@@ -5,23 +5,35 @@ import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts"
 /** One server as kept in config.json `mcpServers`. The shape is the block
  * Claude Code, Cursor and Claude Desktop write, so a pasted entry is a
  * stored entry: a command this machine runs, or a URL to connect to. */
-export interface StoredStdioMcpServer extends StdioMcpSpec {
+/** Per-person values, keyed by lowercased email: env for a command, headers
+ * for a URL. A person's values replace the same-named shared ones for work
+ * done for that person. `peopleOnly` mounts the server only for them. */
+export interface McpPeople {
+  people?: Record<string, Record<string, string>>;
+  peopleOnly?: boolean;
+}
+export interface StoredStdioMcpServer extends StdioMcpSpec, McpPeople {
   enabled: boolean;
 }
-export interface StoredRemoteMcpServer extends RemoteMcpSpec {
+export interface StoredRemoteMcpServer extends RemoteMcpSpec, McpPeople {
   enabled: boolean;
 }
 export type StoredMcpServer = StoredStdioMcpServer | StoredRemoteMcpServer;
 
 /** What the renderer sees: names of secrets, never their values. */
-export interface StdioMcpServerListing {
+export interface McpPeopleListing {
+  /** email → names of that person's values, never the values */
+  people?: Record<string, string[]>;
+  peopleOnly?: boolean;
+}
+export interface StdioMcpServerListing extends McpPeopleListing {
   name: string;
   command: string;
   args: string[];
   envKeys: string[];
   enabled: boolean;
 }
-export interface RemoteMcpServerListing {
+export interface RemoteMcpServerListing extends McpPeopleListing {
   name: string;
   type: "http" | "sse";
   url: string;
@@ -94,28 +106,77 @@ const RESERVED_MCP_NAMES = new Set([
   "openmausbot_phone",
 ]);
 
+const MAX_PEOPLE = 200;
+const secretValue = z.string().max(16_384);
+const keptSecret = z.union([secretValue, z.literal(true)]);
+const peopleSchema = z.record(z.string(), z.record(z.string(), secretValue));
+const peopleMutationSchema = z.record(z.string(), z.record(z.string(), keptSecret));
+
 const stdioEntrySchema = z.object({
   command: z.string().trim().min(1).max(1_024),
   args: z.array(z.string().max(4_096)).max(MAX_ARGS).optional(),
-  env: z.record(z.string(), z.string().max(16_384)).optional(),
+  env: z.record(z.string(), secretValue).optional(),
   enabled: z.boolean().optional(),
+  people: peopleSchema.optional(),
+  peopleOnly: z.boolean().optional(),
 }).strict();
 
 const stdioMutationSchema = stdioEntrySchema.extend({
-  env: z.record(z.string(), z.union([z.string().max(16_384), z.literal(true)])).optional(),
+  env: z.record(z.string(), keptSecret).optional(),
+  people: peopleMutationSchema.optional(),
 });
 
 const remoteEntrySchema = z.object({
   /** Streamable HTTP unless the entry says the older SSE transport. */
   type: z.enum(["http", "sse"]).optional(),
   url: z.string().trim().min(1).max(2_048),
-  headers: z.record(z.string(), z.string().max(16_384)).optional(),
+  headers: z.record(z.string(), secretValue).optional(),
   enabled: z.boolean().optional(),
+  people: peopleSchema.optional(),
+  peopleOnly: z.boolean().optional(),
 }).strict();
 
 const remoteMutationSchema = remoteEntrySchema.extend({
-  headers: z.record(z.string(), z.union([z.string().max(16_384), z.literal(true)])).optional(),
+  headers: z.record(z.string(), keptSecret).optional(),
+  people: peopleMutationSchema.optional(),
 });
+
+const EMAIL = /^[^\s@]+@[^\s@]+$/;
+
+/** Validate and resolve a people map. A mutation that leaves `people` out
+ * keeps the saved map, so an edit from a form that does not know about it
+ * never drops anyone's values. */
+function resolvePeople(
+  incoming: Record<string, Record<string, string | true>> | undefined,
+  saved: Record<string, Record<string, string>> | undefined,
+  mutation: boolean,
+  check: (name: string, value: string) => string | null,
+): { ok: true; people?: Record<string, Record<string, string>> } | { ok: false; error: string } {
+  if (incoming === undefined) return { ok: true, ...(mutation && saved ? { people: saved } : {}) };
+  if (Object.keys(incoming).length > MAX_PEOPLE) return { ok: false, error: `Use at most ${MAX_PEOPLE} people.` };
+  const people: Record<string, Record<string, string>> = {};
+  for (const [rawEmail, values] of Object.entries(incoming)) {
+    const email = rawEmail.trim().toLowerCase();
+    if (!EMAIL.test(email)) return { ok: false, error: `${rawEmail} is not an email address.` };
+    if (people[email]) return { ok: false, error: `${email} is listed twice.` };
+    const resolved = resolveSecrets(values, saved?.[email]);
+    if (!resolved.ok) return { ok: false, error: `${email}: ${resolved.error}` };
+    const invalid = Object.entries(resolved.values).map(([name, value]) => check(name, value)).find((error) => error !== null);
+    if (invalid) return { ok: false, error: `${email}: ${invalid}` };
+    people[email] = resolved.values;
+  }
+  return { ok: true, ...(Object.keys(people).length ? { people } : {}) };
+}
+
+function peopleFields(
+  people: Record<string, Record<string, string>> | undefined,
+  peopleOnly: boolean | undefined,
+  mutation: boolean,
+  existing?: StoredMcpServer,
+): McpPeople {
+  const only = peopleOnly ?? (mutation ? existing?.peopleOnly : undefined);
+  return { ...(people ? { people } : {}), ...(only ? { peopleOnly: true } : {}) };
+}
 
 /** Which shape an entry means to be. `url` decides, as it does for every
  * client that reads these blocks; a `type` of http/sse without a url is
@@ -169,6 +230,9 @@ function parseStdio(raw: unknown, mutation: boolean, existing?: StoredMcpServer)
   }
   const env = resolveSecrets(incoming, existing && !isRemoteMcpServer(existing) ? existing.env : undefined);
   if (!env.ok) return env;
+  const people = resolvePeople(parsed.data.people, existing && !isRemoteMcpServer(existing) ? existing.people : undefined, mutation,
+    (name) => environmentNameError(name));
+  if (!people.ok) return people;
   return {
     ok: true,
     server: {
@@ -176,6 +240,7 @@ function parseStdio(raw: unknown, mutation: boolean, existing?: StoredMcpServer)
       args: parsed.data.args ?? [],
       env: env.values,
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
+      ...peopleFields(people.people, parsed.data.peopleOnly, mutation, existing),
     },
   };
 }
@@ -195,6 +260,8 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
   if (!headers.ok) return headers;
   const invalidHeader = Object.entries(headers.values).map(([name, value]) => headerError(name, value)).find((error) => error !== null);
   if (invalidHeader) return { ok: false, error: invalidHeader };
+  const people = resolvePeople(parsed.data.people, existing && isRemoteMcpServer(existing) ? existing.people : undefined, mutation, headerError);
+  if (!people.ok) return people;
   return {
     ok: true,
     server: {
@@ -202,6 +269,7 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
       url: parsed.data.url,
       headers: headers.values,
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
+      ...peopleFields(people.people, parsed.data.peopleOnly, mutation, existing),
     },
   };
 }
@@ -237,6 +305,10 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
     const parsed = parseStoredMcpServer(name, value);
     if (!parsed.ok) return [];
     const { server } = parsed;
+    const people: McpPeopleListing = {
+      ...(server.people ? { people: Object.fromEntries(Object.entries(server.people).map(([email, values]) => [email, Object.keys(values).sort()])) } : {}),
+      ...(server.peopleOnly ? { peopleOnly: true } : {}),
+    };
     if (isRemoteMcpServer(server)) {
       return [{
         name,
@@ -244,6 +316,7 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
         url: server.url,
         headerKeys: Object.keys(server.headers).sort(),
         enabled: server.enabled,
+        ...people,
       }];
     }
     return [{
@@ -252,6 +325,7 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
       args: server.args,
       envKeys: Object.keys(server.env).sort(),
       enabled: server.enabled,
+      ...people,
     }];
   });
 }

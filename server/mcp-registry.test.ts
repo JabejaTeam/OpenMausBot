@@ -173,3 +173,31 @@ describe("remote (url) MCP servers", () => {
     )).toEqual({ ok: false, error: "No saved value exists for Authorization." });
   });
 });
+
+describe("per-person MCP values", () => {
+  const remote = { type: "http", url: "https://mcp.example.test/mcp", headers: { Authorization: "Bearer shared" } };
+
+  it("stores people by lowercased email and lists only the names of their values", () => {
+    const parsed = parseStoredMcpServer("jabeja", { ...remote, people: { "Ada@Example.test": { Authorization: "Bearer ada" } }, peopleOnly: true });
+    expect(parsed.ok && parsed.server).toMatchObject({ people: { "ada@example.test": { Authorization: "Bearer ada" } }, peopleOnly: true });
+    const listing = listMcpServers({ jabeja: { ...remote, people: { "ada@example.test": { Authorization: "Bearer ada" } } } });
+    expect(listing[0]).toMatchObject({ people: { "ada@example.test": ["Authorization"] } });
+    expect(JSON.stringify(listing)).not.toContain("Bearer ada");
+  });
+
+  it("refuses what is not an email or not a valid value name", () => {
+    expect(parseStoredMcpServer("jabeja", { ...remote, people: { ada: { Authorization: "x" } } }).ok).toBe(false);
+    expect(parseStoredMcpServer("jabeja", { ...remote, people: { "ada@example.test": { "bad header": "x" } } }).ok).toBe(false);
+    expect(parseStoredMcpServer("billit", { command: "billit", env: {}, people: { "ada@example.test": { "1BAD": "x" } } }).ok).toBe(false);
+  });
+
+  it("keeps everyone's saved values when an edit leaves people out, and resolves kept placeholders", () => {
+    const saved = parseStoredMcpServer("jabeja", { ...remote, people: { "ada@example.test": { Authorization: "Bearer ada" } }, peopleOnly: true });
+    if (!saved.ok) throw new Error(saved.error);
+    const edit = parseMcpServerMutation("jabeja", { ...remote, headers: { Authorization: true } }, saved.server);
+    expect(edit.ok && edit.server).toMatchObject({ people: { "ada@example.test": { Authorization: "Bearer ada" } }, peopleOnly: true });
+    const kept = parseMcpServerMutation("jabeja", { ...remote, people: { "ada@example.test": { Authorization: true } } }, saved.server);
+    expect(kept.ok && kept.server.people).toEqual({ "ada@example.test": { Authorization: "Bearer ada" } });
+    expect(parseMcpServerMutation("jabeja", { ...remote, people: { "bob@example.test": { Authorization: true } } }, saved.server).ok).toBe(false);
+  });
+});

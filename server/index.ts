@@ -258,6 +258,7 @@ import { computerKindForResource, ManagedDesktopPolicy } from "./managed-policy.
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS_ERROR } from "./hosted-models.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
+import { personKeyFor, personKeyForEmail } from "./person-key.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import { peerProvenanceNote, withPeerProvenance } from "./peer-provenance.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
@@ -693,8 +694,7 @@ function messageSender(auth: RequestAuth): ResolvedSender | undefined {
  * paired session itself. Hashed, so a message or a thread can carry it
  * without handing other members a session id. */
 function personKey(session: SessionRecord): string {
-  const basis = session.email ? `email:${session.email.trim().toLowerCase()}` : `session:${session.id}`;
-  return `p_${createHash("sha256").update(basis).digest("base64url").slice(0, 22)}`;
+  return session.email ? personKeyForEmail(session.email) : personKeyFor(`session:${session.id}`);
 }
 
 /** More than one person uses this workspace: portal membership, or an email
@@ -7800,7 +7800,9 @@ async function startTurn(
       // composio — only to a driver that can mount them. Their tools are
       // never pre-allowed, so every call rides the normal permission flow.
       if (instance.adapter.capabilities.customMcp === true) {
-        const custom = engineMcpServers(bot);
+        // Per-person values follow whoever this work is for; an automation
+        // (routine, webhook) is for nobody and gets the shared values.
+        const custom = engineMcpServers(bot, opts?.automationSource ? undefined : threadPersonKey(threadId));
         if (Object.keys(custom).length) integrations.custom = custom;
       }
       // CLI engines work inside the bot's own workspace directory rather
@@ -9816,9 +9818,10 @@ async function runGroupMemberTurn(
     onDispatchError?.(message);
     return true;
   }
-  // user-configured MCP servers: same gating as the 1:1 site above.
+  // user-configured MCP servers: same gating as the 1:1 site above, with the
+  // values of the person the room's current request is for.
   if (instance.adapter.capabilities.customMcp === true) {
-    const custom = engineMcpServers(bot);
+    const custom = engineMcpServers(bot, threadPersonKey(threadId));
     if (Object.keys(custom).length) integrations.custom = custom;
   }
   // Connected-app discovery is intentionally awaited before a provider owns
@@ -12293,8 +12296,8 @@ function mcpServerBody(body: unknown): Record<string, unknown> {
 
 /** Configured MCP servers that may reach this bot's engine. While enrolled,
  * the organisation's allow-list filters them; config.json is never changed. */
-function engineMcpServers(bot: BotRecord) {
-  return managedPolicy.filterMcp(customMcpServers(cfg, bot.mcpServers));
+function engineMcpServers(bot: BotRecord, person?: string) {
+  return managedPolicy.filterMcp(customMcpServers(cfg, bot.mcpServers, person));
 }
 
 function persistMcpServers(next: Record<string, unknown>): void {

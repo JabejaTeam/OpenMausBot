@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { personKeyForEmail } from "./person-key.ts";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -1327,6 +1328,30 @@ describe("workspace credential env strip", () => {
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_OPENAI_IMAGE_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_BROWSER_CONNECTION");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_USER_DATA");
+  });
+});
+
+describe("customMcpServers per person", () => {
+  const cfg = { mcpServers: {
+    jabeja: { type: "http", url: "https://mcp.example.test/mcp", headers: { Authorization: "Bearer shared", "X-Team": "jabeja" },
+      people: { "ada@example.test": { Authorization: "Bearer ada" } } },
+    billit: { command: "billit", env: { BILLIT_ENV: "production" }, peopleOnly: true,
+      people: { "boss@example.test": { BILLIT_API_KEY: "boss-key" } } },
+  } } as AppConfig;
+
+  it("gives a listed person their own values over the shared ones", () => {
+    const mounted = customMcpServers(cfg, undefined, personKeyForEmail("Ada@example.test"));
+    expect(mounted.jabeja).toMatchObject({ headers: { Authorization: "Bearer ada", "X-Team": "jabeja" } });
+    expect(mounted.billit).toBeUndefined();
+  });
+
+  it("mounts a people-only server for its people alone, never for automations", () => {
+    expect(customMcpServers(cfg, undefined, personKeyForEmail("boss@example.test")).billit)
+      .toMatchObject({ env: { BILLIT_ENV: "production", BILLIT_API_KEY: "boss-key" } });
+    expect(customMcpServers(cfg, undefined, personKeyForEmail("bob@example.test")).billit).toBeUndefined();
+    const automation = customMcpServers(cfg);
+    expect(automation.billit).toBeUndefined();
+    expect(automation.jabeja).toMatchObject({ headers: { Authorization: "Bearer shared" } });
   });
 });
 

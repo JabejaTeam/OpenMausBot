@@ -48,6 +48,37 @@ shell sandbox. Individual tool approvals depend on the engine and approval mode.
 A server an engine cannot reach is left out of that bot's turn with a note in
 the server log; nothing else breaks.
 
+### One server, each person's own credentials
+
+On a workspace several people share, a server can carry values per person,
+keyed by the email they sign in with. Work done for that person (their own
+messages, and threads a bot opened while working on their request) mounts
+the server with their values over the shared ones; everyone else gets the
+shared values. `peopleOnly: true` mounts the server for the listed people
+alone: nobody else, and no routine or webhook, ever gets it.
+
+```json
+"mcpServers": {
+  "jabeja": {
+    "type": "http", "url": "https://mcp.example.com/mcp",
+    "headers": { "Authorization": "Bearer <shared bots token>" },
+    "people": { "ada@company.com": { "Authorization": "Bearer <Ada's own token>" } }
+  },
+  "billing": {
+    "command": "billing-mcp", "env": { "BILLING_ENV": "production" },
+    "peopleOnly": true,
+    "people": { "owner@company.com": { "BILLING_API_KEY": "<key>" } }
+  }
+}
+```
+
+A person's values are headers for a URL server and environment variables for
+a command. The listing shows who has values and their names, never a value,
+and an edit that leaves `people` out keeps them. A message steered into a
+turn that is already running uses that turn's person. This decides which
+credentials a turn gets; it is not a sandbox, and a bot's shell can still
+read the server's files.
+
 ## What a Claude bot sees, and the "Also use my Claude Code MCP servers" switch
 
 A bot on the Claude engine gets the tools and instructions its owner gave it:

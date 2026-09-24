@@ -15,6 +15,7 @@ import { isModelVariant, type InstanceConfigMap, type ModelSelection } from "./c
 import { PROVIDER_ICON_PRESETS, providerIconError } from "../shared/provider-icon.ts";
 import type { McpServerSpec } from "./contracts.ts";
 import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.ts";
+import { personKeyForEmail } from "./person-key.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 
 const optionalText = z.string().optional();
@@ -1344,8 +1345,11 @@ function skipMcpEntry(name: string, why: string): void {
   console.error(`mcpServers.${JSON.stringify(name)} skipped — ${why}`);
 }
 
-/** The validated, normalized custom servers from config — or {}. */
-export function customMcpServers(cfg: AppConfig, only?: string[]): Record<string, CustomMcpServer> {
+/** The validated, normalized custom servers from config — or {}. `person` is
+ * the opaque key of whoever the work is for: their own values replace the
+ * shared ones, and a people-only server reaches nobody else (automations
+ * included). */
+export function customMcpServers(cfg: AppConfig, only?: string[], person?: string): Record<string, CustomMcpServer> {
   const out: Record<string, CustomMcpServer> = {};
   for (const [name, raw] of Object.entries(cfg.mcpServers ?? {})) {
     // a bot with its own list gets exactly those names; a bot without one
@@ -1357,9 +1361,13 @@ export function customMcpServers(cfg: AppConfig, only?: string[]): Record<string
       continue;
     }
     if (!parsed.server.enabled) continue;
+    const own = person
+      ? Object.entries(parsed.server.people ?? {}).find(([email]) => personKeyForEmail(email) === person)?.[1]
+      : undefined;
+    if (parsed.server.peopleOnly && !own) continue;
     out[name] = isRemoteMcpServer(parsed.server)
-      ? { type: parsed.server.type, url: parsed.server.url, headers: parsed.server.headers }
-      : { command: parsed.server.command, args: parsed.server.args, env: parsed.server.env };
+      ? { type: parsed.server.type, url: parsed.server.url, headers: { ...parsed.server.headers, ...own } }
+      : { command: parsed.server.command, args: parsed.server.args, env: { ...parsed.server.env, ...own } };
   }
   return out;
 }
