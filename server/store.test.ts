@@ -1010,6 +1010,28 @@ describe("Store", () => {
     }
   });
 
+  it("starts new bots on the workspace approval default, never above a creating Chief", () => {
+    const store = new Store(selection, undefined, () => "full");
+    const person = store.createBot({ name: "Person's bot" });
+    expect(person.approvalMode).toBe("full");
+    expect(store.projectBotForTask(person.id, store.createTask(person.id, "Next")!.threadId)?.approvalMode).toBe("full");
+    expect(store.createBot({ name: "By an Ask bot" }, { creatorApprovalMode: "ask" }).approvalMode).toBeUndefined();
+
+    const chief = store.createBot({ name: "Chief", section: "Ops" });
+    store.patchBot(chief.id, { chiefOfStaff: true, approvalMode: "edits" });
+    store.applyTeamSetup({ version: 1, requestId: "setup-capped", botId: chief.id, threadId: chief.threadId,
+      reason: "Requested", createdAt: 1, requesterRevision: "fixture", newTeams: [], operations: [
+        { action: "create", botId: "capped", threadId: "capped-thread", fields: { name: "Analyst", section: "Ops", modelSelection: selection() } },
+      ] });
+    const capped = new Store(selection).bot("capped")!;
+    expect(capped.approvalMode).toBe("edits");
+    expect(capped.tasks?.[0].approvalMode).toBe("edits");
+  });
+
+  it("keeps Ask as the default when no workspace default is set", () => {
+    expect(new Store(selection).createBot().approvalMode).toBeUndefined();
+  });
+
   it("stores variants independently and seeds future conversations from the bot default", () => {
     const store = new Store(selection);
     const bot = store.createBot();

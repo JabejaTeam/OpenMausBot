@@ -10,6 +10,7 @@ import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shar
 import { writeFileAtomic } from "./atomic.ts";
 import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
 import { EFFORT_LEVELS, type EffortLevel } from "../shared/wire.ts";
+import { NEW_BOT_APPROVAL_MODES, type NewBotApprovalMode } from "../shared/approval-mode.ts";
 import { isModelVariant, type InstanceConfigMap, type ModelSelection } from "./contracts.ts";
 import { PROVIDER_ICON_PRESETS, providerIconError } from "../shared/provider-icon.ts";
 import type { McpServerSpec } from "./contracts.ts";
@@ -335,8 +336,13 @@ const threadsConfigSchema = z.object({
 const newBotsConfigSchema = z.object({
   /** Effort for a new bot whose model selection names none. */
   effort: z.enum(EFFORT_LEVELS).optional(),
+  /** Approval level a person's new bot starts on; a bot-created bot never
+   * exceeds its creator. Set in config.json only: the HTTP API a bot's shell
+   * can reach must not raise it. */
+  approvalMode: z.enum(NEW_BOT_APPROVAL_MODES).optional(),
 }).strict();
-/** PATCH newBots: null clears a default back to absent (no level is sent). */
+/** PATCH newBots: null clears a default back to absent (no level is sent).
+ * approvalMode is deliberately absent, so a patch naming it is refused. */
 const newBotsPatchSchema = z.object({
   effort: newBotsConfigSchema.shape.effort.nullable(),
 }).strict();
@@ -485,7 +491,7 @@ export interface AppConfig {
   /** UI creation template. Saving it never mutates a bot or grants access. */
   newBotDefaults?: NewBotDefaults;
   /** Defaults for newly created bots that no model selection carries. */
-  newBots?: { effort?: EffortLevel };
+  newBots?: { effort?: EffortLevel; approvalMode?: NewBotApprovalMode };
   cliStartup?: {
     access: "local" | "tunnel" | "tailscale" | "public-url";
     publicUrl?: string;

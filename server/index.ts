@@ -2637,6 +2637,7 @@ const presetStore = createPresetStore();
 const store = new Store(
   () => bootSelection,
   (selection) => withNewBotEffort(selection, cfg.newBots?.effort, registry.get(selection.instanceId)?.adapter.capabilities.effortLevels),
+  () => cfg.newBots?.approvalMode ?? "ask",
 );
 const teamComputers = new TeamComputers(join(DATA_DIR, "team-computers.json"), ENVIRONMENT_ID);
 let followupsReady = false;
@@ -12202,7 +12203,10 @@ function configStatus() {
     language: cfg.language ?? "",
     rooms: { turnTimeoutMinutes: roomTurnTimeoutMinutes(cfg) },
     // absent effort = no level is sent, so clients can tell it from any level
-    newBots: cfg.newBots?.effort ? { effort: cfg.newBots.effort } : {},
+    newBots: {
+      ...(cfg.newBots?.effort ? { effort: cfg.newBots.effort } : {}),
+      ...(cfg.newBots?.approvalMode ? { approvalMode: cfg.newBots.approvalMode } : {}),
+    },
     threads: {
       maxConcurrentPerBot: maxConcurrentBotThreads(cfg),
       ...(eventLogMaxBytes !== null ? { eventLogMaxBytes } : {}),
@@ -14558,7 +14562,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             // exactly the Chief's audience: a restricted Chief never makes a bot everyone sees
             ...(chief.visibility ? { visibility: chief.visibility } : {}),
           },
-          { seedMessages: false },
+          { seedMessages: false, creatorApprovalMode: approvalModeForTurn(chief) },
         );
         const safeBot = store.patchBot(created.id, {
           composio: false,

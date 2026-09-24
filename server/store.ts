@@ -21,7 +21,7 @@ import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile } from "../shared/bot-avatar.ts";
-import { approvalModeFor, isApprovalMode } from "../shared/approval-mode.ts";
+import { approvalModeFor, isApprovalMode, lowerApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
@@ -581,6 +581,7 @@ export class Store {
   private threads = new Map<string, ThreadState>();
   private defaultSelection: () => ModelSelection;
   private completeNewBotSelection: (selection: ModelSelection) => ModelSelection;
+  private newBotApprovalMode: () => ApprovalMode;
   private listeners = new Set<(change: StoreChange) => void>();
   /** A broken team registry must not prevent loading independent chat data. */
   private registeringInitialSections = true;
@@ -593,9 +594,12 @@ export class Store {
     /** Workspace-wide new-bot defaults (config newBots), applied to every
      * new bot's selection whichever path created it. */
     completeNewBotSelection: (selection: ModelSelection) => ModelSelection = (selection) => selection,
+    /** Workspace-wide approval level for new bots (config newBots). */
+    newBotApprovalMode: () => ApprovalMode = () => "ask",
   ) {
     this.defaultSelection = defaultSelection;
     this.completeNewBotSelection = completeNewBotSelection;
+    this.newBotApprovalMode = newBotApprovalMode;
     mkdirSync(DATA_DIR, { recursive: true });
     for (const file of [BOTS_FILE, GROUPS_FILE]) tightenRegistryFile(file);
     try {
@@ -1648,6 +1652,13 @@ export class Store {
     return this.completeNewBotSelection(requested ?? this.defaultSelection());
   }
 
+  /** The approval level a new bot starts on: the workspace default, never
+   * above its creator's level when a bot creates it. */
+  newBotApproval(creator?: ApprovalMode): ApprovalMode {
+    const mode = this.newBotApprovalMode();
+    return creator ? lowerApprovalMode(mode, creator) : mode;
+  }
+
   createBot(
     profile: Partial<
       Pick<
@@ -1659,6 +1670,8 @@ export class Store {
       /** false = no greeting/onboarding seed. Imported bots must not open
        * with a first-person greeting the user never asked for. */
       seedMessages?: boolean;
+      /** A bot creating this one: the new bot never exceeds its level. */
+      creatorApprovalMode?: ApprovalMode;
     } = {},
   ): BotRecord {
     this.rememberSections([profile.section]);
@@ -1683,6 +1696,8 @@ export class Store {
       resumeCursors: {},
       createdAt: Date.now(),
     };
+    const approvalMode = this.newBotApproval(opts.creatorApprovalMode);
+    if (approvalMode !== "ask") Object.assign(bot, { approvalMode, autoApprove: false });
     if (section) bot.section = section;
     bot.tasks = [{
       threadId: bot.threadId,
@@ -1740,12 +1755,12 @@ export class Store {
         next = { id: operation.botId, threadId: operation.threadId, name: operation.fields.name,
           title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
           resumeCursors: {}, createdAt, ...operation.fields, modelSelection,
-          approvalMode: "ask", autoApprove: false, composio: false, approvePeerComms: false,
+          approvalMode: this.newBotApproval(approvalModeFor(chief)), autoApprove: false, composio: false, approvePeerComms: false,
           // A Chief's new teammate is seen by exactly the Chief's audience:
           // a restricted Chief never creates a bot everyone sees.
           ...(chief.visibility && chief.visibility !== "everyone" ? { visibility: structuredClone(chief.visibility) } : {}),
           tasks: [{ threadId: operation.threadId, title: UNTITLED_THREAD, createdAt, updatedAt: createdAt, resumeCursors: {},
-            modelSelection: structuredClone(modelSelection), approvalMode: "ask", autoApprove: false,
+            modelSelection: structuredClone(modelSelection), approvalMode: this.newBotApproval(approvalModeFor(chief)), autoApprove: false,
             unread: false, activity: "idle", busy: false }],
         };
         nextBots.unshift(next);

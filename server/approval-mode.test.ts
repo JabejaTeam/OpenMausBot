@@ -8,6 +8,7 @@ import {
   hasNativeAutoReview,
   isEmergencyApprovalDowngrade,
   isApprovalMode,
+  lowerApprovalMode,
 } from "../shared/approval-mode.ts";
 
 describe("approval modes", () => {
@@ -106,5 +107,15 @@ describe("approval modes", () => {
     expect(approvalModeFor({ approvalMode: "full", approvalGrant, threadId: "target" })).toBe("ask");
     expect(approvalModeFor({ approvalMode: "full", approvalGrant, threadId: "other" })).toBe("full");
     expect(approvalModeFor({ approvalMode: "full", approvalGrant })).toBe("ask");
+  });
+});
+
+describe("lowerApprovalMode", () => {
+  it("returns the lower of two levels", () => {
+    expect(lowerApprovalMode("full", "ask")).toBe("ask");
+    expect(lowerApprovalMode("full", "edits")).toBe("edits");
+    expect(lowerApprovalMode("edits", "full")).toBe("edits");
+    expect(lowerApprovalMode("full", "full")).toBe("full");
+    expect(lowerApprovalMode("full", "custom")).toBe("custom");
   });
 });

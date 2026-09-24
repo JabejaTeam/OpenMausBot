@@ -42,6 +42,19 @@ export function hasNativeAutoReview(driverKind: string | undefined): boolean {
   return ["codex", "claudeAgent", "cursorAgent", "grokAgent", "qwenAgent"].includes(driverKind ?? "");
 }
 
+/** Levels a workspace may set as the default for new bots. Custom depends on
+ * each bot's own config.toml, and local Auto needs a per-bot warning, so
+ * neither can be a blanket default. */
+export const NEW_BOT_APPROVAL_MODES = ["ask", "edits", "full"] as const;
+export type NewBotApprovalMode = (typeof NEW_BOT_APPROVAL_MODES)[number];
+
+const APPROVAL_RANK: Record<ApprovalMode, number> = { ask: 0, edits: 1, auto: 2, custom: 2, full: 3 };
+
+/** The lower of two levels: a bot never gives a bot it creates more than it has. */
+export function lowerApprovalMode(a: ApprovalMode, b: ApprovalMode): ApprovalMode {
+  return APPROVAL_RANK[a] <= APPROVAL_RANK[b] ? a : b;
+}
+
 export function isApprovalMode(value: unknown): value is ApprovalMode {
   return typeof value === "string" && (APPROVAL_MODES as readonly string[]).includes(value);
 }
