@@ -14,7 +14,7 @@ import type { ModelSelection } from "./contracts.ts";
 import * as mdb from "./message-db.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
 import { canAccessTeam } from "./peer-roster.ts";
-import { Store, toWireTask, type BotRecord } from "./store.ts";
+import { narrowMcpServers, Store, toWireTask, type BotRecord } from "./store.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE, readSectionContext, writeSectionContext } from "./section-context.ts";
 import { TeamComputers } from "./team-computers.ts";
@@ -1026,6 +1026,27 @@ describe("Store", () => {
     const capped = new Store(selection).bot("capped")!;
     expect(capped.approvalMode).toBe("edits");
     expect(capped.tasks?.[0].approvalMode).toBe("edits");
+  });
+
+  it("never gives a bot-created bot an MCP server its creator lacks", () => {
+    const store = new Store(selection);
+    expect(store.createBot({ name: "Free" }, { creatorApprovalMode: "full" }).mcpServers).toBeUndefined();
+    expect(store.createBot({ name: "Narrow" }, { creatorMcpServers: ["jabeja"] }).mcpServers).toEqual(["jabeja"]);
+    const chief = store.createBot({ name: "Chief", section: "Ops" });
+    store.patchBot(chief.id, { chiefOfStaff: true, mcpServers: ["jabeja", "wasender"] });
+    store.applyTeamSetup({ version: 1, requestId: "setup-mcp", botId: chief.id, threadId: chief.threadId,
+      reason: "Requested", createdAt: 1, requesterRevision: "fixture", newTeams: [], operations: [
+        { action: "create", botId: "mcp-child", threadId: "mcp-child-thread", fields: { name: "Clerk", section: "Ops", modelSelection: selection() } },
+      ] });
+    expect(new Store(selection).bot("mcp-child")?.mcpServers).toEqual(["jabeja", "wasender"]);
+  });
+
+  it("narrows a requested MCP list to the creator's servers", () => {
+    expect(narrowMcpServers(undefined, undefined)).toBeUndefined();
+    expect(narrowMcpServers(["billit", "jabeja"], undefined)).toEqual(["billit", "jabeja"]);
+    expect(narrowMcpServers(undefined, ["jabeja"])).toEqual(["jabeja"]);
+    expect(narrowMcpServers(["billit", "jabeja"], ["jabeja"])).toEqual(["jabeja"]);
+    expect(narrowMcpServers(["billit"], [])).toEqual([]);
   });
 
   it("keeps Ask as the default when no workspace default is set", () => {

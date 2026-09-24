@@ -22,6 +22,14 @@ import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode, lowerApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
+
+/** A bot never hands a bot it creates an MCP server it lacks itself.
+ * `undefined` means every enabled server. */
+export function narrowMcpServers(requested: string[] | undefined, creator: string[] | undefined): string[] | undefined {
+  if (!creator) return requested ? [...requested] : undefined;
+  if (!requested) return [...creator];
+  return requested.filter((name) => creator.includes(name));
+}
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
@@ -1672,6 +1680,9 @@ export class Store {
       seedMessages?: boolean;
       /** A bot creating this one: the new bot never exceeds its level. */
       creatorApprovalMode?: ApprovalMode;
+      /** A bot creating this one with a narrowed MCP list: the new bot gets no
+       * server its creator lacks. Absent means the creator has every server. */
+      creatorMcpServers?: string[];
     } = {},
   ): BotRecord {
     this.rememberSections([profile.section]);
@@ -1698,6 +1709,7 @@ export class Store {
     };
     const approvalMode = this.newBotApproval(opts.creatorApprovalMode);
     if (approvalMode !== "ask") Object.assign(bot, { approvalMode, autoApprove: false });
+    if (opts.creatorMcpServers) bot.mcpServers = [...opts.creatorMcpServers];
     if (section) bot.section = section;
     bot.tasks = [{
       threadId: bot.threadId,
@@ -1752,9 +1764,11 @@ export class Store {
         if (at >= 0 || !operation.threadId || !operation.fields.name || !operation.fields.modelSelection) throw new Error("Invalid new bot in team setup");
         const createdAt = Date.now();
         const modelSelection = this.newBotSelection(operation.fields.modelSelection);
+        const mcpServers = narrowMcpServers(undefined, chief.mcpServers);
         next = { id: operation.botId, threadId: operation.threadId, name: operation.fields.name,
           title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
           resumeCursors: {}, createdAt, ...operation.fields, modelSelection,
+          ...(mcpServers ? { mcpServers } : {}),
           approvalMode: this.newBotApproval(approvalModeFor(chief)), autoApprove: false, composio: false, approvePeerComms: false,
           // A Chief's new teammate is seen by exactly the Chief's audience:
           // a restricted Chief never creates a bot everyone sees.

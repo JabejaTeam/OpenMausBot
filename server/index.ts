@@ -14562,7 +14562,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             // exactly the Chief's audience: a restricted Chief never makes a bot everyone sees
             ...(chief.visibility ? { visibility: chief.visibility } : {}),
           },
-          { seedMessages: false, creatorApprovalMode: approvalModeForTurn(chief) },
+          { seedMessages: false, creatorApprovalMode: approvalModeForTurn(chief), creatorMcpServers: chief.mcpServers },
         );
         const safeBot = store.patchBot(created.id, {
           composio: false,
