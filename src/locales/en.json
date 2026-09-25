@@ -255,7 +255,7 @@
   "settings.workRules.saved": "Saved. Bots use it from their next turn.",
   "settings.workRules.error": "Could not save the work rules.",
   "botSettings.codeAgent.title": "Code agent",
-  "botSettings.codeAgent.body": "Follows the workspace's code-agent rules (Settings → Work rules) at every turn. They win over working rules in this bot's own instructions.",
+  "botSettings.codeAgent.body": "Follows the code-agent rules (Settings → Work rules) at every turn. They win over working rules in this bot's own instructions.",
   "settings.myTokens.title": "Your own tokens",
   "settings.myTokens.subtitle": "When a bot works for you, these servers use your own token instead of the shared one. Nobody else sees your token, and you never see theirs.",
   "settings.myTokens.none": "No server here takes your own token yet. An admin can open one for it.",
