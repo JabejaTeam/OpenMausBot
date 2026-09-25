@@ -72,6 +72,13 @@ alone: nobody else, and no routine or webhook, ever gets it.
 }
 ```
 
+With `selfService: true`, signed-in people manage their own values in
+**Settings → Your tokens**: they see only the servers opened for it and
+whether their own value is set, never a value and never anyone else. They
+can replace only the value names the shared entry already has (a token, not
+a new header or environment variable), and a people-only server can never
+be self-service, so nobody can grant themselves access to one.
+
 A person's values are headers for a URL server and environment variables for
 a command. The listing shows who has values and their names, never a value,
 and an edit that leaves `people` out keeps them. A message steered into a

@@ -11,6 +11,10 @@ import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts"
 export interface McpPeople {
   people?: Record<string, Record<string, string>>;
   peopleOnly?: boolean;
+  /** Signed-in people may set and clear their own values, for the value
+   * names the shared entry already has. Never on a people-only server:
+   * that would let anyone grant themselves access. */
+  selfService?: boolean;
 }
 export interface StoredStdioMcpServer extends StdioMcpSpec, McpPeople {
   enabled: boolean;
@@ -25,6 +29,7 @@ export interface McpPeopleListing {
   /** email → names of that person's values, never the values */
   people?: Record<string, string[]>;
   peopleOnly?: boolean;
+  selfService?: boolean;
 }
 export interface StdioMcpServerListing extends McpPeopleListing {
   name: string;
@@ -119,6 +124,7 @@ const stdioEntrySchema = z.object({
   enabled: z.boolean().optional(),
   people: peopleSchema.optional(),
   peopleOnly: z.boolean().optional(),
+  selfService: z.boolean().optional(),
 }).strict();
 
 const stdioMutationSchema = stdioEntrySchema.extend({
@@ -134,6 +140,7 @@ const remoteEntrySchema = z.object({
   enabled: z.boolean().optional(),
   people: peopleSchema.optional(),
   peopleOnly: z.boolean().optional(),
+  selfService: z.boolean().optional(),
 }).strict();
 
 const remoteMutationSchema = remoteEntrySchema.extend({
@@ -170,12 +177,14 @@ function resolvePeople(
 
 function peopleFields(
   people: Record<string, Record<string, string>> | undefined,
-  peopleOnly: boolean | undefined,
+  flags: { peopleOnly?: boolean; selfService?: boolean },
   mutation: boolean,
   existing?: StoredMcpServer,
-): McpPeople {
-  const only = peopleOnly ?? (mutation ? existing?.peopleOnly : undefined);
-  return { ...(people ? { people } : {}), ...(only ? { peopleOnly: true } : {}) };
+): { ok: true; fields: McpPeople } | { ok: false; error: string } {
+  const only = flags.peopleOnly ?? (mutation ? existing?.peopleOnly : undefined);
+  const self = flags.selfService ?? (mutation ? existing?.selfService : undefined);
+  if (only && self) return { ok: false, error: "A people-only server cannot be self-service." };
+  return { ok: true, fields: { ...(people ? { people } : {}), ...(only ? { peopleOnly: true } : {}), ...(self ? { selfService: true } : {}) } };
 }
 
 /** Which shape an entry means to be. `url` decides, as it does for every
@@ -233,6 +242,8 @@ function parseStdio(raw: unknown, mutation: boolean, existing?: StoredMcpServer)
   const people = resolvePeople(parsed.data.people, existing && !isRemoteMcpServer(existing) ? existing.people : undefined, mutation,
     (name) => environmentNameError(name));
   if (!people.ok) return people;
+  const flags = peopleFields(people.people, parsed.data, mutation, existing);
+  if (!flags.ok) return flags;
   return {
     ok: true,
     server: {
@@ -240,7 +251,7 @@ function parseStdio(raw: unknown, mutation: boolean, existing?: StoredMcpServer)
       args: parsed.data.args ?? [],
       env: env.values,
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
-      ...peopleFields(people.people, parsed.data.peopleOnly, mutation, existing),
+      ...flags.fields,
     },
   };
 }
@@ -262,6 +273,8 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
   if (invalidHeader) return { ok: false, error: invalidHeader };
   const people = resolvePeople(parsed.data.people, existing && isRemoteMcpServer(existing) ? existing.people : undefined, mutation, headerError);
   if (!people.ok) return people;
+  const flags = peopleFields(people.people, parsed.data, mutation, existing);
+  if (!flags.ok) return flags;
   return {
     ok: true,
     server: {
@@ -269,7 +282,7 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
       url: parsed.data.url,
       headers: headers.values,
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
-      ...peopleFields(people.people, parsed.data.peopleOnly, mutation, existing),
+      ...flags.fields,
     },
   };
 }
@@ -308,6 +321,7 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
     const people: McpPeopleListing = {
       ...(server.people ? { people: Object.fromEntries(Object.entries(server.people).map(([email, values]) => [email, Object.keys(values).sort()])) } : {}),
       ...(server.peopleOnly ? { peopleOnly: true } : {}),
+      ...(server.selfService ? { selfService: true } : {}),
     };
     if (isRemoteMcpServer(server)) {
       return [{
@@ -400,4 +414,72 @@ export function parseMcpServersImport(
 function slugMcpName(raw: string): string {
   const slug = raw.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
   return /^[a-z]/.test(slug) ? slug : slug ? `mcp-${slug}`.slice(0, 32) : "";
+}
+
+/** A self-service server as one signed-in person sees it: which values they
+ * may set (the shared entry's names) and which they have set. Nothing about
+ * anyone else, and no value. */
+export interface OwnMcpServer {
+  name: string;
+  kind: "url" | "command";
+  valueNames: string[];
+  mine: string[];
+}
+
+export function ownMcpServers(raw: Record<string, unknown> | undefined, email: string): OwnMcpServer[] {
+  const me = email.trim().toLowerCase();
+  return Object.entries(raw ?? {}).flatMap(([name, value]): OwnMcpServer[] => {
+    const parsed = parseStoredMcpServer(name, value);
+    if (!parsed.ok || !parsed.server.selfService || !parsed.server.enabled) return [];
+    const { server } = parsed;
+    const shared = isRemoteMcpServer(server) ? server.headers : server.env;
+    return [{
+      name,
+      kind: isRemoteMcpServer(server) ? "url" : "command",
+      valueNames: Object.keys(shared).sort(),
+      mine: Object.keys(server.people?.[me] ?? {}).sort(),
+    }];
+  });
+}
+
+/** Set (values) or clear (null) one person's own values on a self-service
+ * server. Only the shared entry's value names are accepted: a person may
+ * swap a token, never add an environment variable or header of their own. */
+export function withOwnMcpValues(
+  name: string,
+  raw: unknown,
+  email: string,
+  values: Record<string, string> | null,
+): { ok: true; entry: StoredMcpServer } | { ok: false; status: number; error: string } {
+  const parsed = parseStoredMcpServer(name, raw);
+  if (!parsed.ok || !parsed.server.selfService || !parsed.server.enabled) {
+    return { ok: false, status: 404, error: "No self-service MCP server with that name." };
+  }
+  const me = email.trim().toLowerCase();
+  if (!EMAIL.test(me)) return { ok: false, status: 400, error: "Sign in with an email address to keep your own values." };
+  const { server } = parsed;
+  const people = { ...server.people };
+  if (values === null) {
+    delete people[me];
+  } else {
+    const allowed = Object.keys(isRemoteMcpServer(server) ? server.headers : server.env);
+    const names = Object.keys(values);
+    if (!names.length) return { ok: false, status: 400, error: `Give a value for ${allowed.join(" or ")}.` };
+    const unknown = names.find((key) => !allowed.includes(key));
+    if (unknown) return { ok: false, status: 400, error: `${unknown} is not one of this server's values (${allowed.join(", ")}).` };
+    for (const [key, value] of Object.entries(values)) {
+      if (typeof value !== "string" || !value.trim() || value.length > 16_384) {
+        return { ok: false, status: 400, error: `${key} needs a value.` };
+      }
+      const invalid = isRemoteMcpServer(server) ? headerError(key, value) : null;
+      if (invalid) return { ok: false, status: 400, error: invalid };
+    }
+    if (!people[me] && Object.keys(people).length >= MAX_PEOPLE) {
+      return { ok: false, status: 409, error: `This server already has ${MAX_PEOPLE} people.` };
+    }
+    people[me] = { ...values };
+  }
+  const entry = { ...server, people } as StoredMcpServer;
+  if (!Object.keys(people).length) delete entry.people;
+  return { ok: true, entry };
 }

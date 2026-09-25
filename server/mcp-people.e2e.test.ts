@@ -102,7 +102,7 @@ posixOnly("per-person MCP values on a shared workspace", () => {
       instances: { claude: { driver: "claudeAgent", environment: { FAKE_CLAUDE_DUMP: dumpPath }, config: { cli: FAKE_CLAUDE } } },
       mcpServers: {
         jabeja: { type: "http", url: "https://mcp.example.test/mcp", headers: { Authorization: "Bearer shared-bots" },
-          people: { [ADA]: { Authorization: "Bearer ada-own" } } },
+          selfService: true, people: { [ADA]: { Authorization: "Bearer ada-own" } } },
         billit: { command: process.execPath, args: ["--experimental-strip-types", FAKE_MCP], env: { BILLIT_ENV: "production" },
           peopleOnly: true, people: { [BOSS]: { BILLIT_API_KEY: "boss-key" } } },
       },
@@ -148,4 +148,31 @@ posixOnly("per-person MCP values on a shared workspace", () => {
     expect(text).not.toContain("shared-bots");
     expect((await api("GET", "/api/mcp/servers", undefined, ADA)).status).toBe(403);
   });
+
+  it("lets a member set and clear only their own token, which their next turn then uses", async () => {
+    const created = await api("POST", "/api/bots", { name: "Self Service Heron" }, BOSS);
+    const bot = created.body.bot as { id: string; threadId: string };
+
+    const mine = await api("GET", "/api/mcp/mine", undefined, BOB);
+    expect(mine.status).toBe(200);
+    expect(mine.body.servers).toEqual([{ name: "jabeja", kind: "url", valueNames: ["Authorization"], mine: [] }]);
+
+    expect((await api("PUT", "/api/mcp/mine/jabeja", { values: { Authorization: "Bearer bob-own" } }, BOB)).body.servers[0].mine)
+      .toEqual(["Authorization"]);
+    expect((await api("PUT", "/api/mcp/mine/jabeja", { values: { "X-Evil": "1" } }, BOB)).status).toBe(400);
+    expect((await api("PUT", "/api/mcp/mine/billit", { values: { BILLIT_API_KEY: "bob" } }, BOB)).status).toBe(404);
+    expect((await api("PUT", "/api/mcp/servers/jabeja", { type: "http", url: "https://evil.test/mcp" }, BOB)).status).toBe(403);
+    const seen = JSON.stringify((await api("GET", "/api/mcp/mine", undefined, BOB)).body);
+    expect(seen).not.toContain("bob-own");
+    expect(seen).not.toContain(ADA);
+
+    const bob = await turnAs(BOB, bot, "Bob with his own token");
+    expect(bob.jabeja?.headers?.Authorization).toBe("Bearer bob-own");
+    const ada = await turnAs(ADA, bot, "Ada still has hers");
+    expect(ada.jabeja?.headers?.Authorization).toBe("Bearer ada-own");
+
+    expect((await api("DELETE", "/api/mcp/mine/jabeja", undefined, BOB)).body.servers[0].mine).toEqual([]);
+    const after = await turnAs(BOB, bot, "Bob after clearing");
+    expect(after.jabeja?.headers?.Authorization).toBe("Bearer shared-bots");
+  }, 120_000);
 });

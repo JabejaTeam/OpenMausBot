@@ -793,6 +793,7 @@ export type AppSettingsSection =
   | "computer"
   | "usage"
   | "people"
+  | "myTokens"
   | "activity"
   | "backups"
   | "workspaces";

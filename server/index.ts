@@ -193,6 +193,8 @@ import {
   parseMcpServerMutation,
   parseMcpServersImport,
   parseStoredMcpServer,
+  ownMcpServers,
+  withOwnMcpValues,
 } from "./mcp-registry.ts";
 import { probeMcpServer } from "./mcp-probe.ts";
 import {
@@ -19598,6 +19600,35 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         providerInstancesChanging.delete(instanceId);
         providerConfigBusy = false;
       }
+    }
+
+    // ── a person's own values on self-service MCP servers ──
+    // Any signed-in person, members included: they see which self-service
+    // servers exist and which of their own values are set, never a value and
+    // never anyone else. The server file changes only in that person's entry.
+    if (path === "/api/mcp/mine" || path.startsWith("/api/mcp/mine/")) {
+      const email = auth.kind === "session" ? auth.session.email : undefined;
+      if (!email) return json(res, 400, { error: "Sign in with your email address to keep your own MCP values." });
+      if (method === "GET" && path === "/api/mcp/mine") {
+        return json(res, 200, { servers: ownMcpServers(cfg.mcpServers, email) });
+      }
+      const own = /^\/api\/mcp\/mine\/([a-z][a-z0-9_-]{0,31})$/.exec(path);
+      if (own && (method === "PUT" || method === "DELETE")) {
+        let values: Record<string, string> | null = null;
+        if (method === "PUT") {
+          const body = await readBody(req);
+          const raw = body && typeof body === "object" && !Array.isArray(body) ? (body as { values?: unknown }).values : undefined;
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+            return json(res, 400, { error: 'Send { "values": { "<name>": "<value>" } }.' });
+          }
+          values = raw as Record<string, string>;
+        }
+        const next = withOwnMcpValues(own[1], cfg.mcpServers?.[own[1]], email, values);
+        if (!next.ok) return json(res, next.status, { error: next.error });
+        persistMcpServers({ ...cfg.mcpServers, [own[1]]: next.entry });
+        return json(res, 200, { servers: ownMcpServers(cfg.mcpServers, email) });
+      }
+      return json(res, 405, { error: "Use GET, PUT or DELETE." });
     }
 
     // ── custom MCP servers (a local command or a URL; secrets write-only) ──

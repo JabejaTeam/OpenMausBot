@@ -6,6 +6,8 @@ import {
   parseMcpServerMutation,
   parseMcpServersImport,
   parseStoredMcpServer,
+  ownMcpServers,
+  withOwnMcpValues,
 } from "./mcp-registry.ts";
 
 describe("custom MCP registry", () => {
@@ -199,5 +201,36 @@ describe("per-person MCP values", () => {
     const kept = parseMcpServerMutation("jabeja", { ...remote, people: { "ada@example.test": { Authorization: true } } }, saved.server);
     expect(kept.ok && kept.server.people).toEqual({ "ada@example.test": { Authorization: "Bearer ada" } });
     expect(parseMcpServerMutation("jabeja", { ...remote, people: { "bob@example.test": { Authorization: true } } }, saved.server).ok).toBe(false);
+  });
+});
+
+describe("self-service MCP values", () => {
+  const raw = {
+    jabeja: { type: "http", url: "https://mcp.example.test/mcp", headers: { Authorization: "Bearer shared" }, selfService: true,
+      people: { "ada@example.test": { Authorization: "Bearer ada" } } },
+    billit: { command: "billit", env: { BILLIT_API_KEY: "k" }, peopleOnly: true, people: { "boss@example.test": { BILLIT_API_KEY: "b" } } },
+    other: { type: "http", url: "https://other.example.test/mcp", headers: { Authorization: "Bearer x" } },
+  };
+
+  it("never lets a people-only server be self-service", () => {
+    expect(parseStoredMcpServer("billit", { ...raw.billit, selfService: true }).ok).toBe(false);
+  });
+
+  it("shows a person only self-service servers and the names of their own values", () => {
+    expect(ownMcpServers(raw, "Ada@example.test")).toEqual([{ name: "jabeja", kind: "url", valueNames: ["Authorization"], mine: ["Authorization"] }]);
+    expect(ownMcpServers(raw, "bob@example.test")).toEqual([{ name: "jabeja", kind: "url", valueNames: ["Authorization"], mine: [] }]);
+    expect(JSON.stringify(ownMcpServers(raw, "ada@example.test"))).not.toContain("Bearer");
+  });
+
+  it("sets and clears only the caller's own values, for the shared value names only", () => {
+    const set = withOwnMcpValues("jabeja", raw.jabeja, "bob@example.test", { Authorization: "Bearer bob" });
+    expect(set.ok && set.entry.people).toEqual({ "ada@example.test": { Authorization: "Bearer ada" }, "bob@example.test": { Authorization: "Bearer bob" } });
+    expect(withOwnMcpValues("jabeja", raw.jabeja, "bob@example.test", { "X-Extra": "1" })).toMatchObject({ ok: false, status: 400 });
+    expect(withOwnMcpValues("jabeja", raw.jabeja, "bob@example.test", {})).toMatchObject({ ok: false, status: 400 });
+    expect(withOwnMcpValues("jabeja", raw.jabeja, "bob@example.test", { Authorization: "a\nb" })).toMatchObject({ ok: false, status: 400 });
+    expect(withOwnMcpValues("billit", raw.billit, "bob@example.test", { BILLIT_API_KEY: "mine" })).toMatchObject({ ok: false, status: 404 });
+    expect(withOwnMcpValues("other", raw.other, "bob@example.test", { Authorization: "Bearer bob" })).toMatchObject({ ok: false, status: 404 });
+    const cleared = withOwnMcpValues("jabeja", raw.jabeja, "ada@example.test", null);
+    expect(cleared.ok && cleared.entry.people).toBeUndefined();
   });
 });
