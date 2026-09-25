@@ -311,6 +311,13 @@
             "type": "string",
             "description": "What this specialist is responsible for and how it should work."
           },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "code"
+            ],
+            "description": "\"code\" for a code agent: it then follows the workspace's code-agent rules, which win over working rules in instructions."
+          },
           "modelSelection": {
             "type": "object",
             "additionalProperties": false,

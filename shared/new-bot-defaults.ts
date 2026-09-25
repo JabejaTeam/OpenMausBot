@@ -15,6 +15,7 @@ export type BotDefaultsProfile = Partial<Pick<WireBot,
   browserProfile?: string | null;
   mcpServers?: string[] | null;
   parkDirectMessages?: boolean;
+  kind?: WireBot["kind"];
 };
 
 export type BotRoutineTemplate = Omit<RoutineInput, "botId" | "target" | "groupId" | "resultsThreadId">;

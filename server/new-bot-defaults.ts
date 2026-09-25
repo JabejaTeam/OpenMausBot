@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { profilePatchSchema, fitsOnOneLine } from "./bot-profile.ts";
-import { EFFORT_LEVELS } from "../shared/wire.ts";
+import { BOT_KINDS, EFFORT_LEVELS } from "../shared/wire.ts";
 import { isModelVariant } from "./contracts.ts";
 import { normalizeCronSchedule } from "../shared/routine-schedule.ts";
 
@@ -40,6 +40,8 @@ export const botDefaultsProfileSchema = profilePatchSchema.extend({
   browserProfile: z.string().max(100).nullable().optional(),
   mcpServers: strings(100, 100).nullable().optional(),
   parkDirectMessages: z.boolean().optional(),
+  /** A kind of bot (e.g. "code") follows that kind's workspace rules. */
+  kind: z.enum(BOT_KINDS).optional(),
 }).strict();
 
 const scheduleSchema = z.discriminatedUnion("type", [
@@ -113,7 +115,7 @@ export function resolveBotCreationDefaults(saved: NewBotDefaults | undefined, bo
   if (!checked.success) throw Object.assign(new Error(checked.error.message), { status: 400 });
   const explicit = checked.data;
   const profile = { ...template.profile, ...explicit };
-  for (const key of ["name", "title", "description", "modelSelection", "section"] as const) {
+  for (const key of ["name", "title", "description", "modelSelection", "section", "kind"] as const) {
     if (Object.hasOwn(body, key)) Object.assign(profile, { [key]: key === "section" && body[key] === null ? "" : body[key] });
   }
   const resolved = botDefaultsProfileSchema.safeParse(profile);

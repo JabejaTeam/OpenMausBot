@@ -223,6 +223,13 @@ export const CONNECTOR_TOOL_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
  * settlement receipts (lastProfileRequestId, lastTeamSetupReceipt); the
  * projected tasks are WireTask[] and avatarUrl is always present
  * (null when the bot has none). */
+/** Kinds of bot that share workspace rules (server/kind-instructions.ts). */
+export const BOT_KINDS = ["code"] as const;
+export type BotKind = (typeof BOT_KINDS)[number];
+export function isBotKind(value: unknown): value is BotKind {
+  return typeof value === "string" && (BOT_KINDS as readonly string[]).includes(value);
+}
+
 export interface WireBot {
   waitingForTeammates?: boolean;
   id: string;
@@ -284,6 +291,8 @@ export interface WireBot {
   pinnedMessageId?: string;
   /** The coordinator for this bot's sidebar section. */
   chiefOfStaff?: boolean;
+  /** A bot of a kind follows that kind's workspace rules every turn. */
+  kind?: BotKind;
   /** Owner-selected additional teams this Chief may coordinate. */
   managedSections?: string[];
   /** Pause for human approval before this bot talks to a peer. */

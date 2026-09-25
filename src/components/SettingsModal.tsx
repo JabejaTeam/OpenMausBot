@@ -19,6 +19,7 @@ import { CompanionSection } from "./CompanionSection";
 import { ServerPairingCard } from "./ServerPairingCard";
 import { PeopleSection } from "./PeopleSection";
 import { MyMcpTokensSection } from "./MyMcpTokensSection";
+import { WorkRulesSection } from "./WorkRulesSection";
 import { ActivitySection } from "./ActivitySection";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { CustomDomainSettings } from "./CustomDomainSettings";
@@ -66,6 +67,7 @@ const SECTIONS: Array<{
   { id: "computer", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop"] },
   { id: "usage", labelKey: "settings.section.usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
   { id: "people", labelKey: "settings.section.people", icon: Users, keywords: ["people", "users", "invite", "sign in", "members", "admins", "access"] },
+  { id: "workRules", labelKey: "settings.section.workRules", icon: ScrollText, keywords: ["rules", "work rules", "code agent", "instructions", "guidelines", "role", "kind"] },
   { id: "myTokens", labelKey: "settings.section.myTokens", icon: KeyRound, keywords: ["token", "tokens", "mcp", "my", "own", "personal", "jabeja", "credentials"] },
   { id: "activity", labelKey: "settings.section.activity", icon: ScrollText, keywords: ["activity", "audit", "log", "history", "who changed", "approvals", "decisions", "admin"] },
   { id: "backups", labelKey: "settings.section.backups", icon: Archive, keywords: ["export", "import", "restore", "full backup", "password", "recovery"] },
@@ -565,6 +567,8 @@ export function SettingsModal() {
     .filter((entry) => entry.id !== "people" || !window.ogb)
     // a person's own MCP values exist on a workspace served to a browser
     .filter((entry) => entry.id !== "myTokens" || !window.ogb)
+    // workspace rules are an admin's; the desktop owner is one too
+    .filter((entry) => entry.id !== "workRules" || ownerOrAdmin === true)
     // the activity log belongs to a workspace served to a browser, and to its admins
     .filter((entry) => entry.id !== "activity" || (!window.ogb && ownerOrAdmin === true));
   const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q));
@@ -816,6 +820,7 @@ export function SettingsModal() {
             {section === "usage" && <UsageSection />}
             {section === "people" && <PeopleSection />}
             {section === "myTokens" && <MyMcpTokensSection />}
+            {section === "workRules" && <WorkRulesSection />}
             {section === "activity" && <ActivitySection />}
             {section === "workspaces" && <WorkspacesSection />}
           </div>

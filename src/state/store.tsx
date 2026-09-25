@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { BotVisibility, CloudBackend, EffortLevel, InstalledPackageMetadata, ServerFrame, GroupThreadUsage, SteerQueueReason } from "../../shared/wire";
+import type { BotKind, BotVisibility, CloudBackend, EffortLevel, InstalledPackageMetadata, ServerFrame, GroupThreadUsage, SteerQueueReason } from "../../shared/wire";
 import type { TurnDigest } from "../../shared/digest";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
 import type { MausColor, MausMotion } from "@/lib/mascot";
@@ -406,6 +406,8 @@ export interface Bot {
   pinnedMessageId?: string;
   /** This sidebar section's primary coordinator. */
   chiefOfStaff?: boolean;
+  /** A kind of bot follows that kind's workspace rules ("code"). */
+  kind?: BotKind;
   /** Additional teams the owner explicitly lets this Chief work with. */
   managedSections?: string[];
   /** When this bot wants to talk to another bot (ask_bot/delegate_bot),
@@ -794,6 +796,7 @@ export type AppSettingsSection =
   | "usage"
   | "people"
   | "myTokens"
+  | "workRules"
   | "activity"
   | "backups"
   | "workspaces";

@@ -12,7 +12,7 @@
 // warnings remember which bot they were opened for, so a bot switch while
 // one is up never applies the choice to the newly selected bot.
 import { useState } from "react";
-import { Crown } from "lucide-react";
+import { Code2, Crown } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -105,6 +105,23 @@ export function PermissionsSection({
           allowed={bot.managedSections ?? []}
           onSave={managedSections => patch({ managedSections, acknowledgePeerScope: true })}
         />}
+      </div>
+
+      <div className={cn("rounded-xl border p-4", bot.kind === "code" ? "border-accent/40 bg-accent/10" : "border-hairline/40 bg-card")}>
+        <div className="flex items-center gap-3">
+          <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-lg", bot.kind === "code" ? "bg-accent text-white" : "bg-control text-ink-secondary")}>
+            <Code2 size={17} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[15px] font-medium text-ink">{t("botSettings.codeAgent.title")}</div>
+          </div>
+          <Switch
+            checked={bot.kind === "code"}
+            aria-label={t("botSettings.codeAgent.title")}
+            onClick={() => patch({ kind: bot.kind === "code" ? null : "code" })}
+          />
+        </div>
+        <div className="mt-3 text-[13px] leading-relaxed text-ink-secondary">{t("botSettings.codeAgent.body")}</div>
       </div>
 
       <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">

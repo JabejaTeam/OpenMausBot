@@ -758,6 +758,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         role,
         instructions,
         ...(args.modelSelection !== undefined ? { modelSelection: args.modelSelection } : {}),
+        ...(args.kind !== undefined ? { kind: String(args.kind).trim().toLowerCase() } : {}),
       }),
     });
     turn.createdThisTurn += 1;

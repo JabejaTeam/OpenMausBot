@@ -260,6 +260,8 @@ import { computerKindForResource, ManagedDesktopPolicy } from "./managed-policy.
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS_ERROR } from "./hosted-models.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
+import { isKindInstructionScope, kindInstructionsSystemPrompt, readKindInstructions, writeKindInstructions, KIND_INSTRUCTIONS_MAX_BYTES } from "./kind-instructions.ts";
+import { isBotKind } from "../shared/wire.ts";
 import { personKeyFor, personKeyForEmail } from "./person-key.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import { peerProvenanceNote, withPeerProvenance } from "./peer-provenance.ts";
@@ -2778,6 +2780,7 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "routine", label: "Routines", text: agentsMounted ? ROUTINE_PROMPT : "" },
     { id: "profile", label: "Profile changes", text: agentsMounted ? PROFILE_PROMPT : "" },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
+    { id: "kind-instructions", label: "Workspace rules", text: kindInstructionsSystemPrompt(bot.kind) },
     { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace) }) },
     { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
   ]);
@@ -7695,7 +7698,7 @@ async function startTurn(
       // at the thread's last value, so both belong to the session there. An
       // external update that finds any of it changed since the session started
       // gets the fresh session and replay it always got, rather than a resume.
-      const persistentConfig = [bot.name, bot.title, bot.description, sectionContextSystemPrompt(bot.section),
+      const persistentConfig = [bot.name, bot.title, bot.description, sectionContextSystemPrompt(bot.section), kindInstructionsSystemPrompt(bot.kind),
         ...(instance.driverKind === "codex" ? [model, effort ?? null] : [])];
       const sessionConfig = (soul: string | undefined) =>
         createHash("sha256").update(JSON.stringify([...persistentConfig, soul])).digest("hex").slice(0, 16);
@@ -8379,6 +8382,7 @@ async function startTurn(
         { id: "profile", label: "Profile changes", text: profilePrompt },
         { id: "learn", label: "Skill authoring", text: learnPrompt },
         { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
+        { id: "kind-instructions", label: "Workspace rules", text: kindInstructionsSystemPrompt(bot.kind) },
         // what the bot said lately in its other conversations, so a task
         // never redoes — or forgets — what another one already did
         { id: "recent", label: "Recent work", text: recentWorkPrompt(recentWork(recentWorkSources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId })) },
@@ -10191,6 +10195,7 @@ async function runGroupMemberTurn(
     { id: "recall", label: "Recall", text: integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
     { id: "recent", label: "Recent work", text: recentWorkPrompt(recentLines) },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
+    { id: "kind-instructions", label: "Workspace rules", text: kindInstructionsSystemPrompt(bot.kind) },
     // the room path has always put a newline before memory and trimmed
     // the block's leading space; keep that so existing prompts are
     // byte-identical. The write guidance follows the tools actually
@@ -14557,11 +14562,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (duplicate) {
           return json(res, 409, { error: `@${duplicate.name} already exists in this section; use list_bots` });
         }
+        if (body.kind !== undefined && !isBotKind(body.kind)) {
+          return json(res, 400, { error: 'kind must be "code" when given' });
+        }
         const created = store.createBot(
           {
             name,
             title: role,
             description: instructions,
+            ...(isBotKind(body.kind) ? { kind: body.kind } : {}),
             modelSelection: selection,
             section: chief.section,
             // exactly the Chief's audience: a restricted Chief never makes a bot everyone sees
@@ -16782,6 +16791,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const created = body.visibility === undefined ? null : parseVisibility(body.visibility);
       if (created && !created.ok) return json(res, 400, { error: created.error });
       const bot = store.createBot({ ...profile.patch, soul: settings.soul, section, modelSelection: selection,
+        ...(settings.kind ? { kind: settings.kind } : {}),
         ...(created?.ok ? { visibility: created.visibility } : {}) });
       const createdRoutines: Array<{ id: string; enabled: boolean }> = [];
       try {
@@ -17201,6 +17211,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (body.chiefOfStaff !== undefined && typeof body.chiefOfStaff !== "boolean") {
         return json(res, 400, { error: "chiefOfStaff must be true or false" });
+      }
+      if (body.kind !== undefined) {
+        if (body.kind !== null && !isBotKind(body.kind)) return json(res, 400, { error: 'kind must be "code" or null' });
+        patch.kind = body.kind ?? undefined;
       }
       if (body.cloudBackend !== undefined) {
         const backendError = cloudBackendChangeError(Boolean(existingBot?.busy), activeVpsThreads.has(m[1]));
@@ -19599,6 +19613,23 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       } finally {
         providerInstancesChanging.delete(instanceId);
         providerConfigBusy = false;
+      }
+    }
+
+    // ── workspace rules by kind of bot (admin) ──
+    if (method === "GET" && path === "/api/kind-instructions") {
+      return json(res, 200, { scopes: readKindInstructions(), maxBytes: KIND_INSTRUCTIONS_MAX_BYTES });
+    }
+    const kindScope = /^\/api\/kind-instructions\/([a-z]+)$/.exec(path);
+    if (method === "PUT" && kindScope) {
+      if (!isKindInstructionScope(kindScope[1])) return json(res, 404, { error: "No such role." });
+      const body = await readBody(req);
+      const text = body && typeof body === "object" && !Array.isArray(body) ? (body as { text?: unknown }).text : undefined;
+      if (typeof text !== "string") return json(res, 400, { error: 'Send { "text": "..." }.' });
+      try {
+        return json(res, 200, { scope: kindScope[1], record: writeKindInstructions(kindScope[1], text) });
+      } catch (error) {
+        return json(res, 400, { error: (error as Error).message });
       }
     }
 
