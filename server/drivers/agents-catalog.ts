@@ -368,7 +368,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
         name: { type: "string", description: "Short, unique display name for the specialist." },
         role: { type: "string", description: "The specialist's job title or role." },
         instructions: { type: "string", description: "What this specialist is responsible for and how it should work." },
-        kind: { type: "string", enum: ["code"], description: "\"code\" for a code agent: it then follows the workspace's code-agent rules, which win over working rules in instructions." },
+        kind: { type: "string", enum: ["code", "pm"], description: "\"code\" for a code agent, \"pm\" for a client project manager: it then follows the workspace's rules for that kind, which win over working rules in instructions." },
         modelSelection: { type: "object", additionalProperties: false, properties: {
           instanceId: { type: "string" }, model: { type: "string" },
           effort: { type: "string" }, variant: { type: "string" },

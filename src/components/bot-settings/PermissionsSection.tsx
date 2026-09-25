@@ -12,7 +12,7 @@
 // warnings remember which bot they were opened for, so a bot switch while
 // one is up never applies the choice to the newly selected bot.
 import { useState } from "react";
-import { Code2, Crown } from "lucide-react";
+import { Briefcase, Code2, Crown } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -27,6 +27,11 @@ import { Switch } from "../SettingsPrimitives";
 import { ManagedTeamsSettings } from "./ManagedTeamsSettings";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 import { useBotEditor } from "./BotEditorContext";
+
+const KIND_SWITCHES = [
+  { kind: "code", Icon: Code2, title: "botSettings.codeAgent.title", body: "botSettings.codeAgent.body" },
+  { kind: "pm", Icon: Briefcase, title: "botSettings.pmAgent.title", body: "botSettings.pmAgent.body" },
+] as const;
 
 export function PermissionsSection({
   bot,
@@ -107,22 +112,24 @@ export function PermissionsSection({
         />}
       </div>
 
-      <div className={cn("rounded-xl border p-4", bot.kind === "code" ? "border-accent/40 bg-accent/10" : "border-hairline/40 bg-card")}>
-        <div className="flex items-center gap-3">
-          <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-lg", bot.kind === "code" ? "bg-accent text-white" : "bg-control text-ink-secondary")}>
-            <Code2 size={17} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="text-[15px] font-medium text-ink">{t("botSettings.codeAgent.title")}</div>
+      {KIND_SWITCHES.map(({ kind, Icon, title, body }) => (
+        <div key={kind} className={cn("rounded-xl border p-4", bot.kind === kind ? "border-accent/40 bg-accent/10" : "border-hairline/40 bg-card")}>
+          <div className="flex items-center gap-3">
+            <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-lg", bot.kind === kind ? "bg-accent text-white" : "bg-control text-ink-secondary")}>
+              <Icon size={17} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[15px] font-medium text-ink">{t(title)}</div>
+            </div>
+            <Switch
+              checked={bot.kind === kind}
+              aria-label={t(title)}
+              onClick={() => patch({ kind: bot.kind === kind ? null : kind })}
+            />
           </div>
-          <Switch
-            checked={bot.kind === "code"}
-            aria-label={t("botSettings.codeAgent.title")}
-            onClick={() => patch({ kind: bot.kind === "code" ? null : "code" })}
-          />
+          <div className="mt-3 text-[13px] leading-relaxed text-ink-secondary">{t(body)}</div>
         </div>
-        <div className="mt-3 text-[13px] leading-relaxed text-ink-secondary">{t("botSettings.codeAgent.body")}</div>
-      </div>
+      ))}
 
       <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
         <div>

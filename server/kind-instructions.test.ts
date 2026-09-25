@@ -23,6 +23,16 @@ describe("workspace rules by kind of bot", () => {
     expect(code).toMatch(/win over any conflicting working rule[\s\S]*AGENTS\.md/);
   });
 
+  it("gives project managers their own rules and not the code rules", () => {
+    writeKindInstructions("code", "Surgical changes only.");
+    writeKindInstructions("pm", "Hand code questions to the code agent.");
+    const pm = kindInstructionsSystemPrompt("pm");
+    expect(pm).toContain("client project managers");
+    expect(pm).toContain("Hand code questions to the code agent.");
+    expect(pm).not.toContain("Surgical changes only.");
+    expect(kindInstructionsSystemPrompt("code")).not.toContain("Hand code questions to the code agent.");
+  });
+
   it("clears a scope with empty text and refuses oversized text", () => {
     writeKindInstructions("code", "rules");
     expect(writeKindInstructions("code", "   ")).toBeNull();

@@ -1,5 +1,5 @@
-// Workspace rules by kind of bot: one text for every bot and one for code
-// agents, kept by an admin and read at every turn. The single source for how
+// Workspace rules by kind of bot: one text for every bot and one per kind
+// (code agents, client project managers), kept by an admin and read at every turn. The single source for how
 // bots work, so no rule is copied into a bot's own standing instructions.
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -58,7 +58,7 @@ export function writeKindInstructions(scope: KindInstructionScope, text: string,
   return scopes[scope] ?? null;
 }
 
-const KIND_LABEL: Record<BotKind, string> = { code: "code agents" };
+const KIND_LABEL: Record<BotKind, string> = { code: "code agents", pm: "client project managers" };
 
 /** The workspace rules for one bot, as system-prompt blocks. They come from
  * the admin, so they win over conflicting working rules the bot got anywhere

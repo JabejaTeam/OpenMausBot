@@ -1,15 +1,16 @@
 // Settings → Work rules: the workspace's rules by kind of bot, one text for
-// every bot and one for code agents (server/kind-instructions.ts).
+// every bot and one per kind of bot (server/kind-instructions.ts).
 import { useEffect, useState } from "react";
 
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { Card } from "./SettingsPrimitives";
 
-type Scope = "everyone" | "code";
-const SCOPES: Array<{ scope: Scope; label: "settings.workRules.everyone" | "settings.workRules.code"; hint: "settings.workRules.everyoneHint" | "settings.workRules.codeHint" }> = [
+type Scope = "everyone" | "code" | "pm";
+const SCOPES: Array<{ scope: Scope; label: `settings.workRules.${Scope}`; hint: `settings.workRules.${Scope}Hint` }> = [
   { scope: "everyone", label: "settings.workRules.everyone", hint: "settings.workRules.everyoneHint" },
   { scope: "code", label: "settings.workRules.code", hint: "settings.workRules.codeHint" },
+  { scope: "pm", label: "settings.workRules.pm", hint: "settings.workRules.pmHint" },
 ];
 
 function RulesEditor({ scope, label, hint, initial }: { scope: Scope; label: string; hint: string; initial: string }) {

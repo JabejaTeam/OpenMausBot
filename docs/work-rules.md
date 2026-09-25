@@ -6,10 +6,12 @@ place, for an admin to edit:
 - **Every bot**: reaches every bot at every turn. A good home for what a bot may
   expect when it hands work to a code agent.
 - **Code agents**: reaches bots whose kind is `code`, at every turn.
+- **Project managers**: reaches bots whose kind is `pm`, at every turn.
 
-A bot becomes a code agent with the **Code agent** switch in its settings, when
-it is created with `settings.kind: "code"` (or a New bot template that carries
-it), or when a Chief of Staff creates it with `create_bot` and `kind: "code"`.
+A bot becomes a code agent (or project manager) with the **Code agent** (or
+**Project manager**) switch in its settings, when it is created with
+`settings.kind: "code"` or `"pm"` (or a New bot template that carries it), or
+when a Chief of Staff creates it with `create_bot` and that `kind`.
 
 The rules are read fresh for each turn, so an edit reaches every bot of that
 kind on its next turn without touching the bots themselves. They are sent as

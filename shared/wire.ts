@@ -224,7 +224,7 @@ export const CONNECTOR_TOOL_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
  * projected tasks are WireTask[] and avatarUrl is always present
  * (null when the bot has none). */
 /** Kinds of bot that share workspace rules (server/kind-instructions.ts). */
-export const BOT_KINDS = ["code"] as const;
+export const BOT_KINDS = ["code", "pm"] as const;
 export type BotKind = (typeof BOT_KINDS)[number];
 export function isBotKind(value: unknown): value is BotKind {
   return typeof value === "string" && (BOT_KINDS as readonly string[]).includes(value);

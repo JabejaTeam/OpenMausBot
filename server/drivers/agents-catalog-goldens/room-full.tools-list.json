@@ -314,9 +314,10 @@
           "kind": {
             "type": "string",
             "enum": [
-              "code"
+              "code",
+              "pm"
             ],
-            "description": "\"code\" for a code agent: it then follows the workspace's code-agent rules, which win over working rules in instructions."
+            "description": "\"code\" for a code agent, \"pm\" for a client project manager: it then follows the workspace's rules for that kind, which win over working rules in instructions."
           },
           "modelSelection": {
             "type": "object",

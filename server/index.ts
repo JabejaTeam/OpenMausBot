@@ -14563,7 +14563,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 409, { error: `@${duplicate.name} already exists in this section; use list_bots` });
         }
         if (body.kind !== undefined && !isBotKind(body.kind)) {
-          return json(res, 400, { error: 'kind must be "code" when given' });
+          return json(res, 400, { error: 'kind must be "code" or "pm" when given' });
         }
         const created = store.createBot(
           {
@@ -17213,7 +17213,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 400, { error: "chiefOfStaff must be true or false" });
       }
       if (body.kind !== undefined) {
-        if (body.kind !== null && !isBotKind(body.kind)) return json(res, 400, { error: 'kind must be "code" or null' });
+        if (body.kind !== null && !isBotKind(body.kind)) return json(res, 400, { error: 'kind must be "code", "pm" or null' });
         patch.kind = body.kind ?? undefined;
       }
       if (body.cloudBackend !== undefined) {
