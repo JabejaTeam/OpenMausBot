@@ -281,6 +281,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
   // own values on self-service MCP servers (the route checks the email)
   { methods: ["GET"], path: /^\/api\/mcp\/mine$/ },
+  { methods: ["GET", "PUT"], path: /^\/api\/people\/me$/ },
   { methods: ["PUT", "DELETE"], path: /^\/api\/mcp\/mine\/[a-z][a-z0-9_-]{0,31}$/ },
   { methods: ["POST"], path: /^\/api\/auth\/stream-ticket$/ },
   { methods: ["POST"], path: /^\/api\/auth\/logout$/ },

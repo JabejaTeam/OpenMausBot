@@ -795,6 +795,7 @@ export type AppSettingsSection =
   | "computer"
   | "usage"
   | "people"
+  | "aboutMe"
   | "myTokens"
   | "workRules"
   | "activity"

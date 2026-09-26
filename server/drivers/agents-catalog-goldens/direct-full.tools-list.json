@@ -691,6 +691,35 @@
       }
     },
     {
+      "name": "person_profile_update",
+      "description": "Update the profile of the person this conversation is for: their lasting preferences and habits, shown to every bot when they ask. append adds one fact; replace swaps an exact old_text for text; remove deletes old_text. No client facts, no secrets.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "append",
+              "replace",
+              "remove"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "old_text": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
       "name": "retry_thread",
       "description": "Chief of Staff only. Resume a teammate's thread whose last run failed, stalled or could not start — the one an incident report named — exactly where it stopped, keeping its conversation and files. The teammate gets a line saying you asked for the retry and why. Use it when the cause looks transient (a crash, a timeout, a busy service). Use delegate_bot with a corrected brief instead when the request itself needs to change, and tell the person instead when only they can fix the cause (a sign-in, a missing credential, an unanswered question). Never retry the same thread more than twice.",
       "inputSchema": {

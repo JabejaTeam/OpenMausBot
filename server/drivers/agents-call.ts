@@ -985,6 +985,19 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     const entry = typeof r.entry === "string" && r.entry ? ` Entry: ${r.entry}` : "";
     return { text: `Memory updated.${entry}${r.truncated ? " MEMORY.md exceeds the prompt load budget; keep it short and curated." : ""}` };
   }
+  if (name === "person_profile_update") {
+    if (!["append", "replace", "remove"].includes(String(args.action))
+      || (args.action !== "remove" && (typeof args.text !== "string" || !args.text.trim()))
+      || (args.action !== "append" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
+      return { text: "Use person_profile_update action=append with text, replace with text and old_text, or remove with old_text.", isError: true };
+    }
+    const { body: r } = await apiResponse("/api/internal/person-profile", {
+      method: "POST",
+      body: JSON.stringify({ action: args.action, text: args.text, oldText: args.old_text }),
+    });
+    if (r.error || r.ok !== true) return { text: String(r.error ?? "The profile update was not confirmed."), isError: true };
+    return { text: "Profile updated." };
+  }
   if (name === "retry_thread") {
     const botId = String(args.bot_id ?? "").trim();
     const threadId = String(args.thread_id ?? "").trim();

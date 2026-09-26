@@ -261,6 +261,7 @@ import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
 import { isKindInstructionScope, kindInstructionsSystemPrompt, readKindInstructions, writeKindInstructions, KIND_INSTRUCTIONS_MAX_BYTES } from "./kind-instructions.ts";
+import { notePerson, personTurnPreamble, readPersonProfile, savePersonProfile, updatePersonProfile, PERSON_PROFILE_MAX_LINES } from "./person-profiles.ts";
 import { isBotKind } from "../shared/wire.ts";
 import { personKeyFor, personKeyForEmail } from "./person-key.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
@@ -690,6 +691,7 @@ const turnTriggers = new Map<string, UsageTrigger>();
 function messageSender(auth: RequestAuth): ResolvedSender | undefined {
   if (auth.kind !== "session") return undefined;
   const name = (auth.session.email ?? auth.session.label ?? "").trim();
+  if (auth.session.email) notePerson(personKey(auth.session), auth.session.email);
   return name ? { name, id: personKey(auth.session) } : undefined;
 }
 
@@ -7715,7 +7717,11 @@ async function startTurn(
       // which also depends on the bot's soul/description — is decided below,
       // from the same bot snapshot the prompt's soul is built from.
       const setupText = agentsMounted ? expandSetupTurnText(providerText) : providerText;
-      const userTurnText = promptWithReply(
+      // Who this turn is for rides on its text (server/person-profiles.ts).
+      const personPreamble = opts?.automationSource
+        ? ""
+        : personTurnPreamble(readPersonProfile(threadPersonKey(threadId)), agentsMounted);
+      const userTurnText = (personPreamble ? `${personPreamble}\n\n` : "") + promptWithReply(
         skillAuthoring ? expandLearnTurnText(setupText) : setupText,
         opts?.replyTo,
         cfg.profile?.name?.trim() || "User",
@@ -13182,6 +13188,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const body = await readInternalBody();
         const result = appendMemoryLog(internalSender.id, body.text, { source: memorySource() });
         return json(res, result.ok ? 200 : 400, result);
+      }
+      // Only the profile of the person this thread's work is for, never another's.
+      if (method === "POST" && path === "/api/internal/person-profile") {
+        const key = threadPersonKey(internalCapability.threadId);
+        if (!key || !readPersonProfile(key)?.email) {
+          return json(res, 400, { error: "No signed-in person is behind this conversation, so there is no profile to update." });
+        }
+        const body = await readInternalBody();
+        const result = updatePersonProfile(key, { action: body?.action, text: body?.text, oldText: body?.oldText });
+        return json(res, result.ok ? 200 : result.code === "conflict" ? 409 : result.code === "over-budget" ? 413 : 400,
+          result.ok ? { ok: true } : result);
       }
       if (method === "POST" && path === "/api/internal/browser/mcp") {
         const body = await readInternalBody();
@@ -19631,6 +19648,31 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       } catch (error) {
         return json(res, 400, { error: (error as Error).message });
       }
+    }
+
+    // ── a person's own profile (Settings → About me) ──
+    // Any signed-in person, members included, reads and edits only their own.
+    if (path === "/api/people/me") {
+      const email = auth.kind === "session" ? auth.session.email : undefined;
+      if (!email || auth.kind !== "session") return json(res, 400, { error: "Sign in with your email address to keep a profile." });
+      const key = personKey(auth.session);
+      notePerson(key, email);
+      const view = () => {
+        const profile = readPersonProfile(key);
+        return { email: profile?.email ?? email, name: profile?.name ?? "", text: profile?.text ?? "", maxLines: PERSON_PROFILE_MAX_LINES };
+      };
+      if (method === "GET") return json(res, 200, view());
+      if (method === "PUT") {
+        const body = await readBody(req);
+        if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "Send { name?, text? }." });
+        const { name, text } = body as { name?: unknown; text?: unknown };
+        if ((name !== undefined && typeof name !== "string") || (text !== undefined && typeof text !== "string")) {
+          return json(res, 400, { error: "name and text must be strings." });
+        }
+        const saved = savePersonProfile(key, { name: name as string | undefined, text: text as string | undefined });
+        return saved.ok ? json(res, 200, view()) : json(res, 400, { error: saved.error });
+      }
+      return json(res, 405, { error: "Use GET or PUT." });
     }
 
     // ── a person's own values on self-service MCP servers ──
