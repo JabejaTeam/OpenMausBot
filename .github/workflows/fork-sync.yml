@@ -1,0 +1,138 @@
+# Jabeja fork only: keep feat/new-bot-approval-default on the latest upstream
+# release. Daily (and on demand) it merges the newest upstream v* tag into a
+# sync/<tag> branch, runs typecheck + the vitest suite in shards, and opens a
+# PR when green. A merge conflict or a red suite opens an issue instead.
+# Lives in its own file so upstream's ci.yml never conflicts with it.
+name: Fork sync
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Upstream tag to merge (default: newest v* tag)"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false
+
+env:
+  BASE: feat/new-bot-approval-default
+  UPSTREAM: https://github.com/milind-soni/OpenMausBot.git
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      branch: ${{ steps.merge.outputs.branch }}
+      status: ${{ steps.merge.outputs.status }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BASE }}
+          fetch-depth: 0
+      - id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          git remote add upstream "$UPSTREAM"
+          git fetch --quiet --tags upstream
+          tag="$INPUT_TAG"
+          [ -n "$tag" ] || tag=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - id: merge
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "fork-sync"
+          git config user.email "fork-sync@users.noreply.github.com"
+          branch="sync/$TAG"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor "$TAG" HEAD; then
+            echo "status=current" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git ls-remote --exit-code origin "refs/heads/$branch" >/dev/null; then
+            echo "status=exists" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git switch -c "$branch"
+          if git merge --no-edit "$TAG"; then
+            git push origin "$branch"
+            echo "status=merged" >> "$GITHUB_OUTPUT"
+          else
+            files=$(git diff --name-only --diff-filter=U | sed 's/^/- `/; s/$/`/')
+            git merge --abort
+            gh issue create --title "Fork sync: conflicts merging $TAG" --body "$(printf 'Merging upstream `%s` into `%s` conflicts in:\n\n%s\n\nResolve locally: `git fetch --tags upstream && git switch -c %s %s && git merge %s`' "$TAG" "$BASE" "$files" "$branch" "$BASE" "$TAG")"
+            echo "status=conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+  static:
+    needs: merge
+    if: needs.merge.outputs.status == 'merged'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.merge.outputs.branch }}
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm exec vite build
+
+  vitest:
+    needs: merge
+    if: needs.merge.outputs.status == 'merged'
+    name: vitest (shard ${{ matrix.shard }}/8)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.merge.outputs.branch }}
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node --input-type=commonjs -e "require('electron')"
+      - run: pnpm exec vitest run --shard=${{ matrix.shard }}/8 --reporter=default --reporter=github-actions
+
+  report:
+    needs: [merge, static, vitest]
+    if: ${{ !cancelled() && needs.merge.outputs.status == 'merged' }}
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.merge.outputs.tag }}
+          BRANCH: ${{ needs.merge.outputs.branch }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OK: ${{ needs.static.result == 'success' && needs.vitest.result == 'success' }}
+        run: |
+          if [ "$OK" = "true" ]; then
+            gh pr create --base "$BASE" --head "$BRANCH" --title "Sync upstream $TAG" \
+              --body "Upstream \`$TAG\` merged cleanly; typecheck, build and vitest (8 shards) green: $RUN"
+          else
+            gh issue create --title "Fork sync: $TAG merges but checks fail" \
+              --body "Branch \`$BRANCH\` merges cleanly but typecheck/build/vitest failed: $RUN"
+          fi
