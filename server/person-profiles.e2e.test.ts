@@ -16,7 +16,6 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
-const FAKE_MCP = join(SERVER_DIR, "testing", "fake-mcp-server.ts");
 const PORT = 38800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
@@ -136,5 +135,28 @@ posixOnly("a profile per person, carried by the turns done for them", () => {
     expect(bob).toContain(`working for ${BOB}`);
     expect(bob).toContain("Writes in French");
     expect(bob).not.toContain("short answers");
+  }, 90_000);
+
+  it("names the person the asking bot works for, not whoever last wrote to the asked bot", async () => {
+    const asker = (await api("POST", "/api/bots", { name: "Asking Heron" }, BOSS)).body.bot as { id: string; threadId: string };
+    const coder = (await api("POST", "/api/bots", { name: "Asked Kestrel" }, BOSS)).body.bot as { id: string; threadId: string };
+    await turnAs(BOB, coder, "Bob talks to the coder first");
+    await turnAs(ADA, asker, "Ada asks the asker for a deploy");
+
+    // The asker runs outside this server with a standing token bound to the
+    // thread Ada wrote in (docs/self-hosting.md); its ask is a real ask_bot.
+    const token = "person-profiles-ask-fixture-0123456789abcdef";
+    writeFileSync(join(home, ".openmausbot", "external-runtimes.json"),
+      JSON.stringify({ [asker.id]: { token, threadId: asker.threadId } }), { mode: 0o600 });
+    rmSync(dumpPath, { force: true });
+    const asked = await fetch(`${BASE}/api/internal/ask-bot`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ toBotId: coder.id, message: "Please deploy what Ada asked for" }),
+    });
+    expect(asked.status, await asked.clone().text()).toBe(200);
+    const prompt = await waitFor(dumpedPrompt);
+    expect(prompt, log.slice(-3_000)).toContain(`working for Ada (${ADA})`);
+    expect(prompt).not.toContain("Writes in French");
   }, 90_000);
 });

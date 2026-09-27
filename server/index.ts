@@ -711,6 +711,12 @@ function sharedMembership(): boolean {
 
 /** The person a user line came from, when a session sent it. A bot's line
  * (peerAsk), the owner, a service, a routine or a webhook names nobody. */
+/** Who an asking bot works for, carried on its line (Message.peerAsk). */
+function peerAskPerson(fromThreadId: string | undefined): { forPerson?: string } {
+  const key = fromThreadId ? threadPersonKey(fromThreadId) : undefined;
+  return key ? { forPerson: key } : {};
+}
+
 function linePersonKey(message: Message | undefined): string | undefined {
   return message?.role === "user" && !message.peerAsk ? message.sender?.id : undefined;
 }
@@ -2319,7 +2325,7 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
       peerAsk: asker
         ? unattended
           ? { botId: asker.id, name: asker.name, unattended: true }
-          : { botId: asker.id, name: asker.name }
+          : { botId: asker.id, name: asker.name, ...peerAskPerson(fromThreadId) }
         : undefined,
       onDispatchError: (reason) => finish({ status: "error", text: `(couldn't start that bot: ${reason})` }),
     }).catch((err) =>
@@ -6921,7 +6927,7 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawTe
     // record the author structurally (peerAsk) as well as in the text, so
     // a renderer never has to take the line for the person's own message.
     const peerAsk: Message["peerAsk"] | undefined = opener
-      ? { botId: opener.id, name: opener.name, unattended: unattended || undefined }
+      ? { botId: opener.id, name: opener.name, unattended: unattended || undefined, ...(unattended ? {} : peerAskPerson(sourceThreadId)) }
       : undefined;
     const text = openedThreadId && opener
       ? withPeerProvenance(rawText, { botName: opener.name, delivery: "start_thread", unattended })
@@ -7718,9 +7724,11 @@ async function startTurn(
       // from the same bot snapshot the prompt's soul is built from.
       const setupText = agentsMounted ? expandSetupTurnText(providerText) : providerText;
       // Who this turn is for rides on its text (server/person-profiles.ts).
+      // A bot's ask names the person its asker works for, never whoever last
+      // wrote in this thread.
       const personPreamble = opts?.automationSource
         ? ""
-        : personTurnPreamble(readPersonProfile(threadPersonKey(threadId)), agentsMounted);
+        : personTurnPreamble(readPersonProfile(opts?.peerAsk ? opts.peerAsk.forPerson : threadPersonKey(threadId)), agentsMounted);
       const userTurnText = (personPreamble ? `${personPreamble}\n\n` : "") + promptWithReply(
         skillAuthoring ? expandLearnTurnText(setupText) : setupText,
         opts?.replyTo,
@@ -14027,7 +14035,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const unattended = isUnattended(from.id, fromThreadId);
         const text = `[Retry requested by ${from.name}, your Chief of Staff, after this thread's last run stopped.${note ? ` Note from ${from.name}: ${note}` : ""} Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]`;
         try {
-          await startTurn(target.id, text, { threadId, unattended, peerAsk: { botId: from.id, name: from.name, ...(unattended ? { unattended: true } : {}) } });
+          await startTurn(target.id, text, {
+            threadId, unattended,
+            peerAsk: { botId: from.id, name: from.name, ...(unattended ? { unattended: true } : peerAskPerson(fromThreadId)) },
+          });
         } catch (error) {
           return json(res, 409, { error: error instanceof Error ? error.message : String(error) });
         }

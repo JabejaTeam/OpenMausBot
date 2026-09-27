@@ -432,7 +432,9 @@ export interface WireMessage {
   peerPost?: { unattended?: boolean };
   /** Set on the user-role line another bot delivered into this bot's own
    * conversation (ask_bot, start_thread). */
-  peerAsk?: { botId: string; name: string; unattended?: boolean };
+  /** forPerson: the key of the signed-in person the asking bot works for
+   * (the same one-way key as `sender.id`), so the asked bot knows too. */
+  peerAsk?: { botId: string; name: string; unattended?: boolean; forPerson?: string };
   /** emoji reactions; by = "user" or a member botId. */
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X", linking to the bot-bot channel. */
