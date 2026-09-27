@@ -3,13 +3,16 @@
 // A bot's optional `visibility` is set by an admin:
 //   - absent or "everyone": every signed-in person, today's behaviour;
 //   - "admins": admin sessions only;
-//   - { people: [...] }: the listed addresses (or @domain entries) plus admins.
+//   - { people: [...] }: the listed addresses (or @domain entries) plus admins;
+//   - { people: [...], private: true }: the listed addresses only — admin
+//     sessions do not see it either, unless their own address is listed.
 //
 // This is access control, not an approval gate. It decides what a member's
 // session is shown and may touch — the bot, its threads, their messages,
 // attachments, exports, search hits, routines, webhooks and live frames —
-// and nothing else. The owner on this machine, a session-less local service
-// (the Slack worker), and admin sessions see everything. A desktop has no
+// and nothing else. The owner on this machine and a session-less local
+// service (the Slack worker) see everything; admin sessions see everything
+// except a private bot that does not list them. A desktop has no
 // member sessions, so nothing there changes.
 //
 // Rooms follow their bots: a member sees a room only when the room has at
@@ -30,17 +33,17 @@ import type { BotVisibility } from "../shared/wire.ts";
 
 export type { BotVisibility };
 
-/** The person looking, reduced to what visibility needs. `all` is the owner,
- * a local service or an admin session; `member` is any other session, with
- * the email it signed in with when it has one. */
-export type Viewer = { kind: "all" } | { kind: "member"; email?: string };
+/** The person looking, reduced to what visibility needs. `all` is the owner
+ * or a local service; `admin` an admin session; `member` any other session,
+ * each with the email it signed in with when it has one. */
+export type Viewer = { kind: "all" } | { kind: "admin" | "member"; email?: string };
 
 export const SEES_EVERYTHING: Viewer = { kind: "all" };
 
 export const MAX_VISIBILITY_PEOPLE = 500;
 const ENTRY = /^(?:[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+|@[^\s@,;<>"]+\.[^\s@,;<>"]+)$/;
 
-const peopleSchema = z.object({ people: z.array(z.string().max(320)).max(MAX_VISIBILITY_PEOPLE) }).strict();
+const peopleSchema = z.object({ people: z.array(z.string().max(320)).max(MAX_VISIBILITY_PEOPLE), private: z.literal(true).optional() }).strict();
 
 /** Read an admin's input. null and "everyone" both mean the default, kept as
  * "everyone" so every client's copy of the bot changes too (an absent field
@@ -53,7 +56,7 @@ export function parseVisibility(value: unknown):
   if (value === "admins") return { ok: true, visibility: "admins" };
   const parsed = peopleSchema.safeParse(value);
   if (!parsed.success) {
-    return { ok: false, error: `visibility must be "everyone", "admins", or { "people": [email addresses] } with at most ${MAX_VISIBILITY_PEOPLE} entries` };
+    return { ok: false, error: `visibility must be "everyone", "admins", or { "people": [email addresses], "private"?: true } with at most ${MAX_VISIBILITY_PEOPLE} entries` };
   }
   const people: string[] = [];
   for (const raw of parsed.data.people) {
@@ -62,7 +65,19 @@ export function parseVisibility(value: unknown):
     if (!ENTRY.test(entry)) return { ok: false, error: `"${raw.slice(0, 80)}" is not an email address or @domain` };
     if (!people.includes(entry)) people.push(entry);
   }
+  // A private list that names nobody is seen by nobody but the owner: it
+  // must never fall back to admins, whom it was written to keep out.
+  if (parsed.data.private) return { ok: true, visibility: { people, private: true } };
   return { ok: true, visibility: people.length ? { people } : "admins" };
+}
+
+function isPrivate(value: BotVisibility): value is { people: string[]; private: true } {
+  return typeof value === "object" && value.private === true;
+}
+
+/** An address, or an `@domain` entry, that a people list lets in. */
+function listAdmits(people: readonly string[], entry: string): boolean {
+  return people.includes(entry) || (!entry.startsWith("@") && people.some((other) => other.startsWith("@") && entryMatches(other, entry)));
 }
 
 /** A value read back from bots.json. Anything unrecognised fails closed to
@@ -78,6 +93,11 @@ export function isRestricted(value: unknown): boolean {
   return storedVisibility(value) !== "everyone";
 }
 
+/** Hidden from admin sessions too (a private people list). */
+export function isPrivateValue(value: unknown): boolean {
+  return isPrivate(storedVisibility(value));
+}
+
 function entryMatches(entry: string, email: string): boolean {
   return entry.startsWith("@") ? email.endsWith(entry) && email.length > entry.length : entry === email;
 }
@@ -86,6 +106,7 @@ export function viewerSees(viewer: Viewer, visibility: unknown): boolean {
   if (viewer.kind === "all") return true;
   const stored = storedVisibility(visibility);
   if (stored === "everyone") return true;
+  if (viewer.kind === "admin" && !isPrivate(stored)) return true;
   if (stored === "admins") return false;
   const email = viewer.email?.trim().toLowerCase();
   return Boolean(email && email.includes("@") && stored.people.some((entry) => entryMatches(entry, email)));
@@ -96,20 +117,23 @@ export function sameAudience(a: unknown, b: unknown): boolean {
   const left = storedVisibility(a);
   const right = storedVisibility(b);
   if (typeof left === "string" || typeof right === "string") return left === right;
+  if (isPrivate(left) !== isPrivate(right)) return false;
   if (left.people.length !== right.people.length) return false;
   const set = new Set(left.people);
   return right.people.every((entry) => set.has(entry));
 }
 
 /** True when everyone who can see `inner` can also see `outer`. Admins see
- * every bot, so an admins-only audience is inside any other. */
+ * every bot that is not private, so an admins-only audience is inside any
+ * other but a private one; admins are inside no private audience. */
 export function audienceWithin(inner: unknown, outer: unknown): boolean {
   const small = storedVisibility(inner);
   const large = storedVisibility(outer);
-  if (large === "everyone" || small === "admins") return true;
+  if (large === "everyone") return true;
+  if (small === "admins") return !isPrivate(large);
   if (small === "everyone" || large === "admins") return false;
-  return small.people.every((entry) =>
-    large.people.includes(entry) || (!entry.startsWith("@") && large.people.some((other) => other.startsWith("@") && entryMatches(other, entry))));
+  if (!isPrivate(small) && isPrivate(large)) return false;
+  return small.people.every((entry) => listAdmits(large.people, entry));
 }
 
 /** The people who can see both: everyone ∩ X is X, admins ∩ X is admins,
@@ -120,12 +144,15 @@ export function intersectAudience(a: unknown, b: unknown): BotVisibility {
   const right = storedVisibility(b);
   if (left === "everyone") return right;
   if (right === "everyone") return left;
-  if (left === "admins" || right === "admins") return "admins";
+  // Admins meet a private list nowhere: what is left is its own names.
+  if (left === "admins") return isPrivate(right) ? { people: [], private: true } : "admins";
+  if (right === "admins") return isPrivate(left) ? { people: [], private: true } : "admins";
   const kept = [
-    ...left.people.filter((entry) => audienceWithin({ people: [entry] }, right)),
-    ...right.people.filter((entry) => audienceWithin({ people: [entry] }, left)),
+    ...left.people.filter((entry) => listAdmits(right.people, entry)),
+    ...right.people.filter((entry) => listAdmits(left.people, entry)),
   ];
   const people = [...new Set(kept)];
+  if (isPrivate(left) || isPrivate(right)) return { people, private: true };
   return people.length ? { people } : "admins";
 }
 
@@ -177,6 +204,9 @@ export type ThreadOwner = { bot: string; group?: undefined } | { group: string; 
 export class VisibleSet {
   /** The viewer sees everything: nothing to filter. */
   readonly everything: boolean;
+  /** A member session: its bots and rooms also lose their audience fields.
+   * An admin kept from a private bot still sees every audience it may see. */
+  readonly member: boolean;
   private readonly bots = new Map<string, VisibilityBot>();
   private readonly groups = new Map<string, VisibilityGroup>();
   private readonly viewer: Viewer;
@@ -191,8 +221,10 @@ export class VisibleSet {
     ownerOf?: (threadId: string) => ThreadOwner | undefined,
   ) {
     this.viewer = viewer;
+    this.member = viewer.kind === "member";
+    const hides = viewer.kind === "admin" ? isPrivateValue : isRestricted;
     this.everything = viewer.kind === "all" ||
-      (!bots.some((bot) => isRestricted(bot.visibility)) && !groups.some((group) => isRestricted(group.audienceFloor)));
+      (!bots.some((bot) => hides(bot.visibility)) && !groups.some((group) => hides(group.audienceFloor)));
     this.ownerOf = ownerOf ?? ((threadId) => this.indexedOwner(threadId));
     if (this.everything) return;
     for (const bot of bots) this.bots.set(bot.id, bot);
@@ -341,14 +373,15 @@ export interface FrameContext {
  * is an admin's business), and no teammate ids the member cannot see. */
 export function memberBot<T extends object>(bot: T, visible: VisibleSet): T {
   if (visible.everything) return bot;
-  const { visibility: _visibility, ...rest } = bot as T & { visibility?: unknown; peers?: unknown };
+  const { visibility, ...rest } = bot as T & { visibility?: unknown; peers?: unknown };
+  if (!visible.member && visibility !== undefined) (rest as Record<string, unknown>).visibility = visibility;
   const peers = Array.isArray(rest.peers) ? (rest.peers as unknown[]).filter((id): id is string => typeof id === "string" && visible.bot(id)) : undefined;
   return { ...rest, ...(peers ? { peers } : {}) } as T;
 }
 
 /** A room as a member receives it: without its audience floor. */
-export function memberGroup<T extends object>(group: T): T {
-  if (!("audienceFloor" in group)) return group;
+export function memberGroup<T extends object>(group: T, visible?: VisibleSet): T {
+  if (!("audienceFloor" in group) || (visible && !visible.member)) return group;
   const { audienceFloor: _floor, ...rest } = group as T & { audienceFloor?: unknown };
   return rest as T;
 }
@@ -366,9 +399,9 @@ export function memberBody(body: unknown, visible: VisibleSet): unknown {
       if (key === "bot" && child && typeof child === "object" && !Array.isArray(child)) next = memberBot(child, visible);
       else if (key === "bots" && Array.isArray(child)) {
         next = child.map((bot) => (bot && typeof bot === "object" ? memberBot(bot as object, visible) : bot));
-      } else if (key === "group" && child && typeof child === "object" && !Array.isArray(child)) next = memberGroup(child);
+      } else if (key === "group" && child && typeof child === "object" && !Array.isArray(child)) next = memberGroup(child, visible);
       else if (key === "groups" && Array.isArray(child)) {
-        next = child.map((group) => (group && typeof group === "object" ? memberGroup(group as object) : group));
+        next = child.map((group) => (group && typeof group === "object" ? memberGroup(group as object, visible) : group));
       } else if (depth > 0 && key !== "messages" && child && typeof child === "object" && !Array.isArray(child)) next = narrow(child, depth - 1);
       if (next !== child) (out ??= { ...record })[key] = next;
     }
@@ -424,9 +457,9 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
       if (!seen.groups.has(id)) {
         seen.groups.add(id);
         const fresh = ctx.freshGroup(id);
-        if (fresh) return { ...payload, group: memberGroup({ ...fresh, ...group }) };
+        if (fresh) return { ...payload, group: memberGroup({ ...fresh, ...group }, visible) };
       }
-      return "audienceFloor" in group ? { ...payload, group: memberGroup(group) } : payload;
+      return "audienceFloor" in group ? { ...payload, group: memberGroup(group, visible) } : payload;
     }
     case "group.deleted":
       return seen.groups.delete(str(payload.groupId)) ? payload : undefined;

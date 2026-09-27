@@ -587,6 +587,55 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect((await api("PATCH", `/api/bots/${ids.board}`, { visibility: "admins" }, BOSS)).status).toBe(200);
   });
 
+  it("hides a private bot from admins too, while the people it names and the owner keep it", async () => {
+    const clank = await makeBot("Clank Beetle", "Ada");
+    const admin = openStream(BOSS);
+    try {
+      expect(await admin.ready()).toBeTruthy();
+      const made = await api("PATCH", `/api/bots/${clank.id}`, { visibility: { people: [ADA], private: true } }, BOSS);
+      expect(made.status, JSON.stringify(made.body)).toBe(200);
+      // The admin's stream loses it once and ends, so it reconnects to a fresh snapshot.
+      expect(await waitFor(() => admin.frames.some((f) => f.kind === "bot.deleted" && f.botId === clank.id))).toBe(true);
+      expect(await waitFor(() => admin.state.ended)).toBe(true);
+
+      const boss = (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body;
+      expect(boss.bots.map((b: any) => b.id)).not.toContain(clank.id);
+      expect(boss.sections).not.toContain("Ada");
+      expect(boss.bots.find((b: any) => b.id === ids.board).visibility).toBe("admins");
+      for (const [method, path] of [["GET", `/api/threads/${clank.threadId}/messages`], ["PATCH", `/api/bots/${clank.id}`], ["POST", `/api/bots/${clank.id}/messages`]] as const) {
+        expect(await status(method, path, BOSS, method === "GET" ? undefined : { text: "peek", visibility: "everyone" }), `${method} ${path}`).toBe(404);
+      }
+
+      const ada = (await api("GET", "/api/bots?messages=0", undefined, ADA)).body;
+      expect(ada.bots.map((b: any) => b.id)).toContain(clank.id);
+      expect((await api("GET", "/api/bots?messages=0", undefined, BOB)).body.bots.map((b: any) => b.id)).not.toContain(clank.id);
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.map((b: any) => b.id)).toContain(clank.id);
+
+      // Ada talks to it; a fresh admin stream hears nothing of it.
+      const watching = openStream(BOSS);
+      try {
+        expect(await watching.ready()).toBeTruthy();
+        expect((await api("POST", `/api/bots/${clank.id}/messages`, { text: "CLANK-PRIVATE-7 my own notes", threadId: clank.threadId }, ADA)).status).toBe(202);
+        expect(await waitFor(async () => {
+          const { body } = await api("GET", `/api/threads/${clank.threadId}/messages`, undefined, ADA);
+          return (body.messages ?? []).some((m: any) => m.role === "bot" && m.text);
+        })).toBe(true);
+        expect((await api("PATCH", `/api/bots/${ids.pub}`, { color: "blue" }, BOSS)).status).toBe(200);
+        expect(await waitFor(() => watching.frames.some((f) => f.kind === "bot" && f.bot?.id === ids.pub))).toBe(true);
+        const seen = JSON.stringify(watching.frames);
+        for (const hidden of [clank.id, clank.threadId, "Clank Beetle", "CLANK-PRIVATE-7"]) expect(seen).not.toContain(hidden);
+        const hits = (await api("GET", "/api/search?q=CLANK-PRIVATE-7", undefined, BOSS)).body;
+        expect(JSON.stringify(hits)).not.toContain("CLANK-PRIVATE-7");
+      } finally {
+        watching.close();
+      }
+    } finally {
+      admin.close();
+      // Only the owner on this machine can still reach it to clean up.
+      expect(await status("DELETE", `/api/bots/${clank.id}`)).toBeLessThan(300);
+    }
+  }, 90_000);
+
   it("never widens a room because a restricted bot left it; only an admin's reset does", async () => {
     // Payroll leaves the room it shared with the helpdesk (everyone sees the helpdesk).
     expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { memberIds: [ids.pub] }, BOSS)).status).toBe(200);

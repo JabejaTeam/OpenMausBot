@@ -5,6 +5,7 @@ import {
   intersectAudience,
   narrowestAudience,
   frameForMember,
+  isPrivateValue,
   memberBody,
   memberBot,
   noteSeen,
@@ -274,5 +275,66 @@ describe("live frames for a member", () => {
   it("strips nothing for someone who sees everything", () => {
     const bot = { id: "hr", visibility: "admins", peers: ["x"] };
     expect(memberBot(bot, new VisibleSet(bots, groups, SEES_EVERYTHING))).toBe(bot);
+  });
+});
+
+describe("a private bot, hidden from admins too", () => {
+  const BOSS: Viewer = { kind: "admin", email: "boss@example.test" };
+  const CLANK = { people: ["ada@example.test"], private: true as const };
+
+  it("reads, stores and compares a private list", () => {
+    expect(parseVisibility({ people: ["Ada@example.test"], private: true })).toEqual({ ok: true, visibility: CLANK });
+    // naming nobody is nobody but the owner, never admins
+    expect(parseVisibility({ people: [], private: true })).toEqual({ ok: true, visibility: { people: [], private: true } });
+    expect(parseVisibility({ people: ["ada@example.test"], private: false }).ok).toBe(false);
+    expect(storedVisibility(CLANK)).toEqual(CLANK);
+    expect(isPrivateValue(CLANK)).toBe(true);
+    expect(isPrivateValue({ people: ["ada@example.test"] })).toBe(false);
+    expect(sameAudience(CLANK, { people: ["ada@example.test"] })).toBe(false);
+    expect(sameAudience(CLANK, { people: ["ada@example.test"], private: true })).toBe(true);
+  });
+
+  it("shows it to the listed people and the owner, not to other admins", () => {
+    expect(viewerSees(ADA, CLANK)).toBe(true);
+    expect(viewerSees(BOB, CLANK)).toBe(false);
+    expect(viewerSees(BOSS, CLANK)).toBe(false);
+    expect(viewerSees({ kind: "admin", email: "ada@example.test" }, CLANK)).toBe(true);
+    expect(viewerSees(SEES_EVERYTHING, CLANK)).toBe(true);
+    // every other audience still admits an admin
+    expect(viewerSees(BOSS, "admins")).toBe(true);
+    expect(viewerSees(BOSS, { people: ["ada@example.test"] })).toBe(true);
+  });
+
+  it("keeps admins out of every audience it narrows", () => {
+    expect(audienceWithin("admins", CLANK)).toBe(false);
+    expect(audienceWithin({ people: ["ada@example.test"] }, CLANK)).toBe(false);
+    expect(audienceWithin(CLANK, { people: ["ada@example.test"] })).toBe(true);
+    expect(audienceWithin(CLANK, "admins")).toBe(false);
+    expect(intersectAudience(CLANK, undefined)).toEqual(CLANK);
+    expect(intersectAudience(CLANK, "admins")).toEqual({ people: [], private: true });
+    expect(intersectAudience(CLANK, { people: ["@example.test"] })).toEqual(CLANK);
+    expect(intersectAudience(CLANK, { people: ["bob@example.test"] })).toEqual({ people: [], private: true });
+    expect(roomFeeds([CLANK], { people: ["ada@example.test"] })).toBe(false);
+  });
+
+  it("filters an admin's lists and frames, keeping the audiences an admin may see", () => {
+    const withClank = [...bots, { id: "clank", threadId: "t-clank", section: "Ada", visibility: CLANK }];
+    const boss = new VisibleSet(withClank, groups, BOSS);
+    expect(boss.everything).toBe(false);
+    expect([boss.bot("clank"), boss.thread("t-clank"), boss.bot("hr"), boss.bot("adm")]).toEqual([false, false, true, true]);
+    expect(boss.sections(["Ops", "People", "Ada"])).toEqual(["Ops", "People"]);
+    // no private bot: an admin sees everything, unfiltered
+    expect(new VisibleSet(bots, groups, BOSS).everything).toBe(true);
+    expect(new VisibleSet(withClank, groups, ADA).bot("clank")).toBe(true);
+
+    expect(memberBot({ id: "hr", visibility: { people: ["ada@example.test"] } }, boss)).toEqual({ id: "hr", visibility: { people: ["ada@example.test"] } });
+    const floored = { id: "room-pub", audienceFloor: "admins" };
+    expect(memberBody({ group: floored }, boss)).toEqual({ group: floored });
+
+    const ctx: FrameContext = { visible: boss, webhookBot: () => undefined, freshBot: () => undefined, freshGroup: () => undefined };
+    const seen: StreamSeen = { bots: new Set(["clank"]), groups: new Set() };
+    expect(frameForMember({ kind: "message", threadId: "t-clank" }, ctx, seen)).toBeUndefined();
+    expect(frameForMember({ kind: "bot", bot: { id: "clank", name: "Clank" } }, ctx, seen)).toEqual({ kind: "bot.deleted", botId: "clank" });
+    expect(frameForMember({ kind: "message", threadId: "t-hr" }, ctx, seen)).toEqual({ kind: "message", threadId: "t-hr" });
   });
 });

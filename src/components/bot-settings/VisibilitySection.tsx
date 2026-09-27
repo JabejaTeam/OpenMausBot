@@ -30,7 +30,8 @@ export function visibilityFromForm(mode: VisibilityMode, people: string): { ok: 
 /** One audience, however it was written: absent is everyone, lists compare as sets. */
 export function audienceKey(visibility: BotVisibility | undefined): string {
   if (!visibility || visibility === "everyone" || visibility === "admins") return visibility ?? "everyone";
-  return JSON.stringify([...new Set(visibility.people.map((entry) => entry.trim().toLowerCase()))].sort());
+  const people = [...new Set(visibility.people.map((entry) => entry.trim().toLowerCase()))].sort();
+  return JSON.stringify(visibility.private ? { private: people } : people);
 }
 
 /** Rooms visible to fewer people than this bot: another bot in them has a

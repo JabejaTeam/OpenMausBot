@@ -510,6 +510,7 @@ import {
   routineVisible,
   sameAudience,
   SEES_EVERYTHING,
+  isPrivateValue,
   VisibleSet,
   type FrameContext,
   type PathSubject,
@@ -830,12 +831,14 @@ async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: s
 }
 
 // ── bot visibility (server/bot-visibility.ts) ──────────────────────────
-/** Who is looking. The owner, a session-less local service (the Slack
- * worker) and admin sessions see every bot; any other session is a member,
- * known by the email it signed in with. */
+/** Who is looking. The owner and a session-less local service (the Slack
+ * worker) see every bot; an admin session every bot but a private one that
+ * does not list it; any other session is a member. Sessions are known by
+ * the email they signed in with. */
 function viewerFor(auth: RequestAuth): Viewer {
-  if (auth.kind === "loopback" || auth.scopes.includes("admin")) return SEES_EVERYTHING;
-  return { kind: "member", ...(auth.session.email ? { email: auth.session.email } : {}) };
+  if (auth.kind === "loopback") return SEES_EVERYTHING;
+  const email = auth.session.email ? { email: auth.session.email } : {};
+  return { kind: auth.scopes.includes("admin") ? "admin" : "member", ...email };
 }
 
 /** Thread → the bot or room that owns it, and one VisibleSet per viewer,
@@ -855,7 +858,7 @@ function threadOwner(threadId: string): ThreadOwner | undefined {
   return owner ?? undefined;
 }
 function visibleTo(viewer: Viewer): VisibleSet {
-  const key = viewer.kind === "all" ? "*" : `member:${viewer.email?.trim().toLowerCase() ?? ""}`;
+  const key = viewer.kind === "all" ? "*" : `${viewer.kind}:${viewer.email?.trim().toLowerCase() ?? ""}`;
   let set = visibleSets.get(key);
   if (!set) {
     set = new VisibleSet(store.bots, store.groups, viewer, threadOwner);
@@ -3593,8 +3596,9 @@ function updateChannel(groupId: string, value: unknown): GroupRecord {
     if (body.resetAudience !== true) throw Object.assign(new Error("resetAudience must be true"), { status: 400 });
     patch.audienceFloor = undefined;
   }
+  const floorWasPrivate = isPrivateValue(store.group(groupId)?.audienceFloor);
   const group = store.patchGroup(groupId, patch);
-  if (resetAudience) audienceChanged();
+  if (resetAudience) audienceChanged(floorWasPrivate || isPrivateValue(group?.audienceFloor));
   if (!group) throw Object.assign(new Error("no such room"), { status: 404 });
   return group;
 }
@@ -4379,14 +4383,18 @@ const sseClients = new Set<SseClient>();
 
 /** The frame at which a bot's audience last changed (see the SSE route). */
 let audienceChangedAt = 0;
+/** The same, for a change that hides a bot from admins or shows it again. */
+let privateAudienceChangedAt = 0;
 /** A bot's audience changed: end every member stream. Each reconnects at
  * once with its cursor, which now predates the change, so it is answered
- * with a fresh snapshot of exactly what that person may see. Admin and
- * owner streams are untouched. */
-function audienceChanged(): void {
+ * with a fresh snapshot of exactly what that person may see. Owner streams
+ * are untouched, and admin streams too unless a private audience (hidden
+ * from admins) was involved. */
+function audienceChanged(adminsToo = false): void {
   audienceChangedAt = lastSeq;
+  if (adminsToo) privateAudienceChangedAt = lastSeq;
   for (const client of sseClients) {
-    if (client.viewer.kind !== "member") continue;
+    if (client.viewer.kind === "all" || (client.viewer.kind === "admin" && !adminsToo)) continue;
     sseClients.delete(client);
     try {
       client.res.end();
@@ -4470,7 +4478,7 @@ function broadcast(payload: Record<string, unknown>, options: { adminOnly?: bool
   for (const client of Array.from(sseClients)) {
     if (!wants(client, kind)) continue;
     // Admin-only frames (clientFrame null) never reach members, and a member never falls back to the admin frame.
-    const out = client.admin ? frame : clientFrame === null ? null : memberFrame(client, seq, payload, clientFrame);
+    const out = client.admin ? memberFrame(client, seq, payload, frame) : clientFrame === null ? null : memberFrame(client, seq, payload, clientFrame);
     if (out === null) continue;
     // Screen frames are replaceable and durable events are not: see
     // ./sse-fanout.ts for the backpressure/bound decision this makes.
@@ -4480,9 +4488,10 @@ function broadcast(payload: Record<string, unknown>, options: { adminOnly?: bool
   }
 }
 
-/** The frame a non-admin stream gets: the shared client frame, unless a bot
- * is restricted and this member may not see all of what the frame carries —
- * then narrowed (bot-visibility.ts), withdrawn, or nothing at all (null). */
+/** The frame a stream gets: its own copy (the admin frame for an admin
+ * stream, else the shared client frame), unless a bot is hidden from this
+ * viewer and the frame carries it — then narrowed (bot-visibility.ts),
+ * withdrawn, or nothing at all (null). */
 function memberFrame(client: SseClient, seq: number, payload: Record<string, unknown>, clientFrame: string | null): string | null {
   // A frame kept from clients altogether stays kept: never the admin copy.
   if (clientFrame === null) return null;
@@ -15312,7 +15321,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // A member whose cursor predates a bot's audience change gets a fresh
         // snapshot: a replay is judged by today's audience and could neither
         // withdraw what the change hid nor bring back whole what it showed.
-        !(viewer.kind === "member" && audienceChangedAt > 0 && since <= audienceChangedAt);
+        !(viewer.kind === "member" && audienceChangedAt > 0 && since <= audienceChangedAt) &&
+        !(viewer.kind === "admin" && privateAudienceChangedAt > 0 && since <= privateAudienceChangedAt);
       res.write(
         `data: ${JSON.stringify({
           kind: "hello",
@@ -15327,7 +15337,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         for (const buffered of replayBuffer) {
           if (buffered.seq <= since || !wants(client, buffered.kind)) continue;
           const frame = client.admin
-            ? buffered.frame
+            ? buffered.payload ? memberFrame(client, buffered.seq, buffered.payload, buffered.frame) : buffered.frame
             : buffered.payload
               ? memberFrame(client, buffered.seq, buffered.payload, buffered.clientFrame)
               : buffered.clientFrame;
@@ -15394,7 +15404,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         sections: visible.sections(store.sections),
         groups: store.groups.filter((g) => visible.group(g.id)).map((g) => {
           const room = { ...publicGroupState(g), ...messagePage(g.threadId, limit) };
-          return visible.everything ? room : memberGroup(room);
+          return visible.everything ? room : memberGroup(room, visible);
         }),
         computerControl: Object.fromEntries(
           shownBots.map((bot) => {
@@ -17588,7 +17598,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           broadcast({ kind: "group", group: publicGroupState(group) });
         }
         broadcast({ kind: "sections", sections: store.sections });
-        audienceChanged();
+        audienceChanged(isPrivateValue(beforeVisibility) || isPrivateValue(bot.visibility));
       }
       return json(res, 200, { bot: wireBot(store.bot(bot.id)!) });
     }

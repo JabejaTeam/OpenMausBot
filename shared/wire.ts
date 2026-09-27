@@ -326,9 +326,10 @@ export interface WireBot {
   visibility?: BotVisibility;
 }
 
-/** Who may see a bot: every signed-in person, admins only, or the listed
- * addresses (and `@domain` entries) plus admins. See server/bot-visibility.ts. */
-export type BotVisibility = "everyone" | "admins" | { people: string[] };
+/** Who may see a bot: every signed-in person, admins only, the listed
+ * addresses (and `@domain` entries) plus admins, or — `private` — the listed
+ * addresses only, admins included only when listed. See server/bot-visibility.ts. */
+export type BotVisibility = "everyone" | "admins" | { people: string[]; private?: true };
 
 /** The person a user message is from, as the server resolved it from their
  * own session. No request body can supply it. `name` is attribution only:
