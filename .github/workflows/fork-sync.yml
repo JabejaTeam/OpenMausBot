@@ -53,6 +53,7 @@ jobs:
         env:
           TAG: ${{ steps.tag.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           git config user.name "fork-sync"
           git config user.email "fork-sync@users.noreply.github.com"
