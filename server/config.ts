@@ -1349,6 +1349,17 @@ function skipMcpEntry(name: string, why: string): void {
  * the opaque key of whoever the work is for: their own values replace the
  * shared ones, and a people-only server reaches nobody else (automations
  * included). */
+/** The memory services among a bot's remote MCP servers (`recall` set), with
+ * the headers the same turn would mount them with. */
+export function mcpRecallSources(cfg: AppConfig, only?: string[], person?: string): Array<{ name: string; url: string; headers: Record<string, string> }> {
+  const mounted = customMcpServers(cfg, only, person);
+  return Object.entries(mounted).flatMap(([name, spec]) => {
+    const parsed = parseStoredMcpServer(name, cfg.mcpServers?.[name]);
+    if (!parsed.ok || !isRemoteMcpServer(parsed.server) || !parsed.server.recall || !("headers" in spec)) return [];
+    return [{ name, url: parsed.server.recall, headers: spec.headers }];
+  });
+}
+
 export function customMcpServers(cfg: AppConfig, only?: string[], person?: string): Record<string, CustomMcpServer> {
   const out: Record<string, CustomMcpServer> = {};
   for (const [name, raw] of Object.entries(cfg.mcpServers ?? {})) {

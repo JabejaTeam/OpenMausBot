@@ -21,6 +21,10 @@ export interface StoredStdioMcpServer extends StdioMcpSpec, McpPeople {
 }
 export interface StoredRemoteMcpServer extends RemoteMcpSpec, McpPeople {
   enabled: boolean;
+  /** A memory service's recall address: before each turn of a bot that has
+   * this server, the harness asks it for facts that fit the message, with
+   * the same headers (see mcpRecallSources in config.ts). */
+  recall?: string;
 }
 export type StoredMcpServer = StoredStdioMcpServer | StoredRemoteMcpServer;
 
@@ -43,6 +47,7 @@ export interface RemoteMcpServerListing extends McpPeopleListing {
   type: "http" | "sse";
   url: string;
   headerKeys: string[];
+  recall?: string;
   enabled: boolean;
 }
 export type McpServerListing = StdioMcpServerListing | RemoteMcpServerListing;
@@ -141,6 +146,7 @@ const remoteEntrySchema = z.object({
   people: peopleSchema.optional(),
   peopleOnly: z.boolean().optional(),
   selfService: z.boolean().optional(),
+  recall: z.string().trim().max(2_048).nullable().optional(),
 }).strict();
 
 const remoteMutationSchema = remoteEntrySchema.extend({
@@ -263,6 +269,12 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
   }
   const badUrl = urlError(parsed.data.url);
   if (badUrl) return { ok: false, error: badUrl };
+  // null clears it; a mutation that leaves it out keeps the saved address.
+  const recall = parsed.data.recall === undefined
+    ? (mutation && existing && isRemoteMcpServer(existing) ? existing.recall : undefined)
+    : parsed.data.recall || undefined;
+  const badRecall = recall ? urlError(recall) : null;
+  if (badRecall) return { ok: false, error: `recall: ${badRecall}` };
   const incoming = parsed.data.headers ?? {};
   if (Object.keys(incoming).length > MAX_HEADERS) {
     return { ok: false, error: `Use at most ${MAX_HEADERS} headers.` };
@@ -282,6 +294,7 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
       url: parsed.data.url,
       headers: headers.values,
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
+      ...(recall ? { recall } : {}),
       ...flags.fields,
     },
   };
@@ -330,6 +343,7 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
         url: server.url,
         headerKeys: Object.keys(server.headers).sort(),
         enabled: server.enabled,
+        ...(server.recall ? { recall: server.recall } : {}),
         ...people,
       }];
     }
