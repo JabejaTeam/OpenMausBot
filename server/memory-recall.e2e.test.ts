@@ -151,6 +151,14 @@ posixOnly("memory recall on the turns of the bots that have it", () => {
     expect(plain).not.toContain("Donovan");
   }, 90_000);
 
+  it("keeps a recall address given when the server is added", async () => {
+    const added = await api("POST", "/api/mcp/servers", { name: "memo2", type: "http", url: `http://127.0.0.1:${memoryPort}/mcp`,
+      recall: `http://127.0.0.1:${memoryPort}/recall`, headers: { Authorization: "Bearer other" } }, BOSS);
+    expect(added.status, JSON.stringify(added.body)).toBe(201);
+    const listed = (added.body.servers as Array<{ name: string; recall?: string }>).find((s) => s.name === "memo2");
+    expect(listed?.recall).toBe(`http://127.0.0.1:${memoryPort}/recall`);
+  });
+
   it("does not hold a turn for a memory service that does not answer in time", async () => {
     slow = true;
     const bot = (await api("POST", "/api/bots", { name: "Patient Wren" }, BOSS)).body.bot as { id: string; threadId: string };
