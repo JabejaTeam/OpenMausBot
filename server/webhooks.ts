@@ -69,6 +69,9 @@ export interface WebhookManagerOptions {
   pendingRuns?: (webhookId: string) => number;
   /** Sink for delivery:"post" webhooks: the payload text lands in the bot's chat. */
   post?: (botId: string, text: string) => void;
+  /** Sink for delivery:"whatsapp" webhooks: the event goes into that webhook's
+   * WhatsApp archive, with no task and no chat message. */
+  archive?: (webhookId: string, payload: JsonValue) => { outcome: "stored" | "ignored" | "duplicate"; event: string; reason?: string };
   /** The execution store commits this identity together with the queued run. */
   findRun?: (webhookId: string, deliveryId: string) => { id: string } | null;
 }
@@ -86,7 +89,7 @@ const RATE_LIMIT = 10;
 const MAX_PENDING_RUNS = 3;
 
 const runOnSchema = z.enum(["maus", "cloud"]);
-const deliverySchema = z.enum(["run", "post"]);
+const deliverySchema = z.enum(["run", "post", "whatsapp"]);
 const eventTypesSchema = z.array(z.string()).max(20).optional();
 const triggerInputSchema = z.object({
   name: z.string(),
@@ -436,6 +439,30 @@ export class WebhookManager {
   private dispatch(trigger: StoredWebhookTrigger, event: WebhookEvent): WebhookReceiveResult {
     if (!trigger.enabled) fail(409, "This webhook is paused");
     if (this.options.botState(trigger.botId) === "missing") fail(410, "The assigned MAUS no longer exists");
+
+    // delivery:"whatsapp": archived as it arrives. No model turn, so no rate
+    // limit or run queue — a busy group chat must not be refused — and no
+    // payload preview in the attempt log, which others who see the bot can read.
+    if (trigger.delivery === "whatsapp") {
+      if (!this.options.archive) fail(503, "This server cannot archive WhatsApp messages");
+      const deliveryId = String(event.deliveryId ?? "").trim().slice(0, 200) || randomUUID();
+      const archived = this.options.archive(trigger.id, event.payload);
+      const now = this.now();
+      if (archived.outcome === "stored") {
+        trigger.lastReceivedAt = now;
+        trigger.deliveryCount += 1;
+        trigger.updatedAt = now;
+      }
+      this.appendAttempt(trigger, { eventName: archived.event || event.eventName }, {
+        outcome: archived.outcome === "stored" ? "accepted" : archived.outcome,
+        statusCode: 202,
+        deliveryId,
+        reason: archived.outcome === "stored" ? "Archived (no task run)" : archived.reason,
+      });
+      this.save();
+      if (archived.outcome === "stored") this.emit(trigger);
+      return { deliveryId, duplicate: archived.outcome === "duplicate", ...(archived.outcome === "ignored" ? { ignored: true } : {}) };
+    }
 
     const allowed = trigger.eventTypes ?? [];
     if (allowed.length > 0 && (!event.eventName || !allowed.includes(event.eventName))) {

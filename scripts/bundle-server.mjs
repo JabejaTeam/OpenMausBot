@@ -60,6 +60,8 @@ const ENTRY_POINTS = [
   "permission-proxy.ts",
   "connector-proxy.ts",
   "mcp-gate.ts",
+  // the WhatsApp archive's read side, mounted as a custom stdio MCP server
+  "whatsapp-mcp.ts",
   "browser-proxy.ts",
   "drivers/agents-proxy.ts",
   "drivers/dweb-proxy.ts",

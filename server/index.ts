@@ -422,6 +422,7 @@ import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
+import { WhatsAppArchive } from "./whatsapp-archive.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
@@ -9526,6 +9527,24 @@ function resolveAndSendProfile(
 // Webhook definitions are independent from calendar schedules, but every
 // delivery joins the same RoutineManager queue. That keeps unattended work
 // ordered behind a busy MAUS and gives webhook runs the same durable receipts.
+// delivery:"whatsapp" webhooks: one archive per webhook under <data>/whatsapp/<id>,
+// read by bots through whatsapp-mcp.js. The WasenderAPI session key decrypts
+// attachments; the Soniox key transcribes voice notes as they arrive.
+const whatsappArchives = new Map<string, WhatsAppArchive>();
+function whatsappArchive(webhookId: string): WhatsAppArchive {
+  let archive = whatsappArchives.get(webhookId);
+  if (!archive) {
+    archive = new WhatsAppArchive({
+      dir: join(DATA_DIR, "whatsapp", webhookId),
+      sessionKey: process.env.WASENDER_SESSION_KEY || undefined,
+      sonioxKey: process.env.SONIOX_API_KEY || undefined,
+      log: (line) => console.log(line),
+    });
+    whatsappArchives.set(webhookId, archive);
+  }
+  return archive;
+}
+
 const webhooks = new WebhookManager({
   emit: broadcast,
   botState: unattendedDispatchState,
@@ -9539,6 +9558,7 @@ const webhooks = new WebhookManager({
     if (!bot) return;
     store.appendMessage(bot.threadId, { role: "bot", kind: "text", text });
   },
+  archive: (webhookId, payload) => whatsappArchive(webhookId).accept(payload),
 });
 
 let webhookIngress: WebhookIngress | null = null;

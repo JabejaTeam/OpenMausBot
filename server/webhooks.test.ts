@@ -19,6 +19,7 @@ function harness() {
   const cancelled: Array<{ id: string; message: string }> = [];
   const emitted: unknown[] = [];
   const posted: Array<{ botId: string; text: string }> = [];
+  const archived: Array<{ webhookId: string; payload: unknown }> = [];
   const options: WebhookManagerOptions = {
     file,
     now: () => now,
@@ -31,6 +32,11 @@ function harness() {
     cancelQueued: (id, message) => cancelled.push({ id, message }),
     pendingRuns: () => pending,
     post: (botId, text) => posted.push({ botId, text }),
+    archive: (webhookId, payload) => {
+      archived.push({ webhookId, payload });
+      const kind = (payload as { event?: string }).event ?? "";
+      return kind === "messages.received" ? { outcome: "stored", event: kind } : { outcome: "ignored", event: kind, reason: "not a message" };
+    },
   };
   const manager = new WebhookManager(options);
   return {
@@ -41,6 +47,7 @@ function harness() {
     cancelled,
     emitted,
     posted,
+    archived,
     setNow: (value: number) => (now = value),
     setBot: (value: typeof bot) => (bot = value),
     setPending: (value: number) => (pending = value),
@@ -230,5 +237,34 @@ describe("WebhookManager", () => {
       h.manager.receive(webhook.endpointId, secret, { payload: { index }, eventName: "push", deliveryId: `delivery-${index}` });
     }
     expect(() => h.manager.receive(webhook.endpointId, secret, { payload: { overflow: true }, eventName: "push" })).toThrow("rate limit");
+  });
+  it("archives a whatsapp delivery with no task, no rate limit and no payload preview", () => {
+    const h = harness();
+    const { webhook, secret } = h.manager.create({ name: "WhatsApp", prompt: "", botId: "maus-jarvis", delivery: "whatsapp" });
+    for (let index = 0; index < 25; index++) {
+      h.manager.receive(webhook.endpointId, secret, { payload: { event: "messages.received", data: { text: `private ${index}` } } });
+    }
+    const ignored = h.manager.receive(webhook.endpointId, secret, { payload: { event: "contacts.update" } });
+
+    expect(ignored.ignored).toBe(true);
+    expect(h.archived).toHaveLength(26);
+    expect(h.archived[0]!.webhookId).toBe(webhook.id);
+    expect(h.queued).toHaveLength(0);
+    expect(h.posted).toHaveLength(0);
+    expect(h.manager.list()[0]!.deliveryCount).toBe(25);
+    const attempts = h.manager.listAttempts();
+    expect(attempts.at(-1)).toMatchObject({ outcome: "ignored", eventName: "contacts.update" });
+    expect(attempts[0]).toMatchObject({ outcome: "accepted", eventName: "messages.received", reason: "Archived (no task run)" });
+    expect(JSON.stringify(attempts)).not.toContain("private");
+    expect(readFileSync(h.file, "utf8")).not.toContain("private");
+  });
+
+  it("refuses a whatsapp delivery when the server has no archive", () => {
+    const h = harness();
+    delete h.options.archive;
+    const manager = new WebhookManager(h.options);
+    const { webhook, secret } = manager.create({ name: "WhatsApp", prompt: "", botId: "maus-jarvis", delivery: "whatsapp" });
+    expect(() => manager.receive(webhook.endpointId, secret, { payload: { event: "messages.received" } })).toThrow("cannot archive");
+    expect(h.queued).toHaveLength(0);
   });
 });
