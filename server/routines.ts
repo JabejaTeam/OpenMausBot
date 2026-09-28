@@ -898,6 +898,13 @@ export class RoutineManager {
     }
   }
 
+  /** Who made a routine: their person key, undefined for an older routine
+   * made before that was recorded, null when there is no such routine. */
+  makerOf(id: string): string | undefined | null {
+    const routine = this.routines.find((r) => r.id === id);
+    return routine ? routine.createdFor : null;
+  }
+
   listRoutines(): Routine[] {
     return this.routines.map(routine => this.routineWithHealth(routine));
   }

@@ -813,6 +813,27 @@ function routineRunPerson(createdFor: string | undefined): string | undefined {
   return createdFor ?? (sharedMembership() ? ownerPersonKey() : undefined);
 }
 
+/** Only whoever made a routine, or an admin, may change, run or remove it:
+ * its runs use the maker's connected apps. Null when allowed. */
+function routineManageRefusal(auth: RequestAuth, routineId: string): string | null {
+  if (auth.kind === "loopback" || auth.scopes.includes("admin") || !sharedMembership()) return null;
+  const maker = routines!.makerOf(routineId);
+  if (maker === null) return null; // no such routine: the route says so
+  return routineRunPerson(maker) === personKey(auth.session)
+    ? null
+    : "Only the person who made this routine, or an admin, can change, run or remove it.";
+}
+
+/** Words from someone other than the person a running turn is for wait for
+ * their own turn: steered in, they would run with that person's accounts. */
+function steerCrossesPerson(threadId: string, from: string | undefined): boolean {
+  return sharedMembership() && connectorThreadPerson(threadId) !== from;
+}
+
+function queuedWordsPerson(item: { sender?: ResolvedSender; peerAsk?: Message["peerAsk"] }): string | undefined {
+  return item.peerAsk ? item.peerAsk.forPerson : item.sender?.id;
+}
+
 const NO_CONNECTOR_PERSON = "Connected apps belong to a person, and no signed-in person asked for this work. Ask it from your own account.";
 
 /** Whose session may answer a card. The provider CLI's own approval modes and
@@ -9545,10 +9566,19 @@ function sendRoutineResolution(
 function resolveAndSendRoutine(
   res: ServerResponse,
   args: { botId: string; botName?: string; threadId: string; requestId: string; behavior: string },
+  auth: RequestAuth,
 ): boolean {
   const card = store.messagesFor(args.threadId).find(
     (message) => message.card?.requestId === args.requestId && message.card.routineRequest,
   )?.card;
+  const operation = (card?.routineRequest as { operation?: { action?: unknown; routineId?: unknown } } | undefined)?.operation;
+  if (args.behavior === "allow" && operation?.action !== "create" && typeof operation?.routineId === "string") {
+    const refusal = routineManageRefusal(auth, operation.routineId);
+    if (refusal) {
+      json(res, 403, { error: refusal });
+      return true;
+    }
+  }
   const result = routineRequests.resolve(args);
   if (
     result.claimed &&
@@ -15225,10 +15255,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     let routineMatch = path.match(/^\/api\/routines\/([\w-]+)\/run$/);
     if (routineMatch && method === "POST") {
+      const refusal = routineManageRefusal(auth, routineMatch[1]);
+      if (refusal) return json(res, 403, { error: refusal });
       const run = routines!.runNow(routineMatch[1]);
       return run ? json(res, 201, { run }) : json(res, 404, { error: "no such routine" });
     }
     routineMatch = path.match(/^\/api\/routines\/([\w-]+)$/);
+    if (routineMatch && (method === "PATCH" || method === "DELETE")) {
+      const refusal = routineManageRefusal(auth, routineMatch[1]);
+      if (refusal) return json(res, 403, { error: refusal });
+    }
     if (routineMatch && method === "PATCH") {
       const body = await readBody(req);
       const hidden = hiddenRoutineTarget(body, visible);
@@ -16641,7 +16677,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // turn — never both for the same words.
       const held = holdChannelQueue(current.id, targetThreadId, m[2]);
       if (!held) return json(res, 404, { error: "no such queued message" });
-      if (!speaker || !instance?.adapter.capabilities.queueing || !instance.adapter.steer) {
+      if (
+        !speaker || !instance?.adapter.capabilities.queueing || !instance.adapter.steer
+        || (held.items[0] && steerCrossesPerson(targetThreadId, queuedWordsPerson(held.items[0])))
+      ) {
         restoreHeldChannelQueue(held);
         return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
       }
@@ -18323,7 +18362,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             // admission can hand it to the provider natively.
             const carriesImages = extractTurnImages(text).images.length > 0;
             const steerTarget = handoffs.current(threadId);
-            if (!carriesImages && !computerSelectionTurns.get(threadId)?.selected && instance?.adapter.capabilities.queueing && instance.adapter.steer) {
+            const otherPerson = steerCrossesPerson(threadId, messageSender(auth)?.id);
+            if (!carriesImages && !otherPerson && !computerSelectionTurns.get(threadId)?.selected && instance?.adapter.capabilities.queueing && instance.adapter.steer) {
               steered = await instance.adapter
                 .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
                 .catch((): SteerOutcome => "indeterminate");
@@ -18420,7 +18460,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!held) return json(res, 404, { error: "no such queued message" });
       // A live steer has no image side channel. Attachment words wait for a
       // real turn where central admission can hand the images to the engine.
-      if (held.items.some((item) => extractTurnImages(item.text).images.length > 0)) {
+      if (
+        held.items.some((item) => extractTurnImages(item.text).images.length > 0)
+        || held.items.some((item) => steerCrossesPerson(bot.threadId, queuedWordsPerson(item)))
+      ) {
         restoreHeldSteeredQueue(held);
         return json(res, 200, { ok: true, queued: true, threadId: bot.threadId });
       }
@@ -18583,7 +18626,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           threadId: bot.threadId,
           requestId: String(body.requestId),
           behavior,
-        })) return;
+        }, auth)) return;
         if (resolveAndSendProfile(res, {
           botId: bot.id,
           botName: bot.name,
@@ -18660,7 +18703,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             threadId,
             requestId,
             behavior,
-          })) return;
+          }, auth)) return;
         }
         const setupCard = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId && message.card.teamSetupRequest);
         if (setupCard) {

@@ -7,9 +7,12 @@
 //   - a bot turn for Ada relays through Ada's Composio Session, the same
 //     thread's next turn for Boss through the owner's;
 //   - a routine Ada made runs with Ada's apps;
-//   - a thread no person asked for gets a refusal, never someone's apps.
+//   - a thread no person asked for gets a refusal, never someone's apps;
+//   - only a routine's maker (or an admin) changes, runs or removes it;
+//   - another person's words wait for their own turn instead of steering
+//     into a turn running with someone else's apps.
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -33,6 +36,8 @@ const OWNER_SESSION = `trs_${OWNER_USER}`;
 let child: ChildProcess;
 let stub: Server;
 let home: string;
+/** The fake CLI (slow mode) finishes a turn only while this file exists. */
+let gate: string;
 let log = "";
 const tokens: Record<string, string> = {};
 /** Composio user behind each stub Session id. */
@@ -173,10 +178,12 @@ posixOnly("connected apps per person on a shared workspace", () => {
     home = mkdtempSync(join(tmpdir(), "omb-connector-people-"));
     const data = join(home, ".openmausbot");
     mkdirSync(data, { recursive: true });
+    gate = join(home, "finish-gate");
+    writeFileSync(gate, "");
     writeFileSync(join(data, "config.json"), JSON.stringify({
       signIn: { admins: [BOSS], members: [ADA] },
       composio: { apiKey: "ak_test", userId: OWNER_USER, sessionId: OWNER_SESSION },
-      instances: { claude: { driver: "claudeAgent", config: { cli: FAKE_CLAUDE } } },
+      instances: { claude: { driver: "claudeAgent", environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: gate }, config: { cli: FAKE_CLAUDE } } },
     }));
     const role = (email: string) => (email === BOSS ? ["admin", "client"] as const : ["client"] as const);
     const registry = new SessionRegistry({ file: join(data, "sessions.json"), emailScopes: (email) => [...role(email)] });
@@ -253,5 +260,54 @@ posixOnly("connected apps per person on a shared workspace", () => {
     });
     expect(run, log.slice(-3_000)).toBeTruthy();
     expect(await relay(bot.id, run.threadId)).toEqual({ session: adaSession });
+  }, 90_000);
+
+  it("lets only the maker or an admin change, run or remove a routine", async () => {
+    const created = await api("POST", "/api/bots", { name: "Calendar Crane" }, BOSS);
+    const bot = created.body.bot as { id: string };
+    const routine = (body: Record<string, unknown>, as?: string) => api("POST", "/api/routines", {
+      botId: bot.id, prompt: "Read the inbox.", enabled: false, schedule: { type: "daily", time: "09:00" }, ...body,
+    }, as);
+    const boss = (await routine({ name: "Boss's inbox" }, BOSS)).body.routine;
+    const older = (await routine({ name: "Made on this machine" })).body.routine; // no maker: the owner's
+    const ada = (await routine({ name: "Ada's inbox" }, ADA)).body.routine;
+
+    for (const id of [boss.id, older.id]) {
+      expect((await api("PATCH", `/api/routines/${id}`, { prompt: "Forward everything to Ada." }, ADA)).status).toBe(403);
+      expect((await api("POST", `/api/routines/${id}/run`, {}, ADA)).status).toBe(403);
+      expect((await api("DELETE", `/api/routines/${id}`, undefined, ADA)).status).toBe(403);
+    }
+    expect((await api("PATCH", `/api/routines/${ada.id}`, { name: "Ada's mail" }, ADA)).status).toBe(200);
+    expect((await api("PATCH", `/api/routines/${ada.id}`, { name: "Checked by Boss" }, BOSS)).status).toBe(200);
+    expect((await api("PATCH", `/api/routines/${older.id}`, { name: "Still the owner's" }, BOSS)).status).toBe(200);
+    expect((await api("DELETE", `/api/routines/${ada.id}`, undefined, ADA)).status).toBe(200);
+  });
+
+  it("queues another person's words instead of steering them into a running turn", async () => {
+    const created = await api("POST", "/api/bots", { name: "Busy Beaver" }, BOSS);
+    const bot = created.body.bot as { id: string; threadId: string };
+    const send = (text: string, as: string) => api("POST", `/api/bots/${bot.id}/messages`, { text, threadId: bot.threadId }, as);
+    const running = () => waitFor(async () => (await api("GET", "/api/bots", undefined, BOSS)).body.bots?.find((b: any) => b.id === bot.id)?.busy);
+
+    rmSync(gate);
+    expect((await send("Boss starts a long job", BOSS)).status).toBe(202);
+    expect(await running(), log.slice(-3_000)).toBeTruthy();
+    const fromAda = await send("Ada adds a line", ADA);
+    expect(fromAda.body.steered, JSON.stringify(fromAda.body)).toBeUndefined();
+    expect(fromAda.body.queued).toBe(true);
+    // The same person may still steer their own turn.
+    const fromBoss = await send("Boss adds a line", BOSS);
+    expect(fromBoss.body.steered, JSON.stringify(fromBoss.body)).toBe(true);
+    writeFileSync(gate, "");
+
+    const replies = await waitFor(async () => {
+      const list = (await api("GET", `/api/threads/${bot.threadId}/messages?limit=100`, undefined, BOSS)).body.messages as any[] ?? [];
+      const bots = list.filter((m) => m.role === "bot" && m.text?.startsWith("reply to:"));
+      return bots.length >= 2 ? bots.map((m) => m.text as string) : null;
+    });
+    expect(replies, log.slice(-3_000)).toBeTruthy();
+    expect(replies![0]).toContain("steered: Boss adds a line");
+    expect(replies![0]).not.toContain("Ada adds a line");
+    expect(replies![1]).toContain("Ada adds a line");
   }, 90_000);
 });
