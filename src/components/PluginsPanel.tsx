@@ -11,6 +11,7 @@ import type { LocaleKey } from "@/locales";
 import { readCachedInventory, writeCachedInventory } from "@/lib/connected-apps-cache";
 import { managedConnectorUnavailableReason } from "../../shared/connector-availability";
 import { McpServersPanel } from "./McpServersPanel";
+import { MyMcpTokensSection } from "./MyMcpTokensSection";
 
 export interface ToolkitCard {
   slug: string;
@@ -269,6 +270,9 @@ export function PluginsPanel() {
   const [error, setError] = useState<string | { key: LocaleKey } | null>(null);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"marketplace" | "connected">("marketplace");
+  // Members manage their own tokens; the server list is an admin's.
+  const [admin, setAdmin] = useState<boolean | null>(null);
+  useEffect(() => { let active = true; void api("/api/auth/session").then((session) => { if (active) setAdmin(session.scopes.includes("admin")); }).catch(() => { if (active) setAdmin(false); }); return () => { active = false; }; }, []);
 
   const pollTimers = useRef(new Map<string, ReturnType<typeof setInterval>>());
   const statusGenerations = useRef(new Map<string, number>());
@@ -888,6 +892,8 @@ export function PluginsPanel() {
           )}
         </div>
           </>
+        ) : admin === false ? (
+          <MyMcpTokensSection />
         ) : (
           <McpServersPanel />
         )}

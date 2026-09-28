@@ -750,6 +750,44 @@ function threadPersonKey(threadId: string): string | undefined {
   return linePersonKey(request) ?? threadStarters.get(threadId);
 }
 
+/** The person each thread's latest turn ran for (its [Person]), so a
+ * connected-app call mid-turn acts for the same person. */
+const turnPersons = new Map<string, string | undefined>();
+function connectorThreadPerson(threadId: string): string | undefined {
+  return turnPersons.has(threadId) ? turnPersons.get(threadId) : threadPersonKey(threadId);
+}
+
+/** The install owner: the first sign-in admin. Their connected apps are the
+ * install's own Composio identity, so apps connected before people had
+ * their own stay theirs. */
+function ownerPersonKey(): string | undefined {
+  const admin = signInAllowList().admins[0];
+  return admin ? personKeyForEmail(admin) : undefined;
+}
+
+/** Whose connected apps (Composio) work for a person uses: `{}` is the
+ * install's own identity (the owner, or everyone while one person uses this
+ * workspace), `{ person }` that person's own, null nobody's — work no
+ * signed-in person asked for never borrows someone's accounts. */
+function connectorIdentity(person: string | undefined): { person?: string } | null {
+  if (!sharedMembership()) return {};
+  if (!person) return null;
+  return person === ownerPersonKey() ? {} : { person };
+}
+
+function requestConnectorIdentity(auth: RequestAuth): { person?: string } {
+  return auth.kind === "session" ? connectorIdentity(personKey(auth.session)) ?? {} : {};
+}
+
+/** A routine run works for whoever made the routine (their connected apps,
+ * followed into work it delegates). Older routines predate recording that
+ * and were the owner's. */
+function routineRunPerson(createdFor: string | undefined): string | undefined {
+  return createdFor ?? (sharedMembership() ? ownerPersonKey() : undefined);
+}
+
+const NO_CONNECTOR_PERSON = "Connected apps belong to a person, and no signed-in person asked for this work. Ask it from your own account.";
+
 /** Whose session may answer a card. The provider CLI's own approval modes and
  * the harness's proposals stay exactly as they are; this adds no card, gate
  * or prompt, it only decides whose answer to an existing card counts.
@@ -7749,6 +7787,7 @@ async function startTurn(
       // A bot's ask names the person its asker works for, never whoever last
       // wrote in this thread.
       const turnPerson = opts?.peerAsk ? opts.peerAsk.forPerson : opts?.coordination ? opts.coordinationPerson : threadPersonKey(threadId);
+      turnPersons.set(threadId, turnPerson);
       const personPreamble = opts?.automationSource ? "" : personTurnPreamble(readPersonProfile(turnPerson), agentsMounted);
       // Facts a memory service finds for this message (MCP server `recall`).
       const recallBlock = opts?.automationSource ? "" : await memoryRecallBlock(bot, turnPerson, providerText);
@@ -8865,10 +8904,13 @@ routines = new RoutineManager({
       handoffs.forget(threadId);
     }
   },
-  startTurn: async (botId, threadId, prompt, runOn, triggerSource, onDispatchError) => {
+  personForThread: (threadId) => threadPersonKey(threadId),
+  startTurn: async (botId, threadId, prompt, runOn, triggerSource, onDispatchError, createdFor) => {
+    threadStarters.set(threadId, routineRunPerson(createdFor));
     await startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError });
   },
-  startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, _onDispatchError) => {
+  startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, _onDispatchError, createdFor) => {
+    threadStarters.set(threadId, routineRunPerson(createdFor));
     startGroupTurn(groupId, prompt, undefined, undefined, "goal", undefined, {
       threadId,
       goalCoordinatorBotId: coordinatorBotId,
@@ -14920,12 +14962,22 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             rule: verdict.rule,
           });
         }
+        const connector = connectorIdentity(connectorThreadPerson(internalCapability.threadId));
+        if (!connector) {
+          res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+          return res.end(JSON.stringify({
+            jsonrpc: "2.0",
+            id: (body as { id?: unknown }).id ?? null,
+            error: { code: -32001, message: NO_CONNECTOR_PERSON },
+          }));
+        }
         const upstream = await composio.relayMcp(
           cfg,
           body,
           Array.isArray(req.headers["mcp-session-id"])
             ? req.headers["mcp-session-id"][0]
             : req.headers["mcp-session-id"],
+          connector.person,
         );
         const headers: Record<string, string> = {
           "content-type": upstream.contentType,
@@ -15049,7 +15101,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!composio.configured(cfg) || owner.bot.composio === false) {
           return json(res, 409, { error: "connected apps are not enabled for this bot" });
         }
-        const connectionState: Record<string, { connected?: boolean }> = await composio.connectionStatus(cfg, slugs).catch(() => ({}));
+        const connector = connectorIdentity(connectorThreadPerson(threadId));
+        if (!connector) return json(res, 409, { error: NO_CONNECTOR_PERSON });
+        const connectionState: Record<string, { connected?: boolean }> = await composio.connectionStatus(cfg, slugs, connector.person).catch(() => ({}));
         requireActiveInternalCapability();
         const messageIds: string[] = [];
         for (const item of items) {
@@ -15138,7 +15192,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       const hidden = hiddenRoutineTarget(body, visible);
       if (hidden) return json(res, 404, { error: hidden });
-      return json(res, 201, { routine: routines!.create(body) });
+      return json(res, 201, { routine: routines!.create(body, undefined, auth.kind === "session" ? personKey(auth.session) : undefined) });
     }
     // The desktop shell polls this to decide whether to hold the computer
     // awake: a run in flight, or a routine due within the hour.
@@ -20465,6 +20519,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     // ── connectors (Composio) ──
+    // Members manage only their own apps, which needs the install's own
+    // Composio project: the managed service has one account for everyone.
+    if (
+      path.startsWith("/api/connectors") && auth.kind === "session" && !auth.scopes.includes("admin")
+      && composio.connectionMode(cfg) !== "self-hosted"
+    ) {
+      return json(res, 403, { error: "Only an admin can manage connected apps on this workspace." });
+    }
     if (method === "GET" && path === "/api/connectors/catalog") {
       const { cards, source, pagination } = await composio.listToolkits(cfg);
       return json(res, 200, {
@@ -20487,7 +20549,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           services: {},
         });
       }
-      return json(res, 200, { configured: true, credentialStore: "ok", services: await composio.connectedServices(cfg) });
+      return json(res, 200, { configured: true, credentialStore: "ok", services: await composio.connectedServices(cfg, requestConnectorIdentity(auth).person) });
     }
     if (method === "GET" && path === "/api/connectors") {
       const services = (url.searchParams.get("services") ?? "").split(",").filter(Boolean);
@@ -20499,18 +20561,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           services: {},
         });
       }
-      const status = await composio.connectionStatus(cfg, services.length ? services : composio.CURATED_SLUGS);
+      const status = await composio.connectionStatus(cfg, services.length ? services : composio.CURATED_SLUGS, requestConnectorIdentity(auth).person);
       return json(res, 200, { configured: true, services: status });
     }
     m = path.match(/^\/api\/connectors\/([\w-]+)\/authorize$/);
     if (m && method === "POST") {
       const body = await readBody(req);
-      return json(res, 200, await composio.authorizeService(cfg, m[1], body.alias));
+      return json(res, 200, await composio.authorizeService(cfg, m[1], body.alias, requestConnectorIdentity(auth).person));
     }
     m = path.match(/^\/api\/connectors\/([\w-]+)\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/);
-    if (m && method === "DELETE") return json(res, 200, await composio.removeAccount(cfg, m[1], m[2]));
+    if (m && method === "DELETE") return json(res, 200, await composio.removeAccount(cfg, m[1], m[2], requestConnectorIdentity(auth).person));
     m = path.match(/^\/api\/connectors\/([\w-]+)$/);
-    if (m && method === "DELETE") return json(res, 200, await composio.removeService(cfg, m[1]));
+    if (m && method === "DELETE") return json(res, 200, await composio.removeService(cfg, m[1], requestConnectorIdentity(auth).person));
 
     // Phone credential entry arrives as an HPKE envelope bound to the exact
     // paired device, bot, task, card and allowlisted target. The companion
@@ -20601,12 +20663,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const message = connectorMessage(m[1], threadId, m[2]);
       if (!message?.connector) return json(res, 404, { error: "no such connection request" });
       const connector = message.connector;
+      // A card connects the account of the person the conversation is for.
+      const cardIdentity = connectorIdentity(connectorThreadPerson(threadId));
+      if (!cardIdentity && (m[3] === "authorize" || m[3] === "status")) return json(res, 409, { error: NO_CONNECTOR_PERSON });
+      if (
+        m[3] === "authorize" && auth.kind === "session" && !auth.scopes.includes("admin")
+        && connectorThreadPerson(threadId) !== personKey(auth.session)
+      ) {
+        return json(res, 403, { error: "Only the person this conversation is for can connect an account here." });
+      }
       if (m[3] === "authorize" && method === "POST") {
         store.patchMessage(threadId, message.id, {
           connector: { ...connector, status: "authorizing", error: undefined, dismissed: false },
         });
         try {
-          return json(res, 200, await composio.authorizeService(cfg, connector.slug, connector.alias));
+          return json(res, 200, await composio.authorizeService(cfg, connector.slug, connector.alias, cardIdentity?.person));
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
           store.patchMessage(threadId, message.id, {
@@ -20616,7 +20687,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
       }
       if (m[3] === "status" && method === "GET") {
-        const service = (await composio.connectionStatus(cfg, [connector.slug]))[connector.slug];
+        const service = (await composio.connectionStatus(cfg, [connector.slug], cardIdentity?.person))[connector.slug];
         // A different active account must never complete a second-account card.
         // Missing alias metadata stays pending rather than guessing from the
         // toolkit-wide status (including scoped keys without account reads).

@@ -112,6 +112,9 @@ export interface Routine {
   /** Server-private: added from the organization's library. Never on the
    * wire (routineWithHealth drops it); packageStamps() reads it. */
   installedPackage?: RoutinePackageStamp;
+  /** Server-private: the person key of whoever made it. Its runs work for
+   * that person (their connected apps). Never on the wire. */
+  createdFor?: string;
   nextRunAt: number | null;
   createdAt: number;
   updatedAt: number;
@@ -288,6 +291,10 @@ export interface RoutineManagerOptions {
   resolveResultsThread?: (routine: Routine, forceNew: boolean) => string | undefined;
   /** Compensate an uncommitted allocation, only while still empty. */
   discardResultsThread?: (botId: string, threadId: string) => void;
+  /** The signed-in person a chat conversation is for, so a routine made
+   * from chat records who made it. */
+  personForThread?: (threadId: string) => string | undefined;
+  /** `createdFor`: the routine's maker, absent for older routines. */
   startTurn: (
     botId: string,
     threadId: string,
@@ -295,6 +302,7 @@ export interface RoutineManagerOptions {
     runOn: RoutineRunOn,
     triggerSource: RoutineRunTrigger,
     onDispatchError: (message: string) => void,
+    createdFor?: string,
   ) => Promise<void>;
   startGoal?: (
     groupId: string,
@@ -303,6 +311,7 @@ export interface RoutineManagerOptions {
     coordinatorBotId: string,
     runId: string,
     onDispatchError: (message: string) => void,
+    createdFor?: string,
   ) => Promise<void>;
   interruptTurn?: (botId: string, threadId: string, runOn: RoutineRunOn) => Promise<void>;
   interruptGoal?: (
@@ -807,8 +816,10 @@ export class RoutineManager {
               skippedRuns: Number.isSafeInteger(routine.skippedRuns) && routine.skippedRuns! > 0 ? routine.skippedRuns : undefined,
               lastSkippedAt: Number.isSafeInteger(routine.lastSkippedAt) && routine.lastSkippedAt! >= 0 && routine.lastSkippedAt! <= MAX_DATE_MS ? routine.lastSkippedAt : undefined,
               installedPackage: loadInstalledPackage(routine.installedPackage),
+              createdFor: typeof routine.createdFor === "string" ? routine.createdFor : undefined,
             };
             if (loaded.timeoutMinutes === undefined) delete loaded.timeoutMinutes;
+            if (loaded.createdFor === undefined) delete loaded.createdFor;
             if (loaded.installedPackage === undefined) delete loaded.installedPackage;
             delete loaded.failureStreak;
             return [loaded];
@@ -898,7 +909,7 @@ export class RoutineManager {
       .sort((a, b) => (b.finishedAt ?? b.createdAt) - (a.finishedAt ?? a.createdAt) || b.createdAt - a.createdAt);
     const success = outcomes.findIndex(run => run.status === "completed");
     const failures = success < 0 ? outcomes.length : success;
-    const { installedPackage: _installedPackage, ...visible } = cloneRoutine(routine);
+    const { installedPackage: _installedPackage, createdFor: _createdFor, ...visible } = cloneRoutine(routine);
     return { ...visible, ...(failures ? { failureStreak: failures } : {}) };
   }
 
@@ -1026,7 +1037,7 @@ export class RoutineManager {
     return run ? cloneRun(run) : null;
   }
 
-  create(input: RoutineInput, request?: RoutineRequestCommitFor<"create">): Routine {
+  create(input: RoutineInput, request?: RoutineRequestCommitFor<"create">, createdFor?: string): Routine {
     if (request) {
       const receipt = this.matchingRoutineRequestReceipt(request);
       if (receipt) {
@@ -1052,6 +1063,8 @@ export class RoutineManager {
       createdAt: at,
       updatedAt: at,
     };
+    const maker = createdFor ?? (request ? this.options.personForThread?.(request.threadId) : undefined);
+    if (maker) routine.createdFor = maker;
     const discardResults = this.applyResultsInput(routine, input.resultsThreadId);
     this.commitMutation(() => {
       this.routines.unshift(routine);
@@ -1611,6 +1624,7 @@ export class RoutineManager {
               run.botId,
               run.id,
               (message) => this.failThread(task.threadId, message),
+              this.routines.find((r) => r.id === run.routineId)?.createdFor,
             );
           } else {
             await this.options.startTurn(
@@ -1620,6 +1634,7 @@ export class RoutineManager {
               run.runOn ?? "maus",
               triggerSource,
               (message) => this.failThread(task.threadId, message),
+              this.routines.find((r) => r.id === run.routineId)?.createdFor,
             );
           }
         } catch (error) {
