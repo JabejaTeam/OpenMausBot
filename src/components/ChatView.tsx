@@ -46,6 +46,8 @@ import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { normalizeState, stateForBot } from "@/lib/mascot";
 import { peerLine, type PeerLine } from "@/lib/peer-message";
+import { otherSenderName, usePeople } from "@/lib/people";
+import { PersonLabel } from "./PersonLabel";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { ChatMarkdown } from "./ChatMarkdown";
@@ -312,6 +314,8 @@ function Bubble({
   // provenance note stripped from what the reader sees.
   const peer = peerLine(message);
   const user = message.role === "user" && !peer;
+  usePeople();
+  const senderName = otherSenderName(message);
   const mentionPeers = useMemo(() => state.bots.filter((peer) => peer.id !== bot.id), [state.bots, bot.id]);
   const [expanded, setExpanded] = useState(false);
   const [viewRaw, setViewRaw] = useState(false);
@@ -349,6 +353,7 @@ function Bubble({
   return (
     <div className={cn("group flex w-full flex-col", user ? "animate-msg-in items-end" : "items-start")}>
       {peer && <PeerLabel peer={peer} />}
+      {senderName && <PersonLabel name={senderName} />}
       <div className={cn("flex w-full items-center gap-1.5", user ? "justify-end" : "justify-start")}>
         {user && (
           <MessageActions side="user">
@@ -850,7 +855,7 @@ function PinnedBanner({
   if (!pinned || pinned.kind !== "text") return null;
   const pinnedPeer = peerLine(pinned);
   const sender =
-    pinned.role === "user" ? (pinnedPeer?.name ?? t("chat.you")) : (pinned.from?.name ?? bot.name);
+    pinned.role === "user" ? (pinnedPeer?.name ?? otherSenderName(pinned) ?? t("chat.you")) : (pinned.from?.name ?? bot.name);
   const text = (pinnedPeer?.body ?? pinned.text ?? "").replace(/\s+/g, " ").trim();
   if (!text) return null;
   return (

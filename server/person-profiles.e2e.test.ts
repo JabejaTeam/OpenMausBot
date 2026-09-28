@@ -121,6 +121,16 @@ posixOnly("a profile per person, carried by the turns done for them", () => {
     expect((await api("PUT", "/api/people/me", { name: "two\nlines" }, ADA)).status).toBe(400);
   });
 
+  it("lists names by person key for a transcript, never emails or profile text", async () => {
+    const ada = (await api("GET", "/api/people/me", undefined, ADA)).body;
+    expect(ada.id).toMatch(/^p_/);
+    const listed = await api("GET", "/api/people/names", undefined, BOB);
+    expect(listed.status).toBe(200);
+    expect(listed.body.names[ada.id]).toBe("Ada");
+    expect(JSON.stringify(listed.body)).not.toContain(ADA);
+    expect(JSON.stringify(listed.body)).not.toContain("short answers");
+  });
+
   it("names the person a turn is for and carries only their profile", async () => {
     const created = await api("POST", "/api/bots", { name: "Shared Wren" }, BOSS);
     expect(created.status, JSON.stringify(created.body)).toBe(201);

@@ -7,7 +7,7 @@
 // It rides on the turn's own text, not on the standing instructions: an engine
 // that keeps its instructions for a whole session (Codex) would otherwise keep
 // the first person's profile while someone else takes over the thread.
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
@@ -60,6 +60,24 @@ function overBudget(text: string): string | null {
   if (Buffer.byteLength(text, "utf8") > PERSON_PROFILE_MAX_BYTES) return `A profile is capped at ${PERSON_PROFILE_MAX_BYTES} bytes.`;
   if (text.split("\n").length > PERSON_PROFILE_MAX_LINES) return `A profile is capped at ${PERSON_PROFILE_MAX_LINES} lines.`;
   return null;
+}
+
+/** Every person's display name by key: what a transcript shows beside a
+ * message someone else sent. Names only, never an email or profile text. */
+export function personNames(): Record<string, string> {
+  let files: string[];
+  try {
+    files = readdirSync(PEOPLE_DIR);
+  } catch {
+    return {};
+  }
+  const names: Record<string, string> = {};
+  for (const file of files) {
+    const key = file.endsWith(".json") ? file.slice(0, -5) : "";
+    const name = KEY.test(key) ? readPersonProfile(key)?.name?.trim() : undefined;
+    if (name) names[key] = name;
+  }
+  return names;
 }
 
 /** Remember who a key belongs to, the first time a signed-in person is seen. */

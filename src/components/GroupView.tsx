@@ -63,6 +63,8 @@ import {
   tailWindowStart,
 } from "@/lib/transcript-window";
 import { useReplyDraft } from "@/lib/drafts";
+import { otherSenderName, usePeople } from "@/lib/people";
+import { PersonLabel } from "./PersonLabel";
 
 function dayLabel(at: number): string {
   const d = new Date(at);
@@ -186,6 +188,7 @@ const Transcript = memo(function Transcript({
   onReply: (message: Message) => void;
 }) {
   const { state, dispatch } = useStore();
+  usePeople();
   const showToolCalls = showToolCallsEnabled(state.config);
   const memberOf = (id?: string) => members.find((b) => b.id === id);
   // Several bots working at once turn a room into a wall of chips; fold the
@@ -284,6 +287,7 @@ const Transcript = memo(function Transcript({
             showToolCalls ? <DigestChip message={m} /> : null
           ) : m.kind === "text" && (m.text || m.attachments?.length) ? (
             <div className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>
+              {user && otherSenderName(m) && (newCluster || prev?.sender?.id !== m.sender?.id) && <PersonLabel name={otherSenderName(m)!} />}
               <div className={cn("flex w-full items-end gap-1.5", user ? "justify-end" : "justify-start")}>
                 {user && (
                   <>
@@ -1259,7 +1263,7 @@ export function GroupView({ group }: { group: Group }) {
         const pinned = group.messages.find((m) => m.id === group.pinnedMessageId && m.kind === "text");
         const text = pinned ? (pinned.text ?? "").replace(/\s+/g, " ").trim() : "";
         if (!pinned || !text) return null;
-        const sender = pinned.role === "user" ? t("chat.you") : (pinned.from?.name ?? t("room.aBot"));
+        const sender = pinned.role === "user" ? (otherSenderName(pinned) ?? t("chat.you")) : (pinned.from?.name ?? t("room.aBot"));
         return (
           <div className="w-full px-5">
             <div className="mb-2 flex items-center gap-2 rounded-lg border border-accent/25 bg-accent/[0.07] px-3 py-1.5">

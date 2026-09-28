@@ -262,7 +262,7 @@ import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
 import { isKindInstructionScope, kindInstructionsSystemPrompt, readKindInstructions, writeKindInstructions, KIND_INSTRUCTIONS_MAX_BYTES } from "./kind-instructions.ts";
-import { notePerson, personTurnPreamble, readPersonProfile, savePersonProfile, updatePersonProfile, PERSON_PROFILE_MAX_LINES } from "./person-profiles.ts";
+import { notePerson, personNames, personTurnPreamble, readPersonProfile, savePersonProfile, updatePersonProfile, PERSON_PROFILE_MAX_LINES } from "./person-profiles.ts";
 import { isBotKind } from "../shared/wire.ts";
 import { personKeyFor, personKeyForEmail } from "./person-key.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
@@ -19738,6 +19738,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
     }
 
+    // ── who sent what: display names for the people keys messages carry ──
+    if (method === "GET" && path === "/api/people/names") {
+      return json(res, 200, { names: personNames() });
+    }
+
     // ── a person's own profile (Settings → About me) ──
     // Any signed-in person, members included, reads and edits only their own.
     if (path === "/api/people/me") {
@@ -19747,7 +19752,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       notePerson(key, email);
       const view = () => {
         const profile = readPersonProfile(key);
-        return { email: profile?.email ?? email, name: profile?.name ?? "", text: profile?.text ?? "", maxLines: PERSON_PROFILE_MAX_LINES };
+        return { id: key, email: profile?.email ?? email, name: profile?.name ?? "", text: profile?.text ?? "", maxLines: PERSON_PROFILE_MAX_LINES };
       };
       if (method === "GET") return json(res, 200, view());
       if (method === "PUT") {
