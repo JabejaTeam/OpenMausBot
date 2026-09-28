@@ -491,7 +491,17 @@ export function withOwnMcpValues(
     if (!people[me] && Object.keys(people).length >= MAX_PEOPLE) {
       return { ok: false, status: 409, error: `This server already has ${MAX_PEOPLE} people.` };
     }
-    people[me] = { ...values };
+    // A pasted token without its scheme gets the one the shared value uses
+    // ("Bearer abc" shared, "abc" pasted → "Bearer abc"): people copy the
+    // token itself, and the server would otherwise answer 401.
+    const own = { ...values };
+    if (isRemoteMcpServer(server)) {
+      for (const [key, value] of Object.entries(own)) {
+        const scheme = /^(\S+) \S/.exec(server.headers[key]?.trim() ?? "")?.[1];
+        if (key.toLowerCase() === "authorization" && scheme && !/\s/.test(value.trim())) own[key] = `${scheme} ${value.trim()}`;
+      }
+    }
+    people[me] = own;
   }
   const entry = { ...server, people } as StoredMcpServer;
   if (!Object.keys(people).length) delete entry.people;

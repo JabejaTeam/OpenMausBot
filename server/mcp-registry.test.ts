@@ -230,6 +230,11 @@ describe("self-service MCP values", () => {
     expect(withOwnMcpValues("jabeja", raw.jabeja, "bob@example.test", { Authorization: "a\nb" })).toMatchObject({ ok: false, status: 400 });
     expect(withOwnMcpValues("billit", raw.billit, "bob@example.test", { BILLIT_API_KEY: "mine" })).toMatchObject({ ok: false, status: 404 });
     expect(withOwnMcpValues("other", raw.other, "bob@example.test", { Authorization: "Bearer bob" })).toMatchObject({ ok: false, status: 404 });
+    // a pasted bare token gets the shared value's scheme; a full value is kept
+    const bare = withOwnMcpValues("jabeja", raw.jabeja, "bob@example.test", { Authorization: " bob-token " });
+    expect(bare.ok && bare.entry.people?.["bob@example.test"]).toEqual({ Authorization: "Bearer bob-token" });
+    const full = withOwnMcpValues("jabeja", raw.jabeja, "bob@example.test", { Authorization: "Token bob" });
+    expect(full.ok && full.entry.people?.["bob@example.test"]).toEqual({ Authorization: "Token bob" });
     const cleared = withOwnMcpValues("jabeja", raw.jabeja, "ada@example.test", null);
     expect(cleared.ok && cleared.entry.people).toBeUndefined();
   });
