@@ -365,3 +365,17 @@ describe("bot visibility between teammates", () => {
     expect(peerAllowed(self, "hr")).toBe(true);
   });
 });
+
+describe("peerAllowed across audiences", () => {
+  it("needs the same audience unless the narrower bot was granted its wider teammates", () => {
+    const board = { id: "board", visibility: "admins" };
+    const coach = { id: "coach", visibility: undefined };
+    const clank = { id: "clank", visibility: { people: ["ada@example.test"], private: true } };
+    expect(peerAllowed(board, coach)).toBe(false);
+    expect(peerAllowed({ ...board, reachesWiderAudience: true }, coach)).toBe(true);
+    expect(peerAllowed(coach, { ...board, reachesWiderAudience: true })).toBe(true);
+    // the grant only widens toward bots that already admit everyone who sees it
+    expect(peerAllowed({ ...board, reachesWiderAudience: true }, clank)).toBe(false);
+    expect(peerAllowed({ ...coach, reachesWiderAudience: true }, board)).toBe(false);
+  });
+});

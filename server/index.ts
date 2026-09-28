@@ -17477,6 +17477,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!parsed.ok) return json(res, 400, { error: parsed.error });
         patch.visibility = parsed.visibility;
       }
+      if (body.reachesWiderAudience !== undefined) {
+        if (typeof body.reachesWiderAudience !== "boolean") return json(res, 400, { error: "reachesWiderAudience must be true or false" });
+        patch.reachesWiderAudience = body.reachesWiderAudience;
+      }
       if (body.alwaysAllow !== undefined) {
         if (!Array.isArray(body.alwaysAllow) || body.alwaysAllow.some((t: unknown) => typeof t !== "string")) {
           return json(res, 400, { error: "alwaysAllow must be a list of tool keys" });
@@ -17516,6 +17520,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
       }
       if (body.approvePeerComms === false && existingBot?.approvePeerComms === true) loosened.push("approvePeerComms");
+      if (body.reachesWiderAudience === true && existingBot?.reachesWiderAudience !== true) loosened.push("reachesWiderAudience");
       if (section !== undefined && sectionKey(existingBot?.section) !== sectionKey(section)) loosened.push("section");
       if (Array.isArray(patch.alwaysAllow) && patch.alwaysAllow.some((key) => !(existingBot?.alwaysAllow ?? []).includes(key))) {
         loosened.push("alwaysAllow");

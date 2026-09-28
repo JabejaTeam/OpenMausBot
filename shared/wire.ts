@@ -324,6 +324,10 @@ export interface WireBot {
   /** Who may see this bot on a workspace several people share. Absent means
    * everyone. Sent to admins only; a member's copy of a bot never carries it. */
   visibility?: BotVisibility;
+  /** Admin-set: this bot may reach teammates that more people can see than
+   * this bot, and they may answer it. What it tells them is then seen by
+   * their audience. Off by default: bots reach only the same audience. */
+  reachesWiderAudience?: boolean;
 }
 
 /** Who may see a bot: every signed-in person, admins only, the listed

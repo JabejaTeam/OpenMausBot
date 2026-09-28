@@ -4,7 +4,7 @@
 // caps, one sanitizer, and one reachability rule to audit rather than two
 // that drift.
 
-import { sameAudience } from "./bot-visibility.ts";
+import { audienceWithin, sameAudience } from "./bot-visibility.ts";
 import type { BotActivity } from "./store.ts";
 
 export interface RosterMember {
@@ -28,6 +28,8 @@ export interface RosterMember {
   activity?: BotActivity;
   /** Who may see the bot on a shared workspace (server/bot-visibility.ts). */
   visibility?: unknown;
+  /** Admin grant: may work with teammates whose audience contains its own. */
+  reachesWiderAudience?: boolean;
 }
 
 const sectionKey = (section?: string): string => section?.trim() || "";
@@ -107,8 +109,8 @@ export function peerStatusWords(status: PeerStatus): string {
  * throwing mid-turn: the list is operator-owned local state, so degrading to
  * the documented default is safer than failing a turn. */
 export const peerAllowed = (
-  from: { peers?: string[]; visibility?: unknown },
-  target: string | { id: string; visibility?: unknown },
+  from: { peers?: string[]; visibility?: unknown; reachesWiderAudience?: boolean },
+  target: string | { id: string; visibility?: unknown; reachesWiderAudience?: boolean },
 ): boolean => {
   const targetId = typeof target === "string" ? target : target.id;
   if (Array.isArray(from.peers) && !from.peers.includes(targetId)) return false;
@@ -117,7 +119,12 @@ export const peerAllowed = (
   // bot's answers, to people who cannot see the other (bot-visibility.ts).
   // Bots nobody restricted all share "everyone", so this changes nothing
   // until an admin restricts one.
-  return typeof target === "string" || sameAudience(from.visibility, target.visibility);
+  if (typeof target === "string" || sameAudience(from.visibility, target.visibility)) return true;
+  // An admin's explicit grant on the narrower bot: it may work with a
+  // teammate everyone who sees it can also see (both ways, so the answer
+  // comes back). Its words then reach that teammate's wider audience.
+  return (from.reachesWiderAudience === true && audienceWithin(from.visibility, target.visibility)) ||
+    (target.reachesWiderAudience === true && audienceWithin(target.visibility, from.visibility));
 };
 
 export function canReachPeer(from: RosterMember, target: RosterMember): boolean {

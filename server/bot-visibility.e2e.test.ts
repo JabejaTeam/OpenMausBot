@@ -587,6 +587,25 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect((await api("PATCH", `/api/bots/${ids.board}`, { visibility: "admins" }, BOSS)).status).toBe(200);
   });
 
+  it("lets an admin grant one narrower bot its wider teammates, both ways", async () => {
+    const coach = await makeBot("Coach Owl", "People");
+    const roster = async (id: string) => JSON.stringify((await api("GET", `/api/bots/${id}/system-prompt`, undefined, BOSS)).body);
+    expect(await roster(ids.board)).not.toContain("Coach Owl");
+    expect(await roster(coach.id)).not.toContain("Board Heron");
+    // a member cannot grant it; a bad value is refused
+    expect((await api("PATCH", `/api/bots/${coach.id}`, { reachesWiderAudience: true }, ADA)).status).toBe(403);
+    expect((await api("PATCH", `/api/bots/${ids.board}`, { reachesWiderAudience: "yes" }, BOSS)).status).toBe(400);
+    const granted = await api("PATCH", `/api/bots/${ids.board}`, { reachesWiderAudience: true }, BOSS);
+    expect(granted.status, JSON.stringify(granted.body)).toBe(200);
+    expect(granted.body.bot.reachesWiderAudience).toBe(true);
+    expect(await roster(ids.board)).toContain("Coach Owl");
+    expect(await roster(coach.id)).toContain("Board Heron");
+    // Payroll (Ada and admins) contains Board's audience (admins) too
+    expect(await roster(ids.hr)).toContain("Board Heron");
+    expect((await api("PATCH", `/api/bots/${ids.board}`, { reachesWiderAudience: false }, BOSS)).status).toBe(200);
+    expect(await roster(ids.board)).not.toContain("Coach Owl");
+  });
+
   it("hides a private bot from admins too, while the people it names and the owner keep it", async () => {
     const clank = await makeBot("Clank Beetle", "Ada");
     const admin = openStream(BOSS);
