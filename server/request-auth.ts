@@ -284,6 +284,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET", "PUT"], path: /^\/api\/people\/me$/ },
   { methods: ["GET"], path: /^\/api\/people\/names$/ },
   { methods: ["PUT", "DELETE"], path: /^\/api\/mcp\/mine\/[a-z][a-z0-9_-]{0,31}$/ },
+  // a pairing code for one's own phone (the route requires an email session)
+  { methods: ["POST"], path: /^\/api\/auth\/pairing\/mine$/ },
   { methods: ["POST"], path: /^\/api\/auth\/stream-ticket$/ },
   { methods: ["POST"], path: /^\/api\/auth\/logout$/ },
   // Own outbound desktop connector, additionally bound to a private secret.

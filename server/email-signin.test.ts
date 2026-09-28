@@ -277,3 +277,54 @@ describe("sign in with your email on a hosted server", () => {
     } finally { stream.close(); writeFileSync(configPath, JSON.stringify(config)); }
   });
 });
+
+describe("a signed-in person pairs their own phone", () => {
+  it("gives the phone the person's email and exactly their scopes, never more", async () => {
+    const member = await signIn("staff@example.test");
+    const offer = await call("/api/auth/pairing/mine", { body: { scopes: ["admin", "client"] }, headers: { cookie: member, origin: `https://${HOST}` } });
+    expect(offer.status).toBe(200);
+    expect(offer.body.url).toBe(`https://${HOST}/pair#code=${offer.body.code}`);
+    expect(offer.body.inviteUrl).toMatch(/^openmausbot:\/\/pair\?/);
+
+    // The iOS app redeems the scanned credential as a bearer device.
+    const paired = await call("/api/auth/pair", { body: { code: offer.body.credential, label: "Staff iPhone" }, from: "203.0.113.20" });
+    expect(paired.status).toBe(200);
+    expect(paired.body.session).toMatchObject({ label: "Staff iPhone", scopes: ["client"], email: "staff@example.test" });
+    const bearer = { authorization: `Bearer ${paired.body.token}` };
+    const me = await call("/api/auth/session", { headers: bearer, from: "203.0.113.20" });
+    expect(me.body).toMatchObject({ kind: "session", email: "staff@example.test", scopes: ["client"] });
+    expect((await call("/api/config", { method: "PUT", body: { language: "en" }, headers: bearer, from: "203.0.113.20" })).status).toBe(403);
+    // single use
+    expect((await call("/api/auth/pair", { body: { code: offer.body.code }, from: "203.0.113.21" })).status).toBe(401);
+  });
+
+  it("an admin's phone is an admin; a device without an email cannot mint one", async () => {
+    const owner = await signIn("her@example.test");
+    const offer = await call("/api/auth/pairing/mine", { body: {}, headers: { cookie: owner, origin: `https://${HOST}` } });
+    const paired = await call("/api/auth/pair", { body: { code: offer.body.code, label: "Her iPhone" }, from: "203.0.113.22" });
+    expect(paired.body.session).toMatchObject({ scopes: ["admin", "client"], email: "her@example.test" });
+
+    const anonymous = await call("/api/auth/pairing", { body: { scopes: ["client"] }, headers: { cookie: owner } });
+    const device = await call("/api/auth/pair", { body: { code: anonymous.body.code, cookie: true, label: "Kiosk" }, from: "203.0.113.23" });
+    const refused = await call("/api/auth/pairing/mine", { body: {}, headers: { cookie: cookieOf(device) }, from: "203.0.113.23" });
+    expect(refused.status).toBe(400);
+  });
+
+  it("the app's own invite link works too, and the phone ends when the person leaves the sign-in list", async () => {
+    const member = await signIn("staff@example.test");
+    const offer = await call("/api/auth/pairing/mine", { body: {}, headers: { cookie: member, origin: `https://${HOST}` } });
+    // "Open in the app": the openmausbot:// invite carries the credential the app redeems at /api/pair
+    const token = new URL(offer.body.inviteUrl).searchParams.get("token");
+    const paired = await call("/api/pair", { body: { credential: token, deviceName: "Staff iPhone" }, from: "203.0.113.24" });
+    expect(paired.status).toBe(200);
+    const bearer = { authorization: `Bearer ${paired.body.token}` };
+    expect((await call("/api/auth/session", { headers: bearer, from: "203.0.113.24" })).body).toMatchObject({ email: "staff@example.test", scopes: ["client"] });
+    expect((await call("/api/bots", { headers: bearer, from: "203.0.113.24" })).status).toBe(200);
+    const configPath = join(home, ".openmausbot", "config.json");
+    const config = JSON.parse(readFileSync(configPath, "utf8"));
+    try {
+      writeFileSync(configPath, JSON.stringify({ ...config, signIn: { ...config.signIn, members: [] } }));
+      expect((await call("/api/bots", { headers: bearer, from: "203.0.113.24" })).status).toBe(401);
+    } finally { writeFileSync(configPath, JSON.stringify(config)); }
+  });
+});

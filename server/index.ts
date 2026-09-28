@@ -664,6 +664,33 @@ function savedCustomDomain(): string | null {
   catch { return null; }
 }
 function publicUrl(): string | null { return savedCustomDomain() ?? FALLBACK_PUBLIC_URL; }
+
+/** What POST /api/auth/pairing and /api/auth/pairing/mine answer for a code
+ * just opened. Two links for one window. `url` opens the web app and is what
+ * a browser and the iOS app already read. `inviteUrl` is the custom scheme the
+ * native companion scanners accept; it carries the credential encoding
+ * because those scanners cannot take a typed code. */
+function pairingOffer(opened: { id: string; code: string; credential: string; expiresAt: number }, req: IncomingMessage, auth: RequestAuth) {
+  const origin = requestOrigin(req);
+  const base = publicUrl() ?? (auth.kind === "session" && origin ? origin : null);
+  const code = formatPairingCode(opened.code);
+  const serverName = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED }).label;
+  const invite = base
+    ? `openmausbot://pair?address=${encodeURIComponent(base)}&token=${encodeURIComponent(opened.credential)}&name=${encodeURIComponent(serverName)}`
+    : null;
+  return {
+    id: opened.id,
+    code,
+    credential: opened.credential,
+    expiresAt: opened.expiresAt,
+    url: base ? `${base}/pair#code=${code}` : null,
+    inviteUrl: invite,
+    serverName,
+    hint: base
+      ? null
+      : "this server has no public address to put in a link: set OMB_PUBLIC_URL, or open /pair on the address you use and type the code",
+  };
+}
 function customDomainStatus() {
   return {
     customDomain: savedCustomDomain(), publicUrl: publicUrl(), fallbackUrl: FALLBACK_PUBLIC_URL,
@@ -12754,7 +12781,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // Hosted workspaces have one sign-in authority. A missing optional layer
     // must not accidentally reactivate legacy email/QR credential minting.
     if (HOSTED_WORKSPACE) {
-      if (method === "POST" && ["/api/auth/pair", "/api/pair", "/api/auth/pairing", "/api/auth/email/start", "/api/auth/email/verify"].includes(path)) {
+      if (method === "POST" && ["/api/auth/pair", "/api/pair", "/api/auth/pairing", "/api/auth/pairing/mine", "/api/auth/email/start", "/api/auth/email/verify"].includes(path)) {
         return json(res, 403, { error: "Sign in through the workspace portal." });
       }
       if (workspaceAccess) {
@@ -12765,7 +12792,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     // An enrolled organisation that turns remote access off refuses new pairing
     // codes and new remote sessions. Existing sessions and this app are unchanged.
-    if (method === "POST" && ["/api/auth/pair", "/api/pair", "/api/auth/pairing", "/api/auth/email/start", "/api/auth/email/verify"].includes(path)) {
+    if (method === "POST" && ["/api/auth/pair", "/api/pair", "/api/auth/pairing", "/api/auth/pairing/mine", "/api/auth/email/start", "/api/auth/email/verify"].includes(path)) {
       const refusal = managedPolicy.remoteAccessRefusal();
       if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
     }
@@ -12996,29 +13023,26 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const requested: unknown = body?.scopes;
       const scopes = Array.isArray(requested) ? requested.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
       const opened = sessions.openPairing({ label: typeof body?.label === "string" ? body.label : undefined, scopes });
-      const origin = requestOrigin(req);
-      const base = publicUrl() ?? (auth.kind === "session" && origin ? origin : null);
-      const code = formatPairingCode(opened.code);
-      // Two links for one window. `url` opens the web app and is what a
-      // browser and the iOS app already read. `inviteUrl` is the custom
-      // scheme the native companion scanners accept; it carries the
-      // credential encoding because those scanners cannot take a typed code.
-      const serverName = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED }).label;
-      const invite = base
-        ? `openmausbot://pair?address=${encodeURIComponent(base)}&token=${encodeURIComponent(opened.credential)}&name=${encodeURIComponent(serverName)}`
-        : null;
-      return json(res, 200, {
-        id: opened.id,
-        code,
-        credential: opened.credential,
-        expiresAt: opened.expiresAt,
-        url: base ? `${base}/pair#code=${code}` : null,
-        inviteUrl: invite,
-        serverName,
-        hint: base
-          ? null
-          : "this server has no public address to put in a link: set OMB_PUBLIC_URL, or open /pair on the address you use and type the code",
+      return json(res, 200, pairingOffer(opened, req, auth));
+    }
+    // A signed-in person pairs their own phone. The code carries their email
+    // and exactly their scopes, so the phone is them (private bots, profile,
+    // tokens) and ends with their place on the sign-in list. Client scope:
+    // a member may do this, but never for anyone else or with more rights.
+    if (method === "POST" && path === "/api/auth/pairing/mine") {
+      if (auth.kind !== "session" || !auth.session.email) {
+        return json(res, 400, { error: "Sign in with your email first; a phone paired from here works as you." });
+      }
+      if (!sessions.isLive(auth.session.id)) {
+        return json(res, 401, { error: "Your session ended. Sign in again before creating a pairing code." });
+      }
+      const opened = sessions.openPairing({
+        label: `${auth.session.email} phone`,
+        scopes: [...auth.session.scopes],
+        email: auth.session.email,
+        ...(auth.session.userId ? { userId: auth.session.userId } : {}),
       });
+      return json(res, 200, pairingOffer(opened, req, auth));
     }
     if (method === "GET" && path === "/api/auth/pairing") return json(res, 200, { pairings: sessions.openPairings(), publicUrl: publicUrl() });
     // Admin-only via request-auth's default deny. Connecting a domain only

@@ -799,6 +799,7 @@ export type AppSettingsSection =
   | "people"
   | "aboutMe"
   | "myTokens"
+  | "myPhone"
   | "workRules"
   | "activity"
   | "backups"

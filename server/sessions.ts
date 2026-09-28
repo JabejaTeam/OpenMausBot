@@ -106,6 +106,11 @@ export interface PairingCode {
   label: string;
   createdAt: number;
   expiresAt: number;
+  /** A signed-in person pairing their own phone: the session it becomes is
+   * theirs, so it keeps their private bots, profile and tokens, and ends
+   * with their place on the sign-in list like any email session. */
+  userId?: string;
+  email?: string;
 }
 
 export interface PublicPairing {
@@ -305,7 +310,7 @@ export class SessionRegistry {
 
   // ── pairing ────────────────────────────────────────────────────────────
 
-  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number } = {}): { id: string; code: string; credential: string; expiresAt: number } {
+  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number; userId?: string; email?: string } = {}): { id: string; code: string; credential: string; expiresAt: number } {
     this.prune();
     const now = this.now();
     const code = generatePairingCode();
@@ -320,6 +325,8 @@ export class SessionRegistry {
       createdAt: now,
       expiresAt: now + (input.ttlMs ?? PAIRING_CODE_TTL_MS),
     };
+    if (input.userId) pairing.userId = input.userId;
+    if (input.email) pairing.email = input.email;
     this.pairings.push(pairing);
     return { id: pairing.id, code, credential, expiresAt: pairing.expiresAt };
   }
@@ -407,6 +414,8 @@ export class SessionRegistry {
       // longer than the cap does not hand out a session the cap forbids.
       expiresAt: now + Math.min(SESSION_TTL_MS, SESSION_MAX_AGE_MS),
     };
+    if (pairing.userId) record.userId = pairing.userId;
+    if (pairing.email) record.email = pairing.email;
     this.sessions.push(record);
     this.lastSeenWrites.set(record.id, now); // the exchange itself was the first sighting
     this.persist();

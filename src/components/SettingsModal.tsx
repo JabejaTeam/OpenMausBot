@@ -19,6 +19,7 @@ import { CompanionSection } from "./CompanionSection";
 import { ServerPairingCard } from "./ServerPairingCard";
 import { PeopleSection } from "./PeopleSection";
 import { MyMcpTokensSection } from "./MyMcpTokensSection";
+import { MyPhoneSection } from "./MyPhoneSection";
 import { AboutMeSection } from "./AboutMeSection";
 import { WorkRulesSection } from "./WorkRulesSection";
 import { ActivitySection } from "./ActivitySection";
@@ -70,6 +71,7 @@ const SECTIONS: Array<{
   { id: "people", labelKey: "settings.section.people", icon: Users, keywords: ["people", "users", "invite", "sign in", "members", "admins", "access"] },
   { id: "workRules", labelKey: "settings.section.workRules", icon: ScrollText, keywords: ["rules", "work rules", "code agent", "instructions", "guidelines", "role", "kind"] },
   { id: "aboutMe", labelKey: "settings.section.aboutMe", icon: UserRound, keywords: ["about", "me", "profile", "preferences", "personal", "name"] },
+  { id: "myPhone", labelKey: "settings.section.myPhone", icon: TabletSmartphone, keywords: ["phone", "iphone", "ios", "app", "mobile", "pair", "pairing", "qr", "my", "own"] },
   { id: "myTokens", labelKey: "settings.section.myTokens", icon: KeyRound, keywords: ["token", "tokens", "mcp", "my", "own", "personal", "jabeja", "credentials"] },
   { id: "activity", labelKey: "settings.section.activity", icon: ScrollText, keywords: ["activity", "audit", "log", "history", "who changed", "approvals", "decisions", "admin"] },
   { id: "backups", labelKey: "settings.section.backups", icon: Archive, keywords: ["export", "import", "restore", "full backup", "password", "recovery"] },
@@ -569,6 +571,8 @@ export function SettingsModal() {
     .filter((entry) => entry.id !== "people" || !window.ogb)
     // a person's own MCP values exist on a workspace served to a browser
     .filter((entry) => entry.id !== "myTokens" || !window.ogb)
+    // pairing one's own phone needs an email sign-in, which is a browser's
+    .filter((entry) => entry.id !== "myPhone" || !window.ogb)
     // a person's own profile exists where people sign in with their email
     .filter((entry) => entry.id !== "aboutMe" || !window.ogb)
     // workspace rules are an admin's; the desktop owner is one too
@@ -824,6 +828,7 @@ export function SettingsModal() {
             {section === "usage" && <UsageSection />}
             {section === "people" && <PeopleSection />}
             {section === "myTokens" && <MyMcpTokensSection />}
+            {section === "myPhone" && <MyPhoneSection />}
             {section === "aboutMe" && <AboutMeSection />}
             {section === "workRules" && <WorkRulesSection />}
             {section === "activity" && <ActivitySection />}
