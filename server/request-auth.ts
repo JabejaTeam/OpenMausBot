@@ -361,6 +361,9 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/webhooks$/ },
   // configured-or-not booleans; the handler strips the few identifying fields for clients
   { methods: ["GET"], path: /^\/api\/config$/ },
+  // engines, models and capabilities (images, effort, …) the composer checks;
+  // the handler strips CLI paths, install, sign-in and account fields for clients
+  { methods: ["GET"], path: /^\/api\/instances$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {

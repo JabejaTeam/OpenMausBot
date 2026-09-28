@@ -12430,6 +12430,29 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
   };
 }
 
+/** What a client session sees of an engine: enough to pick a model and to
+ * know what a bot can take (images, effort, agents), never where its CLI
+ * lives, how to install or sign in to it, or whose account it runs on. */
+function instanceForClient(instance: Awaited<ReturnType<typeof describeInstances>>[number]) {
+  const { snapshot } = instance;
+  return {
+    instanceId: instance.instanceId,
+    driverKind: instance.driverKind,
+    displayName: instance.displayName,
+    ...("icon" in instance && instance.icon ? { icon: instance.icon } : {}),
+    ...("policy" in instance && instance.policy ? { policy: instance.policy } : {}),
+    readOnly: true,
+    snapshot: {
+      state: snapshot.state,
+      ...("authenticated" in snapshot && snapshot.authenticated !== undefined ? { authenticated: snapshot.authenticated } : {}),
+      ...("billing" in snapshot && snapshot.billing ? { billing: snapshot.billing } : {}),
+    },
+    models: instance.models,
+    capabilities: instance.capabilities,
+    access: instance.access,
+  };
+}
+
 function mcpServerResponse() {
   // While enrolled with custom servers off, say which servers stay configured
   // but never reach bots, and why. Nothing here is written to config.json.
@@ -19580,7 +19603,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // Windows never pushes PATH changes into a live process, so without
       // this the answer is frozen at boot and "check again" is a no-op.
       resetPathCache();
-      return json(res, 200, { instances: await describeInstances() });
+      const instances = await describeInstances();
+      return json(res, 200, { instances: auth.scopes.includes("admin") ? instances : instances.map(instanceForClient) });
     }
     const companyMutation = /^\/api\/instances\/(company\.[\w.-]+)(?:\/|$)/.exec(path);
     if (hostedModels && path.startsWith("/api/instances/") && method !== "GET") return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });

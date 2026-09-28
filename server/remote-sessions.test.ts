@@ -479,7 +479,7 @@ describe("pairing", () => {
     expect(paired.status).toBe(200);
     const h = (extra: Record<string, string> = {}) => remote("10.0.0.40", { authorization: `Bearer ${paired.body.token}`, ...extra });
     expect((await call("/api/bots", { headers: h() })).status).toBe(200);
-    for (const [method, path] of [["POST", "/api/cli-test"], ["GET", "/api/instances"], ["POST", "/api/webhooks"], ["GET", "/api/mcp/servers"], ["POST", "/api/local-computer/run"]] as const) {
+    for (const [method, path] of [["POST", "/api/cli-test"], ["POST", "/api/webhooks"], ["GET", "/api/mcp/servers"], ["POST", "/api/local-computer/run"]] as const) {
       const r = await call(path, { method, headers: h(), body: method === "POST" ? "{}" : undefined });
       expect(r.status, `${method} ${path}`).toBe(403);
       expect(r.body.error, `${method} ${path}`).toContain("admin scope");
@@ -498,6 +498,23 @@ describe("pairing", () => {
     expect(config.body.vps.sshAlias).toBe("");
     expect(config.body.profile.email).toBe("");
     expect(JSON.stringify(config.body)).not.toContain("partitionId");
+    // the composer needs each engine's capabilities (images) for a member too,
+    // but never its CLI path, install/sign-in details or account
+    const instances = await call("/api/instances", { headers: h() });
+    expect(instances.status).toBe(200);
+    expect(instances.body.instances.length).toBeGreaterThan(0);
+    const owner = (await call("/api/instances")).body.instances;
+    for (const row of instances.body.instances) {
+      expect(row.capabilities).toEqual(owner.find((o: any) => o.instanceId === row.instanceId).capabilities);
+      expect(row.models).toBeDefined();
+      expect(row.readOnly).toBe(true);
+      for (const key of ["cli", "cliDefault", "cliCandidates", "install", "authentication", "claudeAccount", "managed"]) expect(row, key).not.toHaveProperty(key);
+      expect(row.snapshot.state).toBeDefined();
+      for (const key of ["account", "reason", "update", "warning", "version"]) expect(row.snapshot, key).not.toHaveProperty(key);
+    }
+    for (const [method, path] of [["PATCH", "/api/instances/claude"], ["POST", "/api/instances/claude/refresh-models"]] as const) {
+      expect((await call(path, { method, headers: h(), body: "{}" })).status, `${method} ${path}`).toBe(403);
+    }
   });
 
   it("projects client config consistently for REST, live events, and replay without stripping admin events", async () => {
