@@ -27,7 +27,7 @@ import { AboutDialog } from "./AboutDialog";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { ShortcutHint } from "./ShortcutHint";
 import { phoneSettingsAction, useSidebarPhoneStatus } from "./SidebarPhoneButton";
-import { useStore } from "@/state/store";
+import { api, useStore } from "@/state/store";
 import { useUpdaterState, type UpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -194,7 +194,17 @@ export function SidebarProfileMenu() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const triggerRef = useRef<HTMLSpanElement>(null);
 
-  const profile = state.config?.profile;
+  // A person signed in with their email is shown as themselves (About me),
+  // not as the server's own profile; everyone else keeps that profile.
+  const [person, setPerson] = useState<{ name?: string; email?: string } | null>(null);
+  useEffect(() => {
+    let active = true;
+    void api<{ name?: string; email?: string }>("/api/people/me")
+      .then((me) => { if (active) setPerson(me); })
+      .catch(() => { if (active) setPerson(null); });
+    return () => { active = false; };
+  }, []);
+  const profile = person ?? state.config?.profile;
   const name = profileLabel(profile);
 
   const items: SidebarMenuItem[] = [
