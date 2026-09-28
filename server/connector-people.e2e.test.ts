@@ -231,8 +231,15 @@ posixOnly("connected apps per person on a shared workspace", () => {
     await turnAs(ADA, bot, "Ada asks for her mail");
     expect(await relay(bot.id, bot.threadId)).toEqual({ session: adaSession });
 
+    // Local services (time keeping) read who the thread's work is for;
+    // a member never can.
+    const adaPerson = (await api("GET", `/api/threads/${bot.threadId}/person`, undefined, BOSS)).body.person;
+    expect(adaPerson).toMatchObject({ email: ADA });
+    expect((await api("GET", `/api/threads/${bot.threadId}/person`, undefined, ADA)).status).toBe(403);
+
     await turnAs(BOSS, bot, "Boss asks for his mail");
     expect(await relay(bot.id, bot.threadId)).toEqual({ session: OWNER_SESSION });
+    expect((await api("GET", `/api/threads/${bot.threadId}/person`)).body.person).toMatchObject({ email: BOSS });
 
     // Owner on this machine, no signed-in person: nobody's apps.
     const other = await api("POST", "/api/bots", { name: "Quiet Heron" }, BOSS);
@@ -240,6 +247,7 @@ posixOnly("connected apps per person on a shared workspace", () => {
     await turnAs(undefined, unnamed, "A local script asks");
     const refused = await relay(unnamed.id, unnamed.threadId);
     expect(refused.refusal).toMatch(/belong to a person/);
+    expect((await api("GET", `/api/threads/${unnamed.threadId}/person`)).body).toEqual({ person: null });
   }, 90_000);
 
   it("runs a routine with the apps of whoever made it", async () => {

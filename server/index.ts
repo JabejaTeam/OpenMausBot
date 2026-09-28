@@ -15581,6 +15581,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       });
     }
 
+    // Who a thread's work is for: the person of its latest turn, else of its
+    // current request (delegated threads lead back to whoever asked). For
+    // local services such as time keeping; admin scope by default.
+    m = path.match(/^\/api\/threads\/([\w-]+)\/person$/);
+    if (m && method === "GET") {
+      const threadId = m[1];
+      if (!store.botByThread(threadId) && !store.groupByThread(threadId)) {
+        return json(res, 404, { error: "no such conversation" });
+      }
+      const key = connectorThreadPerson(threadId);
+      const profile = readPersonProfile(key);
+      return json(res, 200, { person: key ? { key, ...(profile?.email ? { email: profile.email } : {}), ...(profile?.name ? { name: profile.name } : {}) } : null });
+    }
+
     // scrollback: the page before a message the client already holds
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages$/);
     if (m && method === "GET") {
