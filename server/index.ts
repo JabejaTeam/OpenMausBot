@@ -214,8 +214,6 @@ import {
   parseMcpServerMutation,
   parseMcpServersImport,
   parseStoredMcpServer,
-  ownMcpServers,
-  withOwnMcpValues,
 } from "./mcp-registry.ts";
 import { probeMcpServer } from "./mcp-probe.ts";
 import {
@@ -291,8 +289,8 @@ import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS
 import { CLOUD_IGNORED_KEYS, CLOUD_PAIRING_PATH, cloudHomeConfiguration, createCloudPairing, readSignedBody } from "./cloud-home.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
-import { isKindInstructionScope, kindInstructionsSystemPrompt, readKindInstructions, writeKindInstructions, KIND_INSTRUCTIONS_MAX_BYTES } from "./kind-instructions.ts";
-import { notePerson, personNames, personTurnPreamble, readPersonProfile, savePersonProfile, updatePersonProfile, PERSON_PROFILE_MAX_LINES } from "./person-profiles.ts";
+import { kindInstructionsSystemPrompt } from "./kind-instructions.ts";
+import { notePerson, personTurnPreamble, readPersonProfile, updatePersonProfile } from "./person-profiles.ts";
 import { isBotKind } from "../shared/wire.ts";
 import { personKeyFor, personKeyForEmail } from "./person-key.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
@@ -559,6 +557,7 @@ import {
 // loading the table after everything above leaves module start-up order as is.
 import { json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
 import { ROUTES, dispatchRoutes } from "./routes/table.ts";
+import { createForkPeopleRoutes } from "./routes/fork-people.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
@@ -13834,6 +13833,15 @@ ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: (
 // its file, so New bot cannot disagree with it. No organization: none.
 const orgInstallStatuses = () => orgLibrary?.installStatuses() ?? new Map();
 ROUTES.push(createBotPresetRoutes({ presets: presetStore, orgStatuses: orgInstallStatuses }));
+ROUTES.push(createForkPeopleRoutes({
+  personKey,
+  mcpServers: () => cfg.mcpServers,
+  persistMcpServers,
+  sessions,
+  pairingOffer,
+  conversationExists: (threadId) => Boolean(store.botByThread(threadId) || store.groupByThread(threadId)),
+  threadPerson: connectorThreadPerson,
+}));
 // The bot-memory panel's routes (MEMORY.md, memory/ topics, journal); the
 // store lookups — the 404 precheck and journal thread titles — stay explicit.
 ROUTES.push(createBotMemoryRoutes({
@@ -14140,25 +14148,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const requested: unknown = body?.scopes;
       const scopes = Array.isArray(requested) ? requested.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
       const opened = sessions.openPairing({ label: typeof body?.label === "string" ? body.label : undefined, scopes });
-      return json(res, 200, pairingOffer(opened, req, auth));
-    }
-    // A signed-in person pairs their own phone. The code carries their email
-    // and exactly their scopes, so the phone is them (private bots, profile,
-    // tokens) and ends with their place on the sign-in list. Client scope:
-    // a member may do this, but never for anyone else or with more rights.
-    if (method === "POST" && path === "/api/auth/pairing/mine") {
-      if (auth.kind !== "session" || !auth.session.email) {
-        return json(res, 400, { error: "Sign in with your email first; a phone paired from here works as you." });
-      }
-      if (!sessions.isLive(auth.session.id)) {
-        return json(res, 401, { error: "Your session ended. Sign in again before creating a pairing code." });
-      }
-      const opened = sessions.openPairing({
-        label: `${auth.session.email} phone`,
-        scopes: [...auth.session.scopes],
-        email: auth.session.email,
-        ...(auth.session.userId ? { userId: auth.session.userId } : {}),
-      });
       return json(res, 200, pairingOffer(opened, req, auth));
     }
     if (method === "GET" && path === "/api/auth/pairing") return json(res, 200, { pairings: sessions.openPairings(), publicUrl: publicUrl() });
@@ -16943,20 +16932,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }),
         ),
       });
-    }
-
-    // Who a thread's work is for: the person of its latest turn, else of its
-    // current request (delegated threads lead back to whoever asked). For
-    // local services such as time keeping; admin scope by default.
-    m = path.match(/^\/api\/threads\/([\w-]+)\/person$/);
-    if (m && method === "GET") {
-      const threadId = m[1];
-      if (!store.botByThread(threadId) && !store.groupByThread(threadId)) {
-        return json(res, 404, { error: "no such conversation" });
-      }
-      const key = connectorThreadPerson(threadId);
-      const profile = readPersonProfile(key);
-      return json(res, 200, { person: key ? { key, ...(profile?.email ? { email: profile.email } : {}), ...(profile?.name ? { name: profile.name } : {}) } : null });
     }
 
     // scrollback: the page before a message the client already holds
@@ -21309,82 +21284,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         providerInstancesChanging.delete(instanceId);
         providerConfigBusy = false;
       }
-    }
-
-    // ── workspace rules by kind of bot (admin) ──
-    if (method === "GET" && path === "/api/kind-instructions") {
-      return json(res, 200, { scopes: readKindInstructions(), maxBytes: KIND_INSTRUCTIONS_MAX_BYTES });
-    }
-    const kindScope = /^\/api\/kind-instructions\/([a-z]+)$/.exec(path);
-    if (method === "PUT" && kindScope) {
-      if (!isKindInstructionScope(kindScope[1])) return json(res, 404, { error: "No such role." });
-      const body = await readBody(req);
-      const text = body && typeof body === "object" && !Array.isArray(body) ? (body as { text?: unknown }).text : undefined;
-      if (typeof text !== "string") return json(res, 400, { error: 'Send { "text": "..." }.' });
-      try {
-        return json(res, 200, { scope: kindScope[1], record: writeKindInstructions(kindScope[1], text) });
-      } catch (error) {
-        return json(res, 400, { error: (error as Error).message });
-      }
-    }
-
-    // ── who sent what: display names for the people keys messages carry ──
-    if (method === "GET" && path === "/api/people/names") {
-      return json(res, 200, { names: personNames() });
-    }
-
-    // ── a person's own profile (Settings → About me) ──
-    // Any signed-in person, members included, reads and edits only their own.
-    if (path === "/api/people/me") {
-      const email = auth.kind === "session" ? auth.session.email : undefined;
-      if (!email || auth.kind !== "session") return json(res, 400, { error: "Sign in with your email address to keep a profile." });
-      const key = personKey(auth.session);
-      notePerson(key, email);
-      const view = () => {
-        const profile = readPersonProfile(key);
-        return { id: key, email: profile?.email ?? email, name: profile?.name ?? "", text: profile?.text ?? "", maxLines: PERSON_PROFILE_MAX_LINES };
-      };
-      if (method === "GET") return json(res, 200, view());
-      if (method === "PUT") {
-        const body = await readBody(req);
-        if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "Send { name?, text? }." });
-        const { name, text } = body as { name?: unknown; text?: unknown };
-        if ((name !== undefined && typeof name !== "string") || (text !== undefined && typeof text !== "string")) {
-          return json(res, 400, { error: "name and text must be strings." });
-        }
-        const saved = savePersonProfile(key, { name: name as string | undefined, text: text as string | undefined });
-        return saved.ok ? json(res, 200, view()) : json(res, 400, { error: saved.error });
-      }
-      return json(res, 405, { error: "Use GET or PUT." });
-    }
-
-    // ── a person's own values on self-service MCP servers ──
-    // Any signed-in person, members included: they see which self-service
-    // servers exist and which of their own values are set, never a value and
-    // never anyone else. The server file changes only in that person's entry.
-    if (path === "/api/mcp/mine" || path.startsWith("/api/mcp/mine/")) {
-      const email = auth.kind === "session" ? auth.session.email : undefined;
-      if (!email) return json(res, 400, { error: "Sign in with your email address to keep your own MCP values." });
-      if (method === "GET" && path === "/api/mcp/mine") {
-        return json(res, 200, { servers: ownMcpServers(cfg.mcpServers, email) });
-      }
-      const own = /^\/api\/mcp\/mine\/([a-z][a-z0-9_-]{0,31})$/.exec(path);
-      if (own && (method === "PUT" || method === "DELETE")) {
-        let values: Record<string, string> | null = null;
-        if (method === "PUT") {
-          const body = await readBody(req);
-          const raw = body && typeof body === "object" && !Array.isArray(body) ? (body as { values?: unknown }).values : undefined;
-          if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-            return json(res, 400, { error: 'Send { "values": { "<name>": "<value>" } }.' });
-          }
-          values = raw as Record<string, string>;
-        }
-        const next = withOwnMcpValues(own[1], cfg.mcpServers?.[own[1]], email, values);
-        if (!next.ok) return json(res, next.status, { error: next.error });
-        persistMcpServers({ ...cfg.mcpServers, [own[1]]: next.entry });
-        return json(res, 200, { servers: ownMcpServers(cfg.mcpServers, email) });
-      }
-      return json(res, 405, { error: "Use GET, PUT or DELETE." });
     }
 
     // ── custom MCP servers (a local command or a URL; secrets write-only) ──
