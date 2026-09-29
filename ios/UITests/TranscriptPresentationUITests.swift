@@ -3,6 +3,19 @@ import XCTest
 /// Bundled offline fleet only; no API client or paired user data.
 final class TranscriptPresentationUITests: XCTestCase {
     @MainActor
+    func testPastedNotesHideWrappersAndClaudeUpdateOffersManualRecovery() {
+        let app = launchPreview(detail: "full", update: true)
+        XCTAssertTrue(contains("The pasted notes stay visible.", in: app))
+        XCTAssertFalse(contains("<pasted-text", in: app))
+        XCTAssertFalse(contains("</pasted-text>", in: app))
+        XCTAssertTrue(app.buttons["Update Claude for me"].waitForExistence(timeout: 5))
+        app.buttons["I'll do it myself"].tap()
+        XCTAssertTrue(app.staticTexts["claude update"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["Copy command"].exists)
+        screenshot("Pasted notes and manual Claude update recovery", in: app)
+    }
+
+    @MainActor
     func testCompactionOpensItsSummaryWithoutShowingDigest() {
         let app = launchPreview(detail: "full", receipts: true)
         let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Context compacted")).firstMatch
@@ -65,7 +78,7 @@ final class TranscriptPresentationUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchPreview(detail: String, reasoning: Bool = false, focused: Bool = false, receipts: Bool = false) -> XCUIApplication {
+    private func launchPreview(detail: String, reasoning: Bool = false, focused: Bool = false, receipts: Bool = false, update: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = [
@@ -73,12 +86,17 @@ final class TranscriptPresentationUITests: XCTestCase {
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
             "-companion.prefs.islandIntro", "never",
             "-companion.prefs.activityDetail", detail,
+            // These tests open Pepper through its "Threads" row. The update
+            // fixture gives Pepper one thread, which only the comfortable
+            // density lists; the roster itself is RosterDensityUITests' job.
+            "-companion.prefs.rosterDensity", "comfortable",
             "-companion.onboarding.welcomeSeen", "YES",
             "-companion.onboarding.notificationsSeen", "YES"
         ]
         if reasoning { app.launchArguments.append("-chat-reasoning-preview") }
         if focused { app.launchArguments.append("-chat-focus-preview") }
         if receipts { app.launchArguments.append("-chat-compaction-preview") }
+        if update { app.launchArguments.append("-chat-update-preview") }
         app.launch()
         let threads = app.buttons["threads-toggle.preview-pepper"]
         XCTAssertTrue(threads.waitForExistence(timeout: 10))

@@ -25,6 +25,7 @@ import { FullAccessWarning } from "../FullAccessWarning";
 import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
 import { Switch } from "../SettingsPrimitives";
 import { ManagedTeamsSettings } from "./ManagedTeamsSettings";
+import { ProposalStatus } from "./ProposalStatus";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 import { useBotEditor } from "./BotEditorContext";
 
@@ -103,6 +104,7 @@ export function PermissionsSection({
                   ? `Make this bot the ${sectionName} Chief and hand the role over from ${currentChief.name}.`
                   : `Make this bot the primary contact for the ${sectionName} team.`}
         </div>
+        <ProposalStatus bot={bot} kind="chief" />
         {bot.chiefOfStaff && <ManagedTeamsSettings
           key={bot.id + JSON.stringify(bot.managedSections ?? [])}
           name={bot.name} ownTeam={bot.section?.trim() || ""}
@@ -110,6 +112,7 @@ export function PermissionsSection({
           allowed={bot.managedSections ?? []}
           onSave={managedSections => patch({ managedSections, acknowledgePeerScope: true })}
         />}
+        {bot.chiefOfStaff && <ProposalStatus bot={bot} kind="owner" />}
       </div>
 
       {KIND_SWITCHES.map(({ kind, Icon, title, body }) => (
@@ -139,6 +142,7 @@ export function PermissionsSection({
               ? "This bot will stop and ask before it reaches out to another bot."
               : "Let this bot talk to teammates on its own, without a confirmation step."}
           </div>
+          <ProposalStatus bot={bot} kind="owner" />
         </div>
         <Switch
           checked={Boolean(bot.approvePeerComms)}
@@ -155,6 +159,7 @@ export function PermissionsSection({
         <div className="mt-0.5 text-[13px] text-ink-secondary">
           {draft ? "Default for the new bot's threads, routines and delegated work." : "Default for new threads, routines and delegated work. When enabling Full access, you can also apply it to every existing thread."}
         </div>
+        <ProposalStatus bot={bot} kind="owner" />
         <div className="mt-3">
           <ApprovalModeSelector
             approvalMode={bot.approvalMode}

@@ -17,6 +17,8 @@ import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
+import type { ModelRequestCardData } from "./model-request.ts";
+import type { TighteningRequestCardData } from "./tightening-request.ts";
 import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { RoutineRunCardData } from "./routine-run.ts";
@@ -48,7 +50,7 @@ export interface ModelSelection {
   variant?: string;
 }
 
-/** Which cloud computer backs computer: "cloud"; absent means Box. */
+/** Which cloud computer backs computer: "cloud"; absent means Boat. */
 export type CloudBackend = "box" | "vps";
 
 /** A place a bot can act. cloud covers both cloud backends — from the
@@ -257,13 +259,19 @@ export interface WireBot {
   avatarUrl: string | null;
   /** Mascot, or the crop applied to avatarUrl. */
   avatarCrop?: BotAvatarCrop;
+  /** Zoom of a custom image. Absent means 1, the unzoomed cover crop. */
+  avatarZoom?: number;
+  /** Horizontal point of the image kept in the crop, 0–1. Absent means center. */
+  avatarFocusX?: number;
+  /** Vertical point of the image kept in the crop, 0–1. Absent means center. */
+  avatarFocusY?: number;
   /** True when any task has unread output. */
   unread: boolean;
   /** Default for new tasks; navigating tasks never changes this value. */
   modelSelection: ModelSelection;
   /** where the bot works ("Works on"). Unset = auto. */
   computer?: Surface | "off";
-  /** Which cloud computer backs computer: "cloud"; absent means Box. */
+  /** Which cloud computer backs computer: "cloud"; absent means Boat. */
   cloudBackend?: CloudBackend;
   /** Auto mode may prepare/start this bot's managed VPS container. */
   autoStartVps?: boolean;
@@ -279,6 +287,9 @@ export interface WireBot {
   speakReplies?: boolean;
   /** This bot's own voice id, so a room of bots doesn't sound like one person. */
   voice?: string;
+  /** Whether this bot may send voice notes. Absent/true = allowed; false
+   * hides the tool and refuses the route even with a voice configured. */
+  voiceNotes?: boolean;
   /** Queue direct-chat messages behind outstanding delegated work. */
   parkDirectMessages?: boolean;
   /** true after an edit/branch-switch rewound the visible conversation. */
@@ -308,6 +319,11 @@ export interface WireBot {
   connectorTools?: Record<string, ConnectorToolGrant>;
   /** Whether this bot gets the app's built-in browser. */
   browser?: boolean;
+  /** Memory upkeep: the harness captures facts from finished chats into
+   * MEMORY.md and topic files, adds facts about the person to About me and
+   * tidies nightly. On unless explicitly false; every change is journaled
+   * and can be undone. */
+  memoryUpkeep?: boolean;
   /** Which of the app-wide MCP servers this bot mounts, by name. */
   mcpServers?: string[];
   /** Id of a named browser profile; absent = the bot's own private session. */
@@ -372,9 +388,12 @@ export interface WireMessage {
     by: "person" | "harness";
   };
   /** Durable provider output stored by the harness; renderers receive only
-   * the allowlisted /api/attachments URL. */
+   * the allowlisted /api/attachments URL. `file` entries are documents, audio
+   * and video a bot attached with attach_file; they are opened through the
+   * message-scoped file route, never by path. */
   attachments?: Array<
     | { kind: "image"; path: string; mime: string }
+    | { kind: "file"; path: string; mime: string; name: string }
     | { kind: "audio"; path: string; mime: string; durationMs?: number }
   >;
   card?: OptionCardData;
@@ -387,6 +406,9 @@ export interface WireMessage {
   /** activity messages: tool name + outcome. */
   tool?: {
     name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string;
+    /** error rows: the installed Claude Code is too old for the model, and
+     * the UI can offer to update it in place. */
+    claudeUpdate?: boolean;
     /** Provider item identity, scoped to the owning turn. */
     itemId?: string;
     /** Whether the harness captured the full redacted result. Private
@@ -395,6 +417,11 @@ export interface WireMessage {
   };
   /** user messages sent INTO a running turn (capabilities.queueing). */
   steered?: boolean;
+  /** user messages a peer bot handed to this thread's RUNNING turn through
+   * the non-interrupting aside lane: peer context folded in mid-turn, never
+   * a new request. The text is stored enveloped exactly as injected, so any
+   * later reader sees the sender and the not-steering framing. */
+  aside?: boolean;
   /** A user-role message that arrived through the server's HTTP API. */
   via?: "api";
   /** Which person sent this user message, when the workspace has more than
@@ -469,6 +496,10 @@ export interface OptionCardData {
   tool?: string;
   /** why this card is waiting: guard, mode, sandbox or delivery error. */
   held?: string;
+  /** Terminal: this proposal went stale while open (revision mismatch or
+   * a superseding request). Nothing can answer it; a fresh proposal is
+   * needed, and clients must not offer its options. */
+  expired?: boolean;
   /** Catalog key for held when it is one of the fixed notes. */
   heldCode?: string;
   /** the narrow grant "always allow" remembers for a harness-native card. */
@@ -483,6 +514,10 @@ export interface OptionCardData {
   routineRequest?: RoutineRequestCardData;
   /** A durable profile-change proposal (propose_profile). */
   profileRequest?: ProfileRequestCardData;
+  /** A durable default-model proposal (propose_model). */
+  modelRequest?: ModelRequestCardData;
+  /** A durable authority-tightening proposal (propose_tightening). */
+  tighteningRequest?: TighteningRequestCardData;
   teamSetupRequest?: TeamSetupRequest;
   /** A durable learned-skill proposal. */
   skillRequest?: SkillRequestCardData;
@@ -516,6 +551,9 @@ export interface SecretRequestCardData {
   phoneOperationId?: string;
   provided?: boolean;
   dismissed?: boolean;
+  /** A newer request for the same credential replaced this card; it no
+   * longer offers entry and cannot be provided or dismissed. */
+  superseded?: boolean;
   resumed?: boolean;
   error?: string;
 }

@@ -5,6 +5,7 @@ import type {
   RuntimeEvent,
   RuntimeEventListener,
   SendTurnInput,
+  TextGenerationOptions,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQuestions, questionChoices } from "../../shared/ask-question.ts";
@@ -43,6 +44,7 @@ interface Completion {
 }
 
 interface CompletionJson {
+  model?: string;
   choices?: Array<{
     index?: number;
     message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; reasoning_details?: unknown; tool_calls?: unknown; function_call?: unknown };
@@ -51,7 +53,7 @@ interface CompletionJson {
   }>;
   error?: unknown;
   base_resp?: { status_code?: unknown; status_msg?: unknown };
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; cost?: number };
 }
 
 /** The message of a JSON error body a provider returned with HTTP 200.
@@ -133,6 +135,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     turnId: string;
     done: Promise<void>;
     approval: ReturnType<typeof createChatToolApproval>;
+    /** Mid-turn user input parked by adapter.steer. Spliced into the
+     * request array at the top of the next loop round — the one place the
+     * array is between rounds, never mid-tool-batch — so the model reads
+     * it before its next completion. Kept out of messages[] until then:
+     * a parked item must never look like delivered input. */
+    asides: string[];
   }>();
 
   const emit = (event: RuntimeEvent) => {
@@ -153,6 +161,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     signal?: AbortSignal,
     onDelta?: (delta: string, kind: "assistant_text" | "reasoning_text") => void,
     tools: ChatToolDefinition[] = [],
+    onUsage?: TextGenerationOptions["onUsage"],
   ): Promise<Completion> => {
     // Idle timer that is renewed on every received chunk during streaming
     const timeoutController = new AbortController();
@@ -190,6 +199,17 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
 
       if (!stream || response.headers.get("content-type")?.includes("application/json")) {
         const json = await response.json() as CompletionJson;
+        if (onUsage) {
+          activeSignal.throwIfAborted();
+          const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+          onUsage({
+            model: typeof json.model === "string" && json.model.trim() ? json.model : model,
+            input: count(json.usage?.prompt_tokens),
+            output: count(json.usage?.completion_tokens),
+            cachedInput: count(json.usage?.prompt_tokens_details?.cached_tokens),
+            costUsd: count(json.usage?.cost),
+          });
+        }
         const bodyError = providerError(json);
         if (bodyError) throw new ChatProtocolError(`provider returned a completion error: ${bodyError.slice(0, 200)}`);
         const message = json.choices?.[0]?.message;
@@ -395,7 +415,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     });
     let resolveDone!: () => void;
     const done = new Promise<void>((resolve) => { resolveDone = resolve; });
-    active.set(turn.threadId, { abort, turnId, done, approval });
+    const turnEntry = { abort, turnId, done, approval, asides: [] as string[] };
+    active.set(turn.threadId, turnEntry);
     emit({ ...base(turn.threadId, turnId), type: "turn.started" });
     emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
 
@@ -422,6 +443,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         }
         for (let round = 0; round < 16; round++) {
           abort.signal.throwIfAborted();
+          // Drain parked mid-turn input here, before the next completion
+          // request: the previous round's tool results are complete, so a
+          // user message lands on a consistent array (never inside a tool
+          // batch) and the provider sees it as the newest input.
+          const parked = turnEntry.asides.splice(0);
+          if (parked.length) messages.push({ role: "user", content: parked.join("\n\n") });
           native("out", options.nativeLog.outgoing(turn, messages, model));
           let attempt = 0;
           let completion: Completion;
@@ -636,9 +663,16 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       : { state: "unavailable", reason: options.unavailableReason },
     adapter: {
       provider: options.driverKind,
-      capabilities: { ...(options.computerUse ? { computerMcp: options.tools !== false, cloudComputerMcp: options.tools !== false, localComputerMcp: options.tools !== false,
+      capabilities: { ...(options.computerUse ? { computerMcp: options.tools !== false,
+        // Same gate as cloudComputerMcp: with tools off the runtime cannot
+        // mount the leased Boat descriptor either. The fleet invariant test
+        // pins usesCloudComputer === (remoteAgent || cloudComputerMcp).
+        usesCloudComputer: options.tools !== false, cloudComputerMcp: options.tools !== false, localComputerMcp: options.tools !== false,
         browserMcp: options.tools !== false, nativeImageInput: true, images: true } : {}),
-        sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false },
+        sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false,
+        // The runtime owns the whole tool loop, so it can always take a
+        // user message mid-turn: park it, deliver before the next completion.
+        queueing: true },
       sendTurn,
       interruptTurn: async (threadId, turnId) => {
         const turn = active.get(threadId);
@@ -648,6 +682,18 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       },
       respondToRequest: async (threadId, requestId, decision) =>
         active.get(threadId)?.approval.answer(requestId, decision.behavior, decision.message) ?? "unavailable",
+      steer: async (threadId, text) => {
+        // This engine has no external session to respect — parking the
+        // words in the live turn's entry IS delivery into the loop, so a
+        // successful park is "steered" and a missing turn is the only
+        // refusal. The words ride the array at the next round boundary;
+        // if the turn settles first, the harness's transcript record
+        // keeps them for the next turn (they are never re-sent here).
+        const running = active.get(threadId);
+        if (!running) return "refused";
+        running.asides.push(text);
+        return "steered";
+      },
       hasSession: (threadId) => active.has(threadId),
       stopAll: async () => {
         const turns = [...active.values()];
@@ -659,9 +705,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         return () => listeners.delete(listener);
       },
     },
-    generateText: async (prompt, { signal } = {}) => {
+    generateText: async (prompt, { signal, onUsage } = {}) => {
       const model = options.generateModel?.() ?? options.models().default;
-      const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal);
+      const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal, undefined, [], onUsage);
       if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
       return text.trim() ? text : reasoning;
     },

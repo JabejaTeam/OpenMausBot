@@ -19,6 +19,7 @@ import {
   readSafeLogTail,
 } from "./diagnostics.mjs";
 import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
+import { evictStartupCacheOnce } from "./startup-cache-eviction.mjs";
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
 import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
@@ -78,6 +79,8 @@ import { buildApplicationMenu } from "./menu.mjs";
 import { createComputerSharing, validateSharedFolders } from "./computer-sharing.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDesktopStore } from "./managed-desktop.mjs";
+import { createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
+import { cloudHomeConnectUrl, withCloudHome } from "./cloud-home.mjs";
 import { createOrgLibrary } from "./org-library.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
@@ -275,6 +278,7 @@ let secureCredentials = {};
 let secureCredentialState = null;
 let desktopDataDirLease = null;
 let managedDesktop = null;
+let cloudAccount = null;
 // The organization library channel: catalog and release bytes for the local runtime only.
 let orgLibrary = null;
 let companyBackupController = null;
@@ -971,6 +975,26 @@ function syncPhoneSecretKey(proc) {
   } catch (error) {
     slog(`phone credential key sync failed: ${error?.message ?? error}`);
   }
+}
+
+function ensureCloudAccount() {
+  if (cloudAccount) return cloudAccount;
+  if (!app.isPackaged || desktopRemoteAccess) throw new Error("OMB Cloud sign-in requires the local desktop app.");
+  cloudAccount = createCloudAccountClient({
+    store: createCloudAccountStore({ file: path.join(app.getPath("userData"), "cloud-account.bin"), encryption: {
+      available: async () => (await safeStorage.isAsyncEncryptionAvailable()) &&
+        (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text"),
+      encrypt: value => safeStorage.encryptStringAsync(value), decrypt: value => safeStorage.decryptStringAsync(value),
+    } }),
+    platform: process.platform, deviceName: os.hostname().slice(0, 100) || "My computer", appVersion: app.getVersion(),
+    openBrowser: url => shell.openExternal(url),
+    onState: state => {
+      rememberCloudHome(state);
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.mainFrame.url.startsWith(`${rendererOrigin()}/`) &&
+        !activeEnvironment(environmentsState) && !desktopRemoteAccess) mainWindow.webContents.send("cloud-account:state-changed", state);
+    },
+  });
+  return cloudAccount;
 }
 
 function ensureManagedDesktop() {
@@ -1887,6 +1911,47 @@ async function connectHostedWorkspace(input, name) {
   return true;
 }
 
+/** A verified Cloud session that reports the person's machine lists it under
+ * Servers. It never switches to it: this computer stays active until they
+ * choose "Connect to my Cloud". Signed out, nothing here runs. */
+function rememberCloudHome(state) {
+  try {
+    const next = withCloudHome(environmentsState, state?.status === "connected" ? state.machine : null, () => randomUUID());
+    if (next !== environmentsState) persistEnvironments(next);
+  } catch (error) {
+    slog(`cloud home: could not list the Cloud machine under Servers (${error?.message ?? error})`);
+  }
+}
+
+/** The one action for Cloud Pro: open the person's machine in this window.
+ * Already signed in there, it simply switches. Otherwise the Admin opens a
+ * single-use pairing window on the machine, and the machine's pairing page
+ * signs this app in (the same link flow as Connect to a server). The person
+ * chose this in Settings, so there is no second confirmation. */
+async function connectCloudHome() {
+  const client = ensureCloudAccount();
+  const target = client.homeTarget();
+  if (!target) throw new Error("Your Cloud is not ready to connect yet.");
+  const grant = (await cloudHomeSignedIn(target.origin)) ? null : await client.pairHome();
+  let next = withCloudHome(environmentsState, { status: "ready", origin: target.origin }, () => randomUUID());
+  const entry = next.environments.find((candidate) => candidate.origin === target.origin);
+  if (!entry) throw new Error("Your Cloud could not be added to Servers.");
+  next = withActive(next, entry.id);
+  persistEnvironments(next);
+  navigateMainWindow(cloudHomeConnectUrl({ origin: target.origin, grant }, Date.now()));
+  return client.state();
+}
+
+/** Whether this app's cookie already signs it in to that server. */
+async function cloudHomeSignedIn(origin) {
+  try {
+    const response = await session.defaultSession.fetch(`${origin}/api/auth/session`, { credentials: "include", signal: AbortSignal.timeout(5_000) });
+    return response.ok && (await response.json())?.kind === "session";
+  } catch {
+    return false;
+  }
+}
+
 async function forgetEnvironment(id) {
   const env = environmentsState.environments.find((e) => e.id === id);
   if (!env) return;
@@ -2370,7 +2435,7 @@ ipcMain.handle("desktop:open-external", localOnly("desktop:open-external", async
   return true;
 }));
 
-// The Box VNC viewer must be a top-level page for its token exchange. A
+// The Boat VNC viewer must be a top-level page for its token exchange. A
 // sandboxed modal BrowserWindow satisfies that requirement while keeping the
 // live desktop inside OpenMausBot instead of sending the person to a browser.
 ipcMain.handle("desktop-viewer:open", localOnly("desktop-viewer:open", (event, rawUrl, title, contextId) => {
@@ -2574,6 +2639,14 @@ const workspaceOnly = (handler) => (event, ...args) => {
   return handler(event, ...args);
 };
 const localWorkspaceOnly = (channel, handler) => localOnly(channel, workspaceOnly(handler));
+// Personal Cloud authority stays in main. No renderer-supplied address, token,
+// paid flag or callback can choose an account or activate Pro.
+for (const method of ["state", "begin", "reopen", "cancel", "refresh", "signOut", "openDashboard"]) {
+  ipcMain.handle(`cloud-account:${method}`, localWorkspaceOnly(`cloud-account:${method}`, () => ensureCloudAccount()[method]()));
+}
+// The machine and its code come from the verified session in main, never
+// from the renderer: this handler takes no arguments.
+ipcMain.handle("cloud-account:connectHome", localWorkspaceOnly("cloud-account:connectHome", () => connectCloudHome()));
 ipcMain.handle("organization:settings-opened", localWorkspaceOnly("organization:settings-opened", () => organizationEntry.settingsOpened()));
 ipcMain.handle("organization:state", localWorkspaceOnly("organization:state", () => ensureManagedDesktop().state()));
 ipcMain.handle("organization:begin", localWorkspaceOnly("organization:begin", (_event, input) => ensureManagedDesktop().begin(input)));
@@ -2668,6 +2741,22 @@ ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event,
   if (confirmation.response !== 0) return null;
   savedWorkspace(id);
   return sharingController().save(env, { folders, terminal: input?.terminal === true, computer: input?.computer === true }, info);
+}));
+
+// window.confirm() has no parent window, so window managers (notably tiling
+// ones on Linux) can't center it — it lands at a default screen origin
+// instead of over the app. Route renderer confirms through the main process
+// so dialog.showMessageBox can anchor it to mainWindow.
+ipcMain.handle("dialog:confirm", localWorkspaceOnly("dialog:confirm", async (_event, message) => {
+  if (typeof message !== "string" || !message.trim() || message.length > 4096 || !mainWindow || mainWindow.isDestroyed()) return false;
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: "warning",
+    message,
+    buttons: ["OK", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+  });
+  return response === 0;
 }));
 
 ipcMain.handle("environments:state", localWorkspaceOnly("environments:state", (event) => ({
@@ -2802,6 +2891,17 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
+  // Cached-before-the-fix attachment responses outlive `no-store`: entries
+  // stored under the old one-year immutable policy can replay to a second
+  // identity in this profile without the visibility gate re-running. The
+  // first launch of each new version empties the HTTP cache, before any
+  // window could serve one of those entries.
+  await evictStartupCacheOnce({
+    userData: app.getPath("userData"),
+    currentVersion: app.getVersion(),
+    clearCache: () => session.defaultSession.clearCache(),
+    log: slog,
+  });
   if (process.platform === "win32") {
     try {
       desktopTray = createSystemTray({
@@ -2962,6 +3062,8 @@ app.whenReady().then(async () => {
   }
   if (desktopShutdownStarted) return;
   if (app.isPackaged && !desktopRemoteAccess) void ensureManagedDesktop().start().then(() => companyBackupSchedule.start()).catch(() => {});
+  // Fresh local use never makes a Cloud request; start only restores an existing grant.
+  if (app.isPackaged && !desktopRemoteAccess) void ensureCloudAccount().start().catch(() => {});
   // The companion the user left on comes back without anyone finding the
   // toggle again — one attempt, after the harness port is settled, with the
   // exact options the IPC handler uses. A failure surfaces in companionState
@@ -3063,6 +3165,7 @@ app.on("before-quit", (e) => {
   companyBackupSchedule?.close();
   orgLibrary?.close();
   managedDesktop?.close();
+  cloudAccount?.close();
   companyBackupController?.abort();
   computerSharing?.close();
   if (cuaCleanedUp) return;

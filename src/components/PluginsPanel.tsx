@@ -10,6 +10,7 @@ import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { readCachedInventory, writeCachedInventory } from "@/lib/connected-apps-cache";
 import { managedConnectorUnavailableReason } from "../../shared/connector-availability";
+import { isConnectorToolGrantShape } from "@/lib/connector-grants";
 import { McpServersPanel } from "./McpServersPanel";
 import { MyMcpTokensSection } from "./MyMcpTokensSection";
 
@@ -105,8 +106,48 @@ export function botsMissingConnectedApps(bots: Bot[], instances: InstanceInfo[])
       ?.capabilities?.composioMcp === true);
 }
 
+/** Bots whose connector tool grants limit this service below every tool —
+ * a partial list, no entry at all inside an explicit record, or a grant
+ * shape this build cannot read. Legacy bots (no grants record) have every
+ * tool and never appear. Engines that cannot mount the tools and hidden
+ * bots are left out: their editors are dead ends from here. */
+export function botsWithLimitedServiceTools(bots: Bot[], instances: InstanceInfo[], slug: string): Bot[] {
+  return bots.filter((bot) => {
+    if (bot.hidden || bot.composio === false) return false;
+    if (!instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)
+      ?.capabilities?.composioMcp) return false;
+    const record: unknown = bot.connectorTools;
+    if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+    const grant = (record as Record<string, unknown>)[slug];
+    if (grant === undefined) return true;
+    return !isConnectorToolGrantShape(grant) || grant.tools !== "*";
+  });
+}
+
 export function hasUsableConnectedApps(configured: boolean, phase: ConnectorInventoryPhase, stale: boolean, status: Record<string, ConnectorStatus>): boolean {
   return configured && phase === "ready" && !stale && Object.values(status).some((service) => service.connected);
+}
+
+/** What the host says about why connected apps are off (see
+ * `connectorSetup` in server/composio.ts). Absent from older hosts. */
+export type ConnectorSetup = "ready" | "needs-setup" | "service-unavailable";
+
+/** The one notice above the marketplace when connected apps are off. A fresh
+ * install that never had a connection service gets a calm "here is what to
+ * do"; only a real outage of the managed service, or an older host that does
+ * not say which it is, gets the warning. Two notices about the same fact is
+ * one too many, so the stale banner wins when it is showing. */
+export function connectorSetupNotice(state: {
+  configured: boolean;
+  stale: boolean;
+  setup: ConnectorSetup | undefined;
+  remoteClient: boolean;
+}): { key: LocaleKey; tone: "info" | "warning" } | null {
+  if (state.configured || state.stale) return null;
+  if (state.setup === "needs-setup") {
+    return { key: state.remoteClient ? "connectors.setupNeededRemote" : "connectors.setupNeeded", tone: "info" };
+  }
+  return { key: "connectors.notConfigured", tone: "warning" };
 }
 
 export function requiresAccountAlias(message: string) {
@@ -237,6 +278,8 @@ export interface CatalogPagination {
   items: number;
   totalItems?: number;
   stalled: boolean;
+  /** Server-side stop reason, present only when the walk stalled (#1838). */
+  reason?: string;
 }
 
 export function PluginsPanel() {
@@ -249,6 +292,7 @@ export function PluginsPanel() {
   const [pagination, setPagination] = useState<CatalogPagination | null>(null);
   const [configured, setConfigured] = useState(false);
   const [mode, setMode] = useState<"managed" | "self-hosted" | "unavailable">("unavailable");
+  const [setup, setSetup] = useState<ConnectorSetup | undefined>(undefined);
   // Paint what we last knew before any request goes out: the module cache if
   // this window already fetched, otherwise the inventory saved on disk. An
   // empty panel is never the first thing a connected user sees.
@@ -382,6 +426,7 @@ export function PluginsPanel() {
         setPagination(r.pagination ?? null);
         setConfigured(Boolean(r.configured));
         setMode(r.mode ?? "unavailable");
+        setSetup(r.setup);
       })
       .catch((e) => {
         if (!alive) return;
@@ -526,6 +571,7 @@ export function PluginsPanel() {
   const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
   const close = () => dispatch({ type: "togglePlugins", open: false });
   // Only worth saying once an app is actually connected and reachable.
+  const setupNotice = connectorSetupNotice({ configured, stale, setup, remoteClient });
   const botsWithoutApps = hasUsableConnectedApps(configured, inventoryPhase, stale, status)
     ? botsMissingConnectedApps(state.bots, state.instances)
     : [];
@@ -640,17 +686,24 @@ export function PluginsPanel() {
           </label>
         </div>
 
-        {/* Two notices about the same fact is one too many: the stale banner
-            above already explains this launch, and "configure your own
-            connection service" is advice for someone who never set one up. */}
-        {!configured && !stale && (
-          <div className="mx-6 mb-1 rounded-xl bg-warning/10 px-4 py-3 text-[13px] text-warning sm:mx-8">
-            {t("connectors.notConfigured")}{" "}
+        {/* Not set up yet is not an outage: see connectorSetupNotice. */}
+        {setupNotice && (
+          <div
+            className={cn(
+              "mx-6 mb-1 rounded-xl px-4 py-3 text-[13px] sm:mx-8",
+              setupNotice.tone === "warning" ? "bg-warning/10 text-warning" : "bg-inset text-ink-secondary",
+            )}
+          >
+            {t(setupNotice.key)}{" "}
             <button
-              className={cn("font-medium underline underline-offset-2", remoteClient && "hidden")}
+              className={cn(
+                "font-medium underline underline-offset-2",
+                setupNotice.tone === "info" && "text-ink",
+                remoteClient && "hidden",
+              )}
               onClick={() => {
                 close();
-                dispatch({ type: "toggleAppSettings", open: true });
+                dispatch({ type: "toggleAppSettings", open: true, section: "connections" });
               }}
             >
               {t("connectors.openSettings")}
@@ -714,6 +767,9 @@ export function PluginsPanel() {
                         total: pagination.totalItems.toLocaleString(),
                       })
                       : t("connectors.marketplace.partialStalled")}
+                    {pagination.reason
+                      ? ` — ${t("connectors.marketplace.partialReason", { reason: pagination.reason })}`
+                      : null}
                   </span>
                 )}
               </div>
@@ -830,6 +886,32 @@ export function PluginsPanel() {
                       })}
                     </div>
                   )}
+                  {(serviceStatus?.connected || included) && (() => {
+                    const limited = botsWithLimitedServiceTools(state.bots, state.instances, card.slug);
+                    if (!limited.length) return null;
+                    const names = limited.slice(0, 4).map((candidate, index) => (
+                      <span key={candidate.id}>
+                        {index > 0 && ", "}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            close();
+                            dispatch({ type: "toggleSettings", open: true, botId: candidate.id, section: "access" });
+                          }}
+                          className="font-medium text-ink underline underline-offset-2 hover:text-accent-text"
+                        >
+                          {candidate.name}
+                        </button>
+                      </span>
+                    ));
+                    return (
+                      <div className="ml-14 mt-2 text-[11px] leading-relaxed text-ink-secondary">
+                        <span>{t("connectors.grants.limited", { count: limited.length })}</span>{" "}
+                        {names}
+                        {limited.length > 4 && <span>{t("connectors.grants.more", { count: limited.length - 4 })}</span>}
+                      </div>
+                    );
+                  })()}
                   {addingAccount && (
                     <form
                       className="ml-14 mt-3 flex items-center gap-2"

@@ -20,7 +20,7 @@ import type { Destination } from "./surface.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
-import { botAvatarProfile } from "../shared/bot-avatar.ts";
+import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode, lowerApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
 
 /** A bot never hands a bot it creates an MCP server it lacks itself.
@@ -267,9 +267,10 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
     // transcript's secret-redaction boundary.
     if (card.profileRequest) {
       const scrubChanges = (changes: ProfileRequestChanges): ProfileRequestChanges => {
-        const out: ProfileRequestChanges = {};
+        const out = { ...changes };
         for (const [key, value] of Object.entries(changes)) {
-          out[key as keyof ProfileRequestChanges] = redactSecretsInText(value);
+          // Booleans carry no text to scrub; only string fields pass through redaction.
+          if (typeof value === "string") (out as Record<string, string | boolean>)[key] = redactSecretsInText(value);
         }
         return out;
       };
@@ -391,6 +392,8 @@ export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
   };
   /** Receipt committed with a confirmed profile, for retrying card settlement. */
   lastProfileRequestId?: string;
+  /** Receipt committed with a confirmed authority tightening, for retrying card settlement. */
+  lastTighteningRequestId?: string;
   /** Receipt committed with a reviewed team batch; prevents replay after a lost response. */
   lastTeamSetupReceipt?: { requestId: string; result: TeamSetupResult };
   /** Organization library only: each part's release and written hashes
@@ -403,7 +406,7 @@ export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
  * WireTask[], avatarUrl is coerced to always-present). The exactness
  * assertion fails to compile when either side drifts, so a new server
  * field forces a decision — wire-visible or private here. */
-export type BotWirePrivateKeys = "resumeCursors" | "tasks" | "avatarUrl" | "approvalGrant" | "lastProfileRequestId" | "lastTeamSetupReceipt" | "packageBase";
+export type BotWirePrivateKeys = "resumeCursors" | "tasks" | "avatarUrl" | "approvalGrant" | "lastProfileRequestId" | "lastTighteningRequestId" | "lastTeamSetupReceipt" | "packageBase";
 export type BotWireProjection = Pick<BotRecord, Exclude<keyof BotRecord, BotWirePrivateKeys>>;
 export type BotWireProjectionIsExact = AssertExact<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection> & AssertSameKeys<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection>;
 export const botWireProjectionIsExact: BotWireProjectionIsExact = true;
@@ -707,6 +710,27 @@ export class Store {
       if (b.avatarCrop !== undefined && avatar.avatarCrop !== b.avatarCrop) {
         delete b.avatarCrop;
         botsMigrated = true;
+      }
+      if (b.avatarZoom !== undefined) {
+        const zoom = clampAvatarZoom(b.avatarZoom);
+        if (zoom === AVATAR_ZOOM_MIN) {
+          delete b.avatarZoom;
+          botsMigrated = true;
+        } else if (b.avatarZoom !== zoom) {
+          b.avatarZoom = zoom;
+          botsMigrated = true;
+        }
+      }
+      for (const key of ["avatarFocusX", "avatarFocusY"] as const) {
+        if (b[key] === undefined) continue;
+        const focus = clampAvatarFocus(b[key]);
+        if (focus === AVATAR_FOCUS_CENTER) {
+          delete b[key];
+          botsMigrated = true;
+        } else if (b[key] !== focus) {
+          b[key] = focus;
+          botsMigrated = true;
+        }
       }
     }
     for (const b of this.bots) {
@@ -1671,7 +1695,7 @@ export class Store {
     profile: Partial<
       Pick<
         BotRecord,
-        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section" | "visibility" | "kind"
+        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section" | "cwd" | "visibility" | "kind"
       >
     > = {},
     opts: {
@@ -1712,6 +1736,7 @@ export class Store {
     if (approvalMode !== "ask") Object.assign(bot, { approvalMode, autoApprove: false });
     if (opts.creatorMcpServers) bot.mcpServers = [...opts.creatorMcpServers];
     if (section) bot.section = section;
+    if (profile.cwd) bot.cwd = profile.cwd;
     bot.tasks = [{
       threadId: bot.threadId,
       title: UNTITLED_THREAD,
@@ -1778,6 +1803,9 @@ export class Store {
             modelSelection: structuredClone(modelSelection), approvalMode: this.newBotApproval(approvalModeFor(chief)), autoApprove: false,
             unread: false, activity: "idle", busy: false }],
         };
+        // "" is the private-workspace spelling on proposal; the record
+        // stays clean with the field absent, exactly like the PATCH path.
+        if (!next.cwd) delete next.cwd;
         nextBots.unshift(next);
       } else {
         if (at < 0) throw new Error("A setup target no longer exists");
@@ -1819,6 +1847,28 @@ export class Store {
     }
     this.emit({ type: "bot", botId: chief.id });
     return result;
+  }
+
+  /** One reviewed default-model change (propose_model): task stamping is
+   * identical to applyTeamSetup's update branch — saved per-thread
+   * selections are never rewritten, and a thread with no selection of its
+   * own is pinned to the previous default so it does not silently follow
+   * the new one. */
+  applyModelDefault(id: string, modelSelection: ModelSelection): BotRecord | null {
+    const previous = this.bot(id);
+    if (!previous) return null;
+    const next: BotRecord = { ...previous, modelSelection: structuredClone(modelSelection) };
+    next.tasks = previous.tasks?.map((task) => ({
+      ...task,
+      modelSelection: structuredClone(task.modelSelection ?? previous.modelSelection),
+      approvalMode: approvalModeFor(this.projectBotForTask(previous.id, task.threadId)!),
+      autoApprove: task.autoApprove ?? previous.autoApprove,
+      alwaysAllow: structuredClone(task.alwaysAllow ?? previous.alwaysAllow ?? []),
+    }));
+    this.saveBots(this.bots.map((candidate) => candidate.id === id ? next : candidate));
+    this.bots = this.bots.map((candidate) => candidate.id === id ? next : candidate);
+    this.emit({ type: "bot", botId: id });
+    return next;
   }
 
   deleteBot(id: string, setupRequest?: TeamSetupRequest): boolean {

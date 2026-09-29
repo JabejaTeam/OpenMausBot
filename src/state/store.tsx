@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { BotKind, BotVisibility, ResolvedSender, CloudBackend, EffortLevel, InstalledPackageMetadata, ServerFrame, GroupThreadUsage, SteerQueueReason } from "../../shared/wire";
+import type { BotKind, BotVisibility, ResolvedSender, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, ServerFrame, GroupThreadUsage, SteerQueueReason } from "../../shared/wire";
 import type { TurnDigest } from "../../shared/digest";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
 import type { MausColor, MausMotion } from "@/lib/mascot";
@@ -22,6 +22,7 @@ import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
 import type { QuestionRequestCardData } from "../../shared/ask-question";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
+import type { ModelRequestCardData } from "../../shared/model-request";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { RoutineRunCardData } from "../../shared/routine-run";
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
@@ -88,6 +89,10 @@ export interface OptionCardData {
   tool?: string;
   /** why auto mode stopped to ask anyway */
   held?: string;
+  /** Terminal: this proposal went stale while open (revision mismatch or
+   * a superseding request). Nothing can answer it; a fresh proposal is
+   * needed, and clients must not offer its options. */
+  expired?: boolean;
   /** catalog key for `held` when it is a fixed note, so it reads in the
    * viewer's language; absent for free-text errors and older cards */
   heldCode?: string;
@@ -103,6 +108,8 @@ export interface OptionCardData {
   skillRequest?: SkillRequestCardData;
   /** Persisted profile proposal used by the server when the user confirms it. */
   profileRequest?: ProfileRequestCardData;
+  /** Persisted default-model proposal used by the server when the user confirms it. */
+  modelRequest?: ModelRequestCardData;
   teamSetupRequest?: import("../../shared/team-setup").TeamSetupRequest;
   /** The model's own questions and options (Claude's AskUserQuestion), so
    * the card offers choices instead of an unanswerable Allow/Deny. */
@@ -130,6 +137,9 @@ export interface SecretRequestCardData {
   requestKey: string;
   provided?: boolean;
   dismissed?: boolean;
+  /** A newer request for the same credential replaced this card; it no
+   * longer offers entry and cannot be provided or dismissed. */
+  superseded?: boolean;
   resumed?: boolean;
   error?: string;
 }
@@ -142,8 +152,8 @@ export interface Message {
   /** digest messages: what the turn did, rendered in `text` and structured here. */
   digest?: TurnDigest;
   compaction?: import("../../shared/wire").WireMessage["compaction"];
-  /** Provider-generated files attached to this assistant response. Kinds the
-   * renderer cannot display yet decode without breaking; only images render. */
+  /** Files attached to this assistant response: provider-generated images, and
+   * voice notes, documents, audio and video a bot attached with attach_file. */
   attachments?: import("../../shared/wire").WireMessage["attachments"];
   card?: OptionCardData;
   connector?: ConnectorCardData;
@@ -158,7 +168,7 @@ export interface Message {
    * narration of the same chip ("reading a file"), used by call mode. */
   /** `setup` marks an error fixed by installing something, not by retrying.
    * `summary` is the call's input on one redacted line (the shell command). */
-  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; summary?: string; input?: string; output?: string ; itemId?: string; outputPath?: string; fullResult?: boolean };
+  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; claudeUpdate?: boolean; summary?: string; input?: string; output?: string ; itemId?: string; outputPath?: string; fullResult?: boolean };
   /** user messages sent into a running turn — the model saw it mid-turn */
   steered?: boolean;
   /** a user message that arrived through the server's API, not typed here */
@@ -373,6 +383,12 @@ export interface Bot {
   avatarUrl?: string | null;
   /** Mascot, or the crop applied to avatarUrl. */
   avatarCrop?: BotAvatarCrop;
+  /** Zoom of a custom image. Absent means 1. */
+  avatarZoom?: number;
+  /** Horizontal point of the image kept in the crop, 0–1. Absent means center. */
+  avatarFocusX?: number;
+  /** Vertical point of the image kept in the crop, 0–1. Absent means center. */
+  avatarFocusY?: number;
   unread: boolean;
   busy?: boolean;
   /** what the bot is doing, as the harness sees it; busy is derived from it */
@@ -382,9 +398,9 @@ export interface Bot {
   turnStartedAt?: number | null;
   modelSelection: ModelSelection;
   /** Where this bot works: a computer, only the built-in browser tab, or
-   * nowhere; unset = auto (cloud box if one exists, else local). */
+   * nowhere; unset = auto (cloud boat if one exists, else local). */
   computer?: "cloud" | "vm" | "local" | "browser" | "off";
-  /** Which cloud computer backs `computer: "cloud"`; absent means Box. */
+  /** Which cloud computer backs `computer: "cloud"`; absent means Boat. */
   cloudBackend?: CloudBackend;
   /** Allow Auto to prepare/start the managed VPS container. Off by default. */
   autoStartVps?: boolean;
@@ -400,6 +416,8 @@ export interface Bot {
   speakReplies?: boolean;
   /** this bot's own voice id (falls back to the app-wide one) */
   voice?: string;
+  /** whether this bot may send voice notes (on unless switched off) */
+  voiceNotes?: boolean;
   pinned?: boolean;
   hidden?: boolean;
   /** Sidebar section this bot renders under; absent = unsectioned. */
@@ -422,8 +440,15 @@ export interface Bot {
   /** Whether this bot may use the workspace's connected apps. Unset means
    * allowed for existing bots; imported bots start with this disabled. */
   composio?: boolean;
+  /** Which connected-app tools this bot may call, by service slug. Absent
+   * defers to the composio boolean (unset/true = every tool, false = none);
+   * an explicit {} grants no tools. Edited from bot settings → Access. */
+  connectorTools?: Record<string, ConnectorToolGrant>;
   /** Whether this bot gets the app's built-in browser (Browser tab). On unless switched off. */
   browser?: boolean;
+  /** Memory upkeep (Bot settings → Memory): background capture and the
+   * nightly tidy-up. On unless explicitly false. */
+  memoryUpkeep?: boolean;
   /** Which app-wide MCP servers (Plugins → MCP servers) this bot mounts, by
    * name. Absent = every enabled server; [] = none (null clears over PATCH). */
   mcpServers?: string[] | null;
@@ -594,7 +619,8 @@ export interface ConfigStatus {
   /** Workspace defaults for new bots; absent effort = no level is sent. */
   newBots?: { effort?: EffortLevel };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
-  localVm: { mode: "shared" | "per-bot"; maxInstances: number };
+  automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
+  localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number };
   opencodeGo?: { configured: boolean };
   /** Voice. `configured` = the engine has what it needs (an ElevenLabs or
    * Fish Audio key, or a Chatterbox server address); `ready` = that AND a voice, which is
@@ -671,7 +697,7 @@ export interface BrowserProfile {
 // Settings shows (a saved key's Test button used to vanish that way).
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "mistral" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
+  "xai" | "mistral" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "automaticRecovery" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -686,6 +712,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     vps: frame.vps,
     rooms: frame.rooms,
     threads: frame.threads,
+    automaticRecovery: frame.automaticRecovery,
     localVm: frame.localVm,
     opencodeGo: frame.opencodeGo,
     tts: frame.tts,
@@ -788,6 +815,7 @@ export type AppSettingsSection =
   | "general"
   | "desktopWorkspaces"
   | "organization"
+  | "cloudAccount"
   | "appearance"
   | "experimental"
   | "connections"
@@ -1063,9 +1091,9 @@ export type Action =
     }
   | { type: "pendingQueued"; threadId: string; queueId: string; text: string; reason?: SteerQueueReason }
   | { type: "consumePendingQueued"; threadId: string; queueId: string }
-  | { type: "cancelQueued"; botId: string; queueId: string; threadId?: string }
+  | { type: "cancelQueued"; botId: string; queueId: string; threadId?: string; onCancelled?: () => void }
   | { type: "steerQueued"; botId: string; queueId: string; threadId?: string; onError?: () => void; onSettled?: () => void }
-  | { type: "cancelGroupQueued"; groupId: string; threadId: string; queueId: string }
+  | { type: "cancelGroupQueued"; groupId: string; threadId: string; queueId: string; onCancelled?: () => void }
   | { type: "steerGroupQueued"; groupId: string; queueId: string; threadId?: string; onError?: () => void; onSettled?: () => void }
   | { type: "editMessage"; botId: string; messageId: string; text: string; threadId?: string; sendId?: string }
   | { type: "switchBranch"; botId: string; messageId: string; threadId?: string }
@@ -2017,13 +2045,16 @@ export function reducer(state: AppState, action: Action): AppState {
         confirmFullAccess: _fullConfirmation,
         applyToAllThreads: _allThreads,
         computer,
+        connectorTools,
         ...rest
       } = action.patch;
-      const botPatch = computer === null
-        ? { ...rest, computer: undefined }
-        : computer === undefined
-          ? rest
-          : { ...rest, computer };
+      const botPatch: Partial<Bot> = { ...rest };
+      if (computer === null) botPatch.computer = undefined;
+      else if (computer !== undefined) botPatch.computer = computer;
+      // A dropped grants record returns the bot to the absent legacy field,
+      // exactly like a cleared computer destination.
+      if (connectorTools === null) botPatch.connectorTools = undefined;
+      else if (connectorTools !== undefined) botPatch.connectorTools = connectorTools;
       return updateBot(next, action.botId, (b) => ({ ...b, ...botPatch }));
     }
     case "threadActive": {
@@ -2966,7 +2997,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "cancelQueued":
           void api(`/api/bots/${action.botId}/queue/${action.queueId}`, { method: "DELETE", body: JSON.stringify({ threadId: action.threadId }) })
-            .then(() => rawDispatch(action))
+            .then(() => {
+              rawDispatch(action);
+              action.onCancelled?.();
+            })
             .catch(showError);
           break;
         case "steerQueued":
@@ -2989,7 +3023,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "cancelGroupQueued":
           void api(`/api/groups/${action.groupId}/queue/${action.queueId}`, { method: "DELETE" })
-            .then(() => rawDispatch(action))
+            .then(() => {
+              rawDispatch(action);
+              action.onCancelled?.();
+            })
             .catch(showError);
           break;
         case "steerGroupQueued":
@@ -3216,6 +3253,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             autoStartVps: source.autoStartVps,
             avatarUrl: source.avatarUrl,
             avatarCrop: source.avatarCrop,
+            avatarZoom: source.avatarZoom,
+            avatarFocusX: source.avatarFocusX,
+            avatarFocusY: source.avatarFocusY,
           };
           // A copy of a restricted bot is restricted from its first moment.
           api("/api/bots", {

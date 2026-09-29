@@ -9,7 +9,9 @@ import {
   formatQuestionAnswers,
   MAX_ANSWER_ECHO,
   MAX_OPTIONS,
+  MAX_QUESTION_TEXT,
   MAX_QUESTIONS,
+  ombAskProtocolPrompt,
   parseAskQuestions,
   parseChoices,
   parseOmbAskQuestions,
@@ -98,7 +100,7 @@ describe("parseAskQuestions", () => {
     const [question] = parseAskQuestions({
       questions: [{ question: "x".repeat(9000), options: [{ label: "y".repeat(9000) }] }],
     })!;
-    expect(question!.question.length).toBeLessThanOrEqual(400);
+    expect(question!.question.length).toBe(MAX_QUESTION_TEXT);
     expect(question!.options[0]!.label.length).toBeLessThanOrEqual(120);
   });
 });
@@ -260,6 +262,16 @@ describe("stripOmbAskBlock", () => {
   it("leaves output without a block untouched", () => {
     const output = "Just prose, twice over.\n\nNothing fenced here.";
     expect(stripOmbAskBlock(output)).toBe(output);
+  });
+});
+
+describe("ombAskProtocolPrompt", () => {
+  it("teaches the fence with the shared caps, so the contract and parser cannot drift", () => {
+    const text = ombAskProtocolPrompt();
+    expect(text).toContain("## Asking the person a question");
+    expect(text).toContain("```omb-ask");
+    expect(text).toContain(`up to ${MAX_QUESTIONS} questions at once, each with up to ${MAX_OPTIONS} options`);
+    expect(text.trimEnd().endsWith("never invent them.")).toBe(true);
   });
 });
 

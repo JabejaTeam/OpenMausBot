@@ -41,6 +41,18 @@ export class ProviderError extends Error {
   }
 }
 
+/** The driver proved this attempt never reached a prompt or client-side action,
+ * and its owned process has stopped. The harness may safely recover it. */
+export class TurnNotStartedError extends Error {
+  readonly turnId: TurnId;
+
+  constructor(turnId: TurnId, message: string) {
+    super(message);
+    this.name = "TurnNotStartedError";
+    this.turnId = turnId;
+  }
+}
+
 
 /** Variants are opaque provider IDs, not the cross-engine effort enum. */
 export function isModelVariant(value: unknown): value is string {
@@ -116,6 +128,9 @@ export interface SendTurnInput {
    * process. Takes precedence over resumeCursor. The runtime supplies the
    * active conversation in text/transcript when rebuilding a session. */
   sessionReset?: boolean;
+  /** Hold the startup ACK until prompt dispatch; a safely retired transient
+   * setup failure may reject with TurnNotStartedError instead of completing. */
+  startupRecovery?: boolean;
   /** The turn with the conversation so far replayed inline, attached only
    * alongside resumeCursor. A cursor-resuming driver sends it once, on a
    * fresh session, when the provider refuses the cursor before reading the
@@ -156,9 +171,10 @@ export interface SendTurnInput {
      * bridge harness-controlled lets it turn connection requests into trusted
      * chat cards consistently across provider CLIs. */
     composio?: { command: string; args: string[]; env: Record<string, string> };
-    /** Box's native runner or an explicitly capable driver consumes this
+    /** Boat's native runner or an explicitly capable driver consumes this
      * leased descriptor. Other computers use the stdio descriptor below. */
     computer?: {
+      // kind "box" and field boxId keep their historical names (leased-wire contract).
       kind?: "box";
       boxId: string;
       token: string;
@@ -247,8 +263,19 @@ export interface ProviderAdapter {
      * told it has a computer whose tools its driver cannot mount — it
      * burns turns hunting for tools that aren't there. */
     computerMcp?: boolean;
-    /** Consumes the leased Box descriptor without switching to Box's model. */
+    /** Consumes the leased Boat descriptor without switching to Boat's model. */
     cloudComputerMcp?: boolean;
+    /** True when the whole turn executes on the cloud computer (the Boat native
+     * agent — POST /boxes/{id}/prompt) instead of in the host harness. Such a
+     * driver claims the boat exclusively, cannot use host or Local VM surfaces,
+     * and every tool call acts on that machine's screen (screen pollers start
+     * with screenIsTheWork). Implies a cloud-computer turn even though the
+     * driver mounts no computer descriptor — cloudComputerMcp stays false. */
+    remoteAgent?: boolean;
+    /** True when this driver's turn can run against a cloud computer — natively
+     * (remoteAgent) or by mounting the leased Boat descriptor (cloudComputerMcp).
+     * Gates every cloud attach path (attachBotBoat / attachTeamBoat canMount). */
+    usesCloudComputer?: boolean;
     /** True when the driver mounts turn.integrations.composio (the user's
      * connected apps). Same rule again: a key in the config says the user
      * HAS those connections, not that this driver can reach them. */
@@ -438,12 +465,55 @@ export interface ModelCatalog {
   }>;
 }
 
+/** The picker label for a model id when the catalog row carries no display
+ * name: split on the word breaks the catalog treats as separators and
+ * capitalize each part ("gpt-5.4-mini" → "Gpt 5.4 Mini"). Each harness
+ * passes its own break class so existing labels stay byte-for-byte. */
+export function titleCaseModelId(id: string, wordBreaks: RegExp): string {
+  return id
+    .split(wordBreaks)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+/** A picker label that carries a second facet — a display name, a provider
+ * host — beside the model id, unless the facet is already what the id says.
+ * `redundantWhen` decides what counts as "already said" and `decorate` how
+ * the facet is appended, so every harness's labels stay exactly what they
+ * were while the shape is written once. */
+export function qualifiedModelLabel(
+  id: string,
+  qualifier: string | null | undefined,
+  options: {
+    redundantWhen?: (id: string, qualifier: string) => boolean;
+    decorate?: (qualifier: string) => string;
+  } = {},
+): string {
+  const { redundantWhen = () => false, decorate = (facet) => ` — ${facet}` } = options;
+  if (!qualifier || redundantWhen(id, qualifier)) return id;
+  return `${id}${decorate(qualifier)}`;
+}
+
 export interface DriverCreateInput<Config> {
   instanceId: InstanceId;
   displayName: string | undefined;
   environment: Record<string, string>;
   enabled: boolean;
   config: Config;
+}
+
+export interface TextGenerationUsage {
+  model: string;
+  input?: number;
+  output?: number;
+  cachedInput?: number;
+  costUsd?: number;
+}
+
+export interface TextGenerationOptions {
+  signal?: AbortSignal;
+  onUsage?: (usage: TextGenerationUsage) => void;
 }
 
 export interface ProviderInstance {
@@ -468,7 +538,7 @@ export interface ProviderInstance {
   /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries.
    * The signal is a best-effort cap: drivers that can honor it abort the
    * underlying provider call; the rest keep their own timeout. */
-  generateText?(prompt: string, options?: { signal?: AbortSignal }): Promise<string>;
+  generateText?(prompt: string, options?: TextGenerationOptions): Promise<string>;
   /** Isolated, tool-free permission review on this same provider. Kept
    * separate from generateText so the UI never infers a security capability
    * from a generic helper that may expose prompts in argv or lack approvals. */

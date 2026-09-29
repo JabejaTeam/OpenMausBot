@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:f
 import { personKeyForEmail } from "./person-key.ts";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JsonValue } from "./schema.ts";
 
 import { customMcpServers,
@@ -24,6 +24,7 @@ import { customMcpServers,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
   showToolCallsEnabled,
+  routinesInConversationEnabled,
   saveConfig,
   skillAuthoringEnabled,
   sharedComputersEnabled,
@@ -43,6 +44,21 @@ import { customMcpServers,
 } from "./config.ts";
 
 describe("configuration boundaries", () => {
+  it("requires an explicit backup to opt into automatic recovery without reloading engines", () => {
+    expect(parseStoredConfig({}).automaticRecovery).toBeUndefined();
+    expect(parseConfigPatch({ automaticRecovery: { enabled: false } })).toEqual({ automaticRecovery: { enabled: false } });
+    const automaticRecovery = { enabled: true, backup: { instanceId: "codex", model: "backup", effort: "high" } };
+    expect(parseStoredConfig({ automaticRecovery }).automaticRecovery).toEqual(automaticRecovery);
+    expect(parseConfigPatch({ automaticRecovery }).automaticRecovery).toEqual(automaticRecovery);
+    expect(providerReloadKeys({ automaticRecovery })).toEqual([]);
+    const invalidSettings: JsonValue[] = [{ enabled: true }, { backup: { instanceId: "codex", model: "m" } },
+      { enabled: "true" }, { enabled: true, backup: { instanceId: "", model: "m" } },
+      { enabled: true, backup: { instanceId: "codex", model: "m", effort: "high", variant: "v" } },
+      { enabled: false, maxRetries: 2 }];
+    for (const invalid of invalidSettings) {
+      expect(() => parseConfigPatch({ automaticRecovery: invalid })).toThrow("automaticRecovery");
+    }
+  });
   it("accepts shared user context, including clearing, without reloading providers", () => {
     const profile = { aboutMe: "I prefer short answers.\nMy time zone is Europe/Berlin." };
     expect(parseConfigPatch({ profile })).toEqual({ profile });
@@ -480,8 +496,23 @@ describe("configuration boundaries", () => {
     expect(parseConfigPatch({ localVm: { mode: "per-bot", maxInstances: 4 } })).toEqual({
       localVm: { mode: "per-bot", maxInstances: 4 },
     });
+    expect(parseConfigPatch({ localVm: { maxInstances: 5 } })).toEqual({
+      localVm: { maxInstances: 5 },
+    });
+    expect(parseConfigPatch({ localVm: { mode: "per-bot", maxInstances: 8 } })).toEqual({
+      localVm: { mode: "per-bot", maxInstances: 8 },
+    });
     expect(localVmMode({ localVm: { mode: "per-bot" } })).toBe("per-bot");
     expect(localVmMaxInstances({ localVm: { maxInstances: 3 } })).toBe(3);
+  });
+
+  it("accepts pool mode with the same bounded seat count", () => {
+    expect(parseConfigPatch({ localVm: { mode: "pool", maxInstances: 4 } })).toEqual({
+      localVm: { mode: "pool", maxInstances: 4 },
+    });
+    expect(localVmMode({ localVm: { mode: "pool" } })).toBe("pool");
+    // The default must stay shared: pool ships config-gated (ADR-2).
+    expect(localVmMode({})).toBe("shared");
   });
 
   it("keeps skill authoring on by default with an explicit opt-out, and the browser off by default", () => {
@@ -535,6 +566,14 @@ describe("configuration boundaries", () => {
     );
   });
 
+  it("keeps routine runs in a hidden thread unless the conversation option is on", () => {
+    expect(routinesInConversationEnabled({})).toBe(false);
+    expect(parseConfigPatch({ features: { routinesInConversation: true } })).toEqual({
+      features: { routinesInConversation: true },
+    });
+    expect(routinesInConversationEnabled({ features: { routinesInConversation: true } })).toBe(true);
+  });
+
   it("keeps tool-call chips off by default and accepts an explicit opt-in", () => {
     expect(showToolCallsEnabled({})).toBe(false);
     expect(parseConfigPatch({ features: { showToolCalls: true } })).toEqual({
@@ -543,7 +582,7 @@ describe("configuration boundaries", () => {
     expect(showToolCallsEnabled({ features: { showToolCalls: true } })).toBe(true);
   });
 
-  it.each([0, 1.5, 5, "2", null])("rejects an invalid per-bot VM limit: %j", (maxInstances) => {
+  it.each([0, 1.5, 9, "2", null])("rejects an invalid per-bot VM limit: %j", (maxInstances) => {
     expect(() => parseConfigPatch({ localVm: { maxInstances } })).toThrow("localVm.maxInstances");
   });
 
@@ -760,7 +799,7 @@ describe("Instance CLI override", () => {
     // instances section of config.json.
     const cfg: AppConfig = {
       xai: { key: "SECRET-XAI" },
-      box: { token: "SECRET-BOX" },
+      box: { token: "SECRET-BOAT" },
       opencodeGo: { apiKey: "SECRET-OCG" },
       instances: {
         claude: { driver: "claudeAgent" },
@@ -840,7 +879,7 @@ describe("credential env narrowing", () => {
   it("injects each credential only into the driver that consumes it", () => {
     const cfg: AppConfig = {
       xai: { key: "SECRET-XAI" },
-      box: { token: "SECRET-BOX" },
+      box: { token: "SECRET-BOAT" },
       opencodeGo: { apiKey: "SECRET-OCG" },
       instances: {
         grokApi: { driver: "grok" },
@@ -852,7 +891,7 @@ describe("credential env narrowing", () => {
     };
     const instances = instanceConfigs(cfg);
     expect(instances.grokApi.environment).toEqual({ XAI_API_KEY: "SECRET-XAI" });
-    expect(instances.computer.environment).toEqual({ BOX_TOKEN: "SECRET-BOX" });
+    expect(instances.computer.environment).toEqual({ BOX_TOKEN: "SECRET-BOAT" });
     expect(instances.opencode.environment).toEqual({ OPENCODE_API_KEY: "SECRET-OCG" });
     // engines that bring their own login receive NO workspace credential
     expect(instances.claude.environment).toEqual({});
@@ -862,20 +901,20 @@ describe("credential env narrowing", () => {
   it("hands no credential to any default-fleet CLI engine except the Computer", () => {
     // the default `grok` instance is the CLI-login grokAgent, not the
     // API-key driver, so a configured xai key reaches nobody by default
-    const cfg: AppConfig = { xai: { key: "SECRET-XAI" }, box: { token: "SECRET-BOX" } };
+    const cfg: AppConfig = { xai: { key: "SECRET-XAI" }, box: { token: "SECRET-BOAT" } };
     const instances = instanceConfigs(cfg);
     for (const [id, entry] of Object.entries(instances)) {
-      if (id === "computer") expect(entry.environment).toEqual({ BOX_TOKEN: "SECRET-BOX" });
+      if (id === "computer") expect(entry.environment).toEqual({ BOX_TOKEN: "SECRET-BOAT" });
       else expect(entry.environment).toEqual({});
     }
   });
 
   it("keeps a per-instance environment while layering the credential on top", () => {
     const cfg: AppConfig = {
-      box: { token: "SECRET-BOX" },
+      box: { token: "SECRET-BOAT" },
       instances: { computer: { driver: "boxAgent", environment: { MY_FLAG: "1" } } },
     };
-    expect(instanceConfigs(cfg).computer.environment).toEqual({ MY_FLAG: "1", BOX_TOKEN: "SECRET-BOX" });
+    expect(instanceConfigs(cfg).computer.environment).toEqual({ MY_FLAG: "1", BOX_TOKEN: "SECRET-BOAT" });
   });
 });
 
@@ -1003,6 +1042,17 @@ describe("credential env preference", () => {
     expect(cfg.imageGen).toEqual({ key: "env-image" });
   });
 
+  it("uses a preset voice only when the person has not chosen one or another provider", () => {
+    process.env.OMB_TTS_DEFAULT_VOICE = " preset-voice ";
+    expect(loadConfig().tts?.voice).toBe("preset-voice");
+    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ tts: { voice: "chosen" } }));
+    expect(loadConfig().tts?.voice).toBe("chosen");
+    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ tts: { provider: "system" } }));
+    expect(loadConfig().tts?.voice).toBeUndefined();
+    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ tts: { provider: "elevenlabs" } }));
+    expect(loadConfig().tts?.voice).toBe("preset-voice");
+  });
+
   it("saves and removes the verified domain without replacing existing settings", () => {
     saveConfig({ profile: { name: "Workspace owner" }, customDomain: "https://bots.example.com" });
     expect(loadConfig().customDomain).toBe("https://bots.example.com");
@@ -1022,6 +1072,19 @@ describe("credential env preference", () => {
     });
     expect(() => parseConfigPatch({ onboarding: { hintsSeen: ["x".repeat(61)] } })).toThrow();
     expect(() => parseConfigPatch({ onboarding: { unknown: true } })).toThrow();
+  });
+
+  it("replaces automatic recovery atomically, clears an omitted backup and keeps unrelated settings", () => {
+    const backup = { instanceId: "codex", model: "backup", effort: "high" as const };
+    saveConfig({ automaticRecovery: { enabled: true, backup }, profile: { name: "Recovery fixture" } });
+    expect(loadConfig().automaticRecovery).toEqual({ enabled: true, backup });
+    saveConfig({ automaticRecovery: { enabled: true, backup: { instanceId: "claude", model: "other" } } });
+    expect(loadConfig().automaticRecovery).toEqual({ enabled: true, backup: { instanceId: "claude", model: "other" } });
+    expect(() => saveConfig({ automaticRecovery: { enabled: true } })).toThrow();
+    expect(loadConfig().automaticRecovery?.backup?.model).toBe("other");
+    saveConfig({ automaticRecovery: { enabled: false } });
+    expect(loadConfig().automaticRecovery).toEqual({ enabled: false });
+    expect(loadConfig().profile).toEqual({ name: "Recovery fixture" });
   });
 
   it("persists a context change without losing the other context preferences", () => {
@@ -1452,5 +1515,72 @@ describe("customMcpServers with url entries", () => {
       docs: { type: "sse", url: "https://docs.example/sse", headers: { Authorization: "Bearer t" } },
       notes: { command: "npx", args: [], env: {} },
     });
+  });
+});
+
+describe("loadConfig with an unusable config.json", () => {
+  const path = join(DATA_DIR, "config.json");
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    mkdirSync(DATA_DIR, { recursive: true });
+    rmSync(path, { force: true });
+    warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    loadConfig(); // reset the once-per-problem memory with a clean run
+    warn.mockClear();
+  });
+  afterEach(() => {
+    warn.mockRestore();
+    rmSync(path, { force: true });
+  });
+
+  it("stays quiet on a first run with no file", () => {
+    expect(loadConfig().instances).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("names the file and the failing field when one schema error drops the whole file", () => {
+    // threads without maxConcurrentPerBot fails the stored schema, which drops
+    // every other section (here: the Claude instance) along with it.
+    writeFileSync(path, JSON.stringify({
+      instances: { claude: { driver: "claudeAgent", displayName: "Claude (work)" } },
+      threads: { eventLogMaxBytes: 1_000_000 },
+    }));
+    expect(loadConfig().instances).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const message = String(warn.mock.calls[0]?.[0]);
+    expect(message).toContain(path);
+    expect(message).toContain("maxConcurrentPerBot");
+  });
+
+  it("warns about invalid JSON too, and only once while the file stays broken", () => {
+    writeFileSync(path, "{ not json");
+    loadConfig();
+    loadConfig();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("using defaults");
+  });
+
+  it("never logs credential fragments from a JSON parser error", () => {
+    writeFileSync(path, "sk-fixture");
+    loadConfig();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("invalid JSON");
+    expect(String(warn.mock.calls[0]?.[0])).not.toContain("sk-fixture");
+  });
+
+  it("warns again after a repaired or removed file becomes broken", () => {
+    for (const recovered of ["{}", null]) {
+      writeFileSync(path, "{ not json");
+      loadConfig();
+      warn.mockClear();
+      if (recovered === null) rmSync(path);
+      else writeFileSync(path, recovered);
+      loadConfig();
+      expect(warn).not.toHaveBeenCalled();
+      writeFileSync(path, "{ not json");
+      loadConfig();
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockClear();
+    }
   });
 });

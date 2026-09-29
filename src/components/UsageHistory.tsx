@@ -1,5 +1,5 @@
 // App settings → Usage → History: what this workspace spent over a period,
-// by bot, model, person, day or engine, from the server's month-by-month
+// by bot, model, person, day, engine or routine, from the server's month-by-month
 // ledger (server/usage-ledger.ts). The card above it sums live tasks; this
 // one survives restarts and exports for an invoice.
 import { useEffect, useState } from "react";
@@ -7,12 +7,12 @@ import { Download, Loader2 } from "lucide-react";
 import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { formatTokens, formatUsd, hasFiniteCost, headlineTokens } from "@/lib/usage";
+import { cachedUsageNote, formatTokens, formatUsd, hasFiniteCost, headlineTokens, tokensColumnLabel } from "@/lib/usage";
 import { Card } from "./SettingsPrimitives";
 import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
 
-export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine";
-export const USAGE_GROUPINGS: readonly UsageGroupBy[] = ["bot", "model", "user", "day", "engine"];
+export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine";
+export const USAGE_GROUPINGS: readonly UsageGroupBy[] = ["bot", "model", "user", "day", "engine", "routine"];
 export type UsagePeriod = "month" | "lastMonth" | "days30";
 
 export interface UsageGroup {
@@ -55,6 +55,7 @@ export function usagePeriodRange(period: UsagePeriod, now = new Date()): { from:
 /** The server can only describe the non-person triggers in English; the
  * app names them itself by key. */
 export function usageGroupLabel(groupBy: UsageGroupBy, group: UsageGroup): string {
+  if (groupBy === "routine") return group.key === "manual" ? t("usage.history.notRoutine") : group.label;
   if (groupBy !== "user") return group.label;
   if (group.key === "owner") return t("usage.history.owner");
   if (group.key === "bot") return t("usage.history.botToBot");
@@ -66,12 +67,13 @@ export function usageExportHref(range: { from: string; to: string }): string {
   return `/api/usage.csv?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`;
 }
 
-const GROUP_LABEL_KEYS: Record<UsageGroupBy, "usage.history.byBot" | "usage.history.byModel" | "usage.history.byUser" | "usage.history.byDay" | "usage.history.byEngine"> = {
+const GROUP_LABEL_KEYS: Record<UsageGroupBy, "usage.history.byBot" | "usage.history.byModel" | "usage.history.byUser" | "usage.history.byDay" | "usage.history.byEngine" | "usage.history.byRoutine"> = {
   bot: "usage.history.byBot",
   model: "usage.history.byModel",
   user: "usage.history.byUser",
   day: "usage.history.byDay",
   engine: "usage.history.byEngine",
+  routine: "usage.history.byRoutine",
 };
 
 /** A cost cell: "~" in front when part of it is an estimate, a dash when
@@ -94,6 +96,7 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
     return <div className="text-[13px] text-ink-secondary">{t("usage.history.empty")}</div>;
   }
   const billable = Boolean(summary.billing);
+  const cachedNote = cachedUsageNote(summary.total);
   const columns = billable ? "grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-5" : "grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-5";
   const money = (value: number | null | undefined) => (hasFiniteCost(value) ? formatUsd(value) : "—");
   return (
@@ -101,7 +104,7 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
       <div className={cn(columns, "border-b border-hairline/40 pb-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary")}>
         <span>{t(GROUP_LABEL_KEYS[summary.groupBy])}</span>
         <span className="text-right">{t("usage.colTurns")}</span>
-        <span className="text-right">{t("usage.colTokens")}</span>
+        <span className="text-right">{tokensColumnLabel(summary.total)}</span>
         <span className="text-right">{t("usage.colCost")}</span>
         {billable && <span className="text-right">{t("usage.history.colBillable")}</span>}
       </div>
@@ -123,6 +126,9 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
         <CostCell group={summary.total} strong />
         {billable && <span className="text-right tabular-nums">{money(summary.total.billableUsd)}</span>}
       </div>
+      {cachedNote && (
+        <div className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{cachedNote}</div>
+      )}
       {hasFiniteCost(summary.total.estimatedUsd) && summary.total.estimatedUsd > 0 && (
         <div className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("usage.history.estimated", { amount: formatUsd(summary.total.estimatedUsd) })}</div>
       )}
@@ -165,7 +171,7 @@ export function UsageHistory({ load = fetchUsage }: { load?: typeof fetchUsage }
           value={period}
           onChange={(event) => setPeriod(event.target.value as UsagePeriod)}
           aria-label={t("usage.history.period")}
-          className="rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12.5px] text-ink focus:border-hairline focus:outline-none"
+          className="rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12.5px] text-ink focus:outline-none"
         >
           <option value="month">{t("usage.history.thisMonth")}</option>
           <option value="lastMonth">{t("usage.history.lastMonth")}</option>

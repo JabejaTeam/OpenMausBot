@@ -26,6 +26,22 @@ export const scriptedTurnSchema = z.object({
   fail: z.boolean().optional(),
 });
 
+/** A fixture skill for the skill bench: the manifest shape the server's
+ * user-skill loader reads (DATA_DIR/skills/<id>/manifest.json) plus the
+ * SKILL.md body, as pure data. The installSkill step materializes it under
+ * the booted world's data dir; user skills hot-load every turn, so later
+ * sends in the same run see it without a server restart. */
+export const fixtureSkillSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  version: z.string(),
+  description: z.string(),
+  defaultEnabled: z.boolean().default(true),
+  triggerTerms: z.array(z.string()).min(1),
+  requiredCapabilities: z.array(z.string()).default([]),
+  skillMd: z.string(),
+});
+
 export const scenarioBotSchema = z.object({
   /** Referenced from steps and scripted arguments as "@key". */
   key: z.string(),
@@ -51,6 +67,11 @@ export const stepSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("snapshotRoutineRun"), routine: z.string(), saveAs: z.string() }),
   z.object({ kind: z.literal("waitForRoutineRun"), routine: z.string(), status: z.string(), timeoutMs: z.number().optional() }),
   z.object({ kind: z.literal("writeGate"), gate: z.string() }),
+  /** Materializes a fixture skill as a user skill under the world's data
+   * dir. The skill bench uses it to run the same prompt with the skill
+   * installed and without it; ordinary scenarios can pin skill-delivery
+   * behavior the same way. */
+  z.object({ kind: z.literal("installSkill"), skill: fixtureSkillSchema }),
   /** Applied before the first turn: pins admission preconditions (for
    * example threads.maxConcurrentPerBot) the scenario's behavior needs. */
   z.object({ kind: z.literal("setConfig"), config: z.record(z.string(), z.unknown()) }),
@@ -63,6 +84,9 @@ export const stepSchema = z.discriminatedUnion("kind", [
 export const assertionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("sendNotQueued"), bot: z.string() }),
   z.object({ kind: z.literal("toolCalls"), bot: z.string(), equals: z.array(scriptedToolCallSchema) }),
+  /** Ordered tool names for one bot, ignoring arguments: the golden-thread
+   * trace shape, and the live tier's argument-agnostic invariant. */
+  z.object({ kind: z.literal("toolNames"), bot: z.string(), equals: z.array(z.string()) }),
   z.object({ kind: z.literal("turnOrder"), bots: z.array(z.string()) }),
   z.object({ kind: z.literal("systemPromptIncludes"), bot: z.string(), turn: z.number().int(), includes: z.string() }),
   z.object({ kind: z.literal("promptIncludes"), bot: z.string(), turn: z.number().int(), includes: z.string() }),
@@ -105,10 +129,14 @@ export const scenarioSchema = z.object({
   bots: z.array(scenarioBotSchema),
   steps: z.array(stepSchema),
   assertions: z.array(assertionSchema),
+  /** Present when a tier-2 redactor produced this fixture from a real
+   * thread export; pins the pipeline version that must reproduce it. */
+  golden: z.object({ from: z.literal("redacted-thread"), redactor: z.number().int() }).optional(),
 });
 
 export type ScriptedToolCall = z.infer<typeof scriptedToolCallSchema>;
 export type ScriptedTurn = z.infer<typeof scriptedTurnSchema>;
+export type FixtureSkill = z.infer<typeof fixtureSkillSchema>;
 export type ScenarioBot = z.infer<typeof scenarioBotSchema>;
 export type Step = z.infer<typeof stepSchema>;
 export type Assertion = z.infer<typeof assertionSchema>;
