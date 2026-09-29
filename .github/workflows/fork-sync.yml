@@ -1,7 +1,8 @@
 # Jabeja fork only: keep feat/new-bot-approval-default on the latest upstream
 # release. Daily (and on demand) it merges the newest upstream v* tag into a
 # sync/<tag> branch, runs typecheck + the vitest suite in shards, and opens a
-# PR when green. A merge conflict or a red suite opens an issue instead.
+# PR when green. Generated files (GENERATED) are regenerated, never reported;
+# any other merge conflict or a red suite opens an issue instead.
 # Lives in its own file so upstream's ci.yml never conflicts with it.
 name: Fork sync
 
@@ -26,11 +27,13 @@ concurrency:
 env:
   BASE: feat/new-bot-approval-default
   UPSTREAM: https://github.com/milind-soni/OpenMausBot.git
+  # Files a tool writes; a sync regenerates them instead of reporting a conflict.
+  GENERATED: server/drivers/agents-catalog-goldens/profiles.json
 
 jobs:
   merge:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
       branch: ${{ steps.merge.outputs.branch }}
@@ -66,8 +69,22 @@ jobs:
             echo "status=exists" >> "$GITHUB_OUTPUT"; exit 0
           fi
           git switch -c "$branch"
+          merged=false
           if git merge --no-edit "$TAG"; then
-            git push origin "$branch"
+            merged=true
+          else
+            # Generated files never need a human: take upstream's copy here
+            # and regenerate it below. Anything else still stops the sync.
+            for f in $GENERATED; do
+              if git diff --name-only --diff-filter=U | grep -qx "$f"; then
+                git checkout --theirs -- "$f" && git add -- "$f"
+              fi
+            done
+            if [ -z "$(git diff --name-only --diff-filter=U)" ]; then
+              git commit --no-edit && merged=true
+            fi
+          fi
+          if [ "$merged" = true ]; then
             echo "status=merged" >> "$GITHUB_OUTPUT"
           else
             files=$(git diff --name-only --diff-filter=U | sed 's/^/- `/; s/$/`/')
@@ -75,6 +92,25 @@ jobs:
             gh issue create --title "Fork sync: conflicts merging $TAG" --body "$(printf 'Merging upstream `%s` into `%s` conflicts in:\n\n%s\n\nResolve locally: `git fetch --tags upstream && git switch -c %s %s && git merge %s`' "$TAG" "$BASE" "$files" "$branch" "$BASE" "$TAG")"
             echo "status=conflict" >> "$GITHUB_OUTPUT"
           fi
+      - if: steps.merge.outputs.status == 'merged'
+        uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - if: steps.merge.outputs.status == 'merged'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Regenerate generated files and push
+        if: steps.merge.outputs.status == 'merged'
+        env:
+          BRANCH: ${{ steps.merge.outputs.branch }}
+        run: |
+          pnpm install --frozen-lockfile
+          UPDATE_AGENTS_CATALOG_GOLDENS=1 pnpm exec vitest run server/drivers/agents-catalog-wire.test.ts || true
+          if ! git diff --quiet -- $GENERATED; then
+            git add -- $GENERATED
+            git commit -m "chore(fork): regenerate generated files after the upstream merge"
+          fi
+          git push origin "$BRANCH"
 
   static:
     needs: merge
