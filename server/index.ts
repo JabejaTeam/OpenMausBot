@@ -1968,6 +1968,24 @@ function threadBusy(botId: string, threadId: string): boolean {
   return store.taskByThread(botId, threadId)?.busy === true || directTurnDispatchClaims.has(threadId);
 }
 
+/** Another thread's turn holds the project folder this thread would run in.
+ * Two bots (or two threads of one bot) can share one folder, e.g. a code
+ * agent and its reviewer. startTurn refuses the second claim with
+ * workspace_busy, so admission waits here instead of failing the work.
+ * Mirrors store.pinTaskCwd without pinning; a private task workspace never
+ * collides, so only an explicit folder is checked. */
+function threadFolderBusy(botId: string, threadId: string): boolean {
+  const task = store.taskByThread(botId, threadId);
+  if (!task) return false;
+  const cwd = task.cwd !== undefined ? task.cwd
+    : Object.keys(task.resumeCursors).length === 0 ? store.bot(botId)?.cwd : null;
+  if (!cwd) return false;
+  let resource: string;
+  try { resource = workspaceResource(cwd); } catch { return false; }
+  const blocker = turnResources.blocker(resource, { threadId, generation: "" });
+  return Boolean(blocker && blocker.threadId !== threadId);
+}
+
 /** Opt-in direct-chat parking (#1194): when this bot's person chose to queue
  * messages behind running work, a message that arrives while delegated
  * assignments are still out waits in the steer queue — room-style parking —
@@ -3783,7 +3801,8 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
   // group turn.
   busy: n => {
     if (n.groupId) return Boolean(store.bot(n.botId)?.busy || (store.group(n.groupId) && groupIsWorking(store.group(n.groupId)!)));
-    const slot = threadBusy(n.botId, n.threadId) || botAtThreadCapacity(n.botId) || Boolean(activeGroupTurnForBot(n.botId));
+    const slot = threadBusy(n.botId, n.threadId) || botAtThreadCapacity(n.botId) || Boolean(activeGroupTurnForBot(n.botId)) ||
+      threadFolderBusy(n.botId, n.threadId);
     return n.status === "resume" ? slot : slot || recipientAwaitingPerson(n.botId, n.threadId);
   },
   changed: (groupIds, directThreadIds) => {
@@ -6702,7 +6721,8 @@ function drainDelegationWakes(): void {
     // Completion can precede asynchronous digest/resource settlement. Keep
     // the wake parked until a slot is actually free; a rejected async start
     // could otherwise requeue after the last idle-release drain has run.
-    if (threadBusy(entry.botId, threadId) || botAtThreadCapacity(entry.botId) || activeGroupTurnForBot(entry.botId)) continue;
+    if (threadBusy(entry.botId, threadId) || botAtThreadCapacity(entry.botId) || activeGroupTurnForBot(entry.botId) ||
+      threadFolderBusy(entry.botId, threadId)) continue;
     pendingDelegationWakes.delete(threadId);
     dispatchDelegationWake(entry.botId, threadId, entry.targetName, entry.failureReason, entry.routineRunId, entry.budgetAcquired);
   }
@@ -7191,7 +7211,7 @@ function drainQueuedSends() {
     // Provider completion can precede its dispatch promise: keep the queue
     // intact until that exact handshake releases its runtime-only claim.
     (botId, threadId) => threadBusy(botId, threadId) || botAtThreadCapacity(botId) || Boolean(activeGroupTurnForBot(botId))
-      || parksBehindCoordination(botId, threadId),
+      || parksBehindCoordination(botId, threadId) || threadFolderBusy(botId, threadId),
   );
 }
 
@@ -7203,7 +7223,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
   // below: the drain's own block check waits it out, so the words queue
   // here rather than bounce off startTurn's 409.
   const groupTurn = activeGroupTurnForBot(botId);
-  if (capacity || threadBusy(botId, threadId) || groupTurn || parksBehindCoordination(botId, threadId)) {
+  if (capacity || threadBusy(botId, threadId) || groupTurn || parksBehindCoordination(botId, threadId) || threadFolderBusy(botId, threadId)) {
     const reason = capacity ? "capacity" as const : groupTurn ? "group-turn" as const : undefined;
     const queued = queueSteeredMessage(botId, threadId, text, {
       replyToId: replyTo?.id,
@@ -7240,9 +7260,9 @@ async function startOrQueueOpenedThread(
   // queue here rather than bounce.
   const capacity = botAtThreadCapacity(botId);
   const groupTurn = activeGroupTurnForBot(botId);
-  if (capacity || groupTurn) {
+  if (capacity || groupTurn || threadFolderBusy(botId, threadId)) {
     queueSteeredMessage(botId, threadId, text, {
-      reason: capacity ? "capacity" : "group-turn",
+      reason: capacity ? "capacity" : groupTurn ? "group-turn" : undefined,
       unattended,
       peerAsk,
     });
