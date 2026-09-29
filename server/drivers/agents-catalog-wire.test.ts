@@ -95,34 +95,37 @@ const PROFILES = profiles();
  * is pinned by tool names, byte count and sha256 in profiles.json. */
 const FULL = { direct: "direct+skills+shared+voice", room: "room+own-thread+skills+shared+voice", external: "external" } as const;
 
+/** Jabeja fork: bytes our own additions add to every direct/room profile. */
+const FORK_EXTRA_BYTES = 1027;
+
 /** Bytes measured when the budget was last set. A profile may not exceed this
  * by more than 2%, and may not undercut it by more than 2% either: a smaller
  * catalog is the goal, so lock the win in by lowering the number. */
 const BUDGET_BASELINE: Record<string, number> = {
-  "direct": 45059,
-  "direct+voice": 45800,
-  "direct+shared": 46804,
-  "direct+shared+voice": 47545,
-  "direct+skills": 46985,
-  "direct+skills+voice": 47726,
-  "direct+skills+shared": 48730,
-  "direct+skills+shared+voice": 49471,
-  "room": 43077,
-  "room+voice": 43818,
-  "room+shared": 44822,
-  "room+shared+voice": 45563,
-  "room+skills": 45003,
-  "room+skills+voice": 45744,
-  "room+skills+shared": 46748,
-  "room+skills+shared+voice": 47489,
-  "room+own-thread": 44364,
-  "room+own-thread+voice": 45105,
-  "room+own-thread+shared": 46109,
-  "room+own-thread+shared+voice": 46850,
-  "room+own-thread+skills": 46290,
-  "room+own-thread+skills+voice": 47031,
-  "room+own-thread+skills+shared": 48035,
-  "room+own-thread+skills+shared+voice": 48776,
+  "direct": 44032,
+  "direct+voice": 44773,
+  "direct+shared": 45777,
+  "direct+shared+voice": 46518,
+  "direct+skills": 45958,
+  "direct+skills+voice": 46699,
+  "direct+skills+shared": 47703,
+  "direct+skills+shared+voice": 48444,
+  "room": 42050,
+  "room+voice": 42791,
+  "room+shared": 43795,
+  "room+shared+voice": 44536,
+  "room+skills": 43976,
+  "room+skills+voice": 44717,
+  "room+skills+shared": 45721,
+  "room+skills+shared+voice": 46462,
+  "room+own-thread": 43337,
+  "room+own-thread+voice": 44078,
+  "room+own-thread+shared": 45082,
+  "room+own-thread+shared+voice": 45823,
+  "room+own-thread+skills": 45263,
+  "room+own-thread+skills+voice": 46004,
+  "room+own-thread+skills+shared": 47008,
+  "room+own-thread+skills+shared+voice": 47749,
   "external": 3030,
   "external+everything": 3030,
 };
@@ -307,7 +310,11 @@ describe("agents proxy tools/list wire size", () => {
   });
 
   it.each(Object.keys(PROFILES))("%s stays within 2% of its budget baseline", (name) => {
-    const baseline = BUDGET_BASELINE[name];
+    // Jabeja fork: our extra tool params (kind, person profile, …) ride on top
+    // of upstream's baseline, so BUDGET_BASELINE stays upstream's verbatim
+    // and never conflicts on a sync. Raise FORK_EXTRA_BYTES when we add more.
+    const baseline = BUDGET_BASELINE[name] === undefined ? undefined
+      : BUDGET_BASELINE[name]! + (name.startsWith("external") ? 0 : FORK_EXTRA_BYTES);
     expect(baseline, `${name} has no BUDGET_BASELINE entry`).toBeTypeOf("number");
     const actual = bytes(wires[name]!);
     expect(actual, `${name} grew past its budget (${baseline} + 2%). Trim the catalog, or raise BUDGET_BASELINE on purpose.`)
