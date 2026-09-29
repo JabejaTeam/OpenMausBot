@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -801,5 +802,33 @@ it("waits for a shared project folder instead of failing the teammate's work", (
     const reviewer = f.nodes().find((n: any) => n.botId === f.specialist.id);
     expect((await f.messages(reviewer.threadId)).some((m: any) => /another thread is working in this project folder/.test(m.tool?.name ?? ""))).toBe(false);
     expect((await f.messages(f.lead.activeTaskId)).some((m: any) => m.text === f.plan[f.lead.id].resumeReply)).toBe(true);
+  } finally { removeTempDir(folder); }
+}), 60_000);
+
+it("runs a threadWorktrees teammate in its own copy while the project folder is held", () => fixture(async f => {
+  // Fork: the lead holds the repo folder with a running turn; the specialist
+  // works in its own worktree of that repo, so it neither waits nor fails.
+  const folder = mkdtempSync(join(tmpdir(), "omb-worktree-folder-"));
+  const git = (...args: string[]) => execFileSync("git", ["-C", folder, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { encoding: "utf8" });
+  try {
+    git("init", "-q", "-b", "main");
+    writeFileSync(join(folder, "a.txt"), "one\n");
+    git("add", ".");
+    git("commit", "-qm", "init");
+    await f.api(`/api/bots/${f.lead.id}`, { cwd: folder }, "PATCH");
+    await f.api(`/api/bots/${f.specialist.id}`, { cwd: folder, threadWorktrees: true }, "PATCH");
+    const sourceGate = join(f.session.info.dataDir, "source-ready");
+    f.plan[f.lead.id].gateFile = sourceGate;
+    f.save();
+    await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "Build it and have it checked");
+    await expect.poll(() => f.nodes().find((n: any) => n.botId === f.specialist.id)?.status, { timeout: 20_000 }).toBe("completed");
+    const node = f.nodes().find((n: any) => n.botId === f.specialist.id);
+    const task = (await f.api("/api/bots")).bots.find((b: any) => b.id === f.specialist.id).tasks.find((t: any) => t.threadId === node.threadId);
+    expect(task.cwd).toBe(join(f.session.info.dataDir, "worktrees", f.specialist.id, node.threadId));
+    expect(execFileSync("git", ["-C", task.cwd, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim()).toBe(`omb/${node.threadId}`);
+    const turn = f.evidence().find((entry: any) => entry.botId === f.specialist.id);
+    expect(turn.system).toContain(`merge --ff-only omb/${node.threadId}`);
+    writeFileSync(sourceGate, "release the folder");
+    expect((await f.cli("wait", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--timeout", "30")).status).toBe("settled");
   } finally { removeTempDir(folder); }
 }), 60_000);

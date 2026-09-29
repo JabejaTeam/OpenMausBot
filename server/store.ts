@@ -2251,7 +2251,7 @@ export class Store {
    * current folder — unless the task already has a session (a thread from
    * before folders existed), which pins to the default so the folder can't
    * move under it. Returns the pinned value: a path, or null for default. */
-  pinTaskCwd(botId: string, threadId: string, fallbackCwd?: string, opts: { none?: boolean } = {}): string | null {
+  pinTaskCwd(botId: string, threadId: string, fallbackCwd?: string, opts: { none?: boolean; cwd?: string } = {}): string | null {
     const bot = this.bot(botId);
     const task = bot ? this.taskByThread(botId, threadId) : undefined;
     if (!bot || !task) return null;
@@ -2264,7 +2264,7 @@ export class Store {
       return null;
     }
     if (task.cwd === undefined) {
-      task.cwd = Object.keys(task.resumeCursors).length === 0 ? (bot.cwd ?? fallbackCwd ?? null) : null;
+      task.cwd = Object.keys(task.resumeCursors).length === 0 ? (opts.cwd ?? bot.cwd ?? fallbackCwd ?? null) : null;
       this.saveBots();
       this.emit({ type: "bot", botId });
     }

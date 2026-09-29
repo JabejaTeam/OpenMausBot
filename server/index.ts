@@ -291,6 +291,7 @@ import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS
 import { CLOUD_IGNORED_KEYS, CLOUD_PAIRING_PATH, cloudHomeConfiguration, createCloudPairing, readSignedBody } from "./cloud-home.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
+import { ensureThreadWorktree, removeThreadWorktree, threadWorktreePath, threadWorktreeSystemPrompt } from "./thread-worktrees.ts";
 import { isKindInstructionScope, kindInstructionsSystemPrompt, readKindInstructions, writeKindInstructions, KIND_INSTRUCTIONS_MAX_BYTES } from "./kind-instructions.ts";
 import { notePerson, personNames, personTurnPreamble, readPersonProfile, savePersonProfile, updatePersonProfile, PERSON_PROFILE_MAX_LINES } from "./person-profiles.ts";
 import { isBotKind } from "../shared/wire.ts";
@@ -2250,8 +2251,10 @@ function threadBusy(botId: string, threadId: string): boolean {
 function threadFolderBusy(botId: string, threadId: string): boolean {
   const task = store.taskByThread(botId, threadId);
   if (!task) return false;
+  const bot = store.bot(botId);
+  // A new thread of a threadWorktrees bot pins to its own worktree.
   const cwd = task.cwd !== undefined ? task.cwd
-    : Object.keys(task.resumeCursors).length === 0 ? store.bot(botId)?.cwd : null;
+    : Object.keys(task.resumeCursors).length === 0 && !bot?.threadWorktrees ? bot?.cwd : null;
   if (!cwd) return false;
   let resource: string;
   try { resource = workspaceResource(cwd); } catch { return false; }
@@ -8591,9 +8594,16 @@ async function startTurn(
       // pin the task to the default so the header chip never shows the
       // bot's folder for a task that runs elsewhere.
       if (opts?.runOn === "cloud") store.pinTaskCwd(bot.id, threadId, undefined, { none: true });
+      // Fork: a bot with threadWorktrees pins each new thread to its own
+      // worktree of its project folder (server/thread-worktrees.ts).
+      const unpinned = store.taskByThread(bot.id, threadId);
+      const threadWorktree = privateWorkspace && opts?.runOn !== "cloud" && bot.threadWorktrees && bot.cwd &&
+        unpinned && unpinned.cwd === undefined && Object.keys(unpinned.resumeCursors).length === 0
+        ? await ensureThreadWorktree(bot.cwd, bot.id, threadId)
+        : undefined;
       const pinnedCwd =
         privateWorkspace && opts?.runOn !== "cloud"
-          ? store.pinTaskCwd(bot.id, threadId, privateWorkspace)
+          ? store.pinTaskCwd(bot.id, threadId, privateWorkspace, { cwd: threadWorktree })
           : null;
       const cwd = pinnedCwd ?? undefined;
       if (cwd && !claimTurnResource(resourceOwner, workspaceResource(cwd))) {
@@ -9198,6 +9208,7 @@ async function startTurn(
         { id: "learn", label: "Skill authoring", text: learnPrompt },
         { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
         { id: "kind-instructions", label: "Workspace rules", text: kindInstructionsSystemPrompt(bot.kind) },
+        { id: "thread-worktree", label: "Own copy", text: cwd && bot.cwd && cwd === threadWorktreePath(bot.id, threadId) ? threadWorktreeSystemPrompt(bot.cwd, cwd, threadId) : "" },
         // what the bot said lately in its other conversations, so a task
         // never redoes — or forgets — what another one already did
         { id: "recent", label: "Recent work", text: recentWorkPrompt(recentWork(recentWorkSources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId })) },
@@ -18963,6 +18974,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (body.kind !== null && !isBotKind(body.kind)) return json(res, 400, { error: 'kind must be "code", "pm" or null' });
         patch.kind = body.kind ?? undefined;
       }
+      if (body.threadWorktrees !== undefined) {
+        if (typeof body.threadWorktrees !== "boolean") return json(res, 400, { error: "threadWorktrees must be true or false" });
+        patch.threadWorktrees = body.threadWorktrees || undefined;
+      }
       if (body.cloudBackend !== undefined) {
         const backendError = cloudBackendChangeError(Boolean(existingBot?.busy), activeVpsThreads.has(m[1]));
         if (backendError) return json(res, 409, { error: backendError });
@@ -20510,8 +20525,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const stagedSkillCleanups = stagedSkillCleanupsForThread(m[2]);
       roomHandoffs.cancelDirect(m[2], "The source conversation was deleted");
       cancelTeamSetupResumesForThread(m[2]);
+      const deletedCwd = store.taskByThread(bot.id, m[2])?.cwd;
       const updated = store.deleteTask(m[1], m[2]);
       if (!updated) return json(res, 404, { error: "no such task" });
+      if (bot.cwd && deletedCwd && deletedCwd === threadWorktreePath(bot.id, m[2])) {
+        try {
+          const kept = removeThreadWorktree(bot.cwd, bot.id, m[2]);
+          if (kept) console.log(`[thread-worktree] ${kept}`);
+        } catch (e) { console.warn(`[thread-worktree] cleanup failed: ${(e as Error).message}`); }
+      }
       clearTurnDigestState(m[2]);
       handoffs.forget(m[2]);
       settleDirectFollowup(directTurnGenerationByThread.get(m[2]));

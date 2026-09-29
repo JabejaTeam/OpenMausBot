@@ -292,6 +292,8 @@ export interface WireBot {
   voiceNotes?: boolean;
   /** Queue direct-chat messages behind outstanding delegated work. */
   parkDirectMessages?: boolean;
+  /** Fork: each new thread works in its own git worktree of `cwd`. */
+  threadWorktrees?: boolean;
   /** true after an edit/branch-switch rewound the visible conversation. */
   rewound?: boolean;
   pinned?: boolean;
