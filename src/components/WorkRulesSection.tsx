@@ -40,7 +40,7 @@ function RulesEditor({ scope, label, hint, initial }: { scope: Scope; label: str
         value={text}
         rows={10}
         onChange={(event) => { setText(event.target.value); setStatus("idle"); }}
-        className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink focus:border-hairline focus:outline-none"
+        className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink focus:border-accent focus:outline-none"
       />
       <div className="flex items-center gap-3">
         <button

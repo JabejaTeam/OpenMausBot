@@ -36,6 +36,7 @@ export function usePeople(): void {
       return () => listeners.delete(listener);
     },
     () => version,
+    () => version,
   );
 }
 

@@ -426,7 +426,10 @@ describe("independent bot tasks through the isolated control surface", () => {
     evidence.push({ groupDefaultPreservedUntilStop: true, groupId: group.id, selectedTaskId: threadId });
   }, 30_000);
 
-  it("refuses a second engine in the same selected project folder until its owner stops", async () => {
+  // Jabeja fork (5ef18431): a message for a thread whose project folder is
+  // held by a sibling waits in the queue instead of failing, and runs once
+  // the owner stops.
+  it("queues a second engine in the same selected project folder until its owner stops", async () => {
     const created = await tool("create_bot", { name: "Shared project fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;
     const taskA = created.bot.activeTaskId;
@@ -440,15 +443,15 @@ describe("independent bot tasks through the isolated control surface", () => {
     await control(["set-model", "--bot", botId, "--task", taskB, "--instance", "claude", "--model", models[1]]);
     await control(["send", "--bot", botId, "--task", taskB, "--text", "PROJECT_B_CONFLICT"]);
     const blocked = await control(["wait", "--bot", botId, "--task", taskB, "--timeout", "10"]);
-    expect(blocked.status).toBe("failed");
-    expect(JSON.stringify(blocked.messages)).toContain("project folder");
+    expect(blocked.status).not.toBe("failed");
     expect(existsSync(modelFile(models[1], "json"))).toBe(false);
     expect((await botState(botId)).tasks.find((task: any) => task.taskId === taskA)?.busy).toBe(true);
 
     await control(["interrupt", "--bot", botId, "--task", taskA]);
     await control(["wait", "--bot", botId, "--task", taskA, "--timeout", "10"]);
-    await control(["send", "--bot", botId, "--task", taskB, "--text", "PROJECT_B_NOW_OWNS_FOLDER"]);
-    expect((await dump(models[1])).env.OMB_FIXTURE_CWD).toBe(realpathSync(cwd));
+    const owned = await dump(models[1]);
+    expect(owned.env.OMB_FIXTURE_CWD).toBe(realpathSync(cwd));
+    expect(JSON.stringify(owned)).toContain("PROJECT_B_CONFLICT");
     await control(["interrupt", "--bot", botId, "--task", taskB]);
   }, 45_000);
 

@@ -47,7 +47,7 @@ export function MyPhoneSection() {
         {offer ? t("settings.myPhone.again") : t("settings.myPhone.create")}
       </button>
       {offer ? (
-        <div className="mt-4 rounded-lg border border-line bg-surface p-4">
+        <div className="mt-4 rounded-lg border border-hairline bg-card p-4">
           {expired ? (
             <p className="text-[13px] text-ink-secondary">{t("remote.serverPairing.expired")}</p>
           ) : (
