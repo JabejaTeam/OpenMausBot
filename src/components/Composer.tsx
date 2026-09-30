@@ -1,6 +1,7 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Square, Target, Users, X } from "lucide-react";
+import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Plus, Square, Target, Users, X } from "lucide-react";
+import { useSimpleUi } from "@/lib/simple-ui";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
@@ -120,6 +121,7 @@ export function Composer({
   const { threads, currentBotId } = useThreadRefs();
   const { capabilities } = useDesktopCapabilities();
   const remoteClient = window.ogb?.remoteClient?.active === true;
+  const simpleUi = useSimpleUi();
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
   // offers members plus @everyone; explicit mentions override the room's
   // configured default responder.
@@ -970,9 +972,9 @@ export function Composer({
                 title={t("composer.attach")}
                 className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink"
               >
-                <Paperclip size={17} />
+                {simpleUi ? <Plus size={20} /> : <Paperclip size={17} />}
               </button>
-              {group && !group.dm && (
+              {group && !group.dm && !simpleUi && (
                 <button
                   type="button"
                   aria-pressed={effectiveChannelMode === "goal"}
@@ -1004,7 +1006,7 @@ export function Composer({
                   {effectiveChannelMode === "goal" ? "/goal" : t("composer.goal.chip")}
                 </button>
               )}
-              {modeBot && approvalEngine && !remoteClient && (
+              {modeBot && approvalEngine && !remoteClient && !simpleUi && (
                 <ApprovalModeSelector
                   approvalMode={modeBot.approvalMode}
                   autoApprove={modeBot.autoApprove}
@@ -1016,7 +1018,7 @@ export function Composer({
                   onManageCommandAllowlist={ownerOrAdmin === true ? () => setCommandAllowlistTarget({ botId: modeBot.id, botName: modeBot.name, threadId: modeBot.threadId }) : undefined}
                 />
               )}
-              {modeBot && !remoteClient && (
+              {modeBot && !remoteClient && !simpleUi && (
                 <PlaceChip
                   bot={modeBot}
                   task={composerTask}
@@ -1155,7 +1157,7 @@ export function Composer({
             <Square size={14} className="fill-current" />
           </button>
         )}
-        {!locked && !busy && !hasContent && capabilities.dictation.available && (
+        {!locked && !busy && (!hasContent || simpleUi) && capabilities.dictation.available && (
           <button
             onClick={toggleMic}
             aria-label={recording ? t("composer.dictation.stop") : t("composer.dictation.start")}
@@ -1170,10 +1172,10 @@ export function Composer({
             <Mic size={18} />
           </button>
         )}
-        {hasContent && !locked && (
+        {(hasContent || (simpleUi && !busy)) && !locked && (
           <button
             onClick={send}
-            disabled={attachmentPending}
+            disabled={attachmentPending || !hasContent}
             aria-label={
               busy && canSteer
                   ? t("composer.send.steer")
@@ -1192,7 +1194,9 @@ export function Composer({
               "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
               busy && !canSteer
                   ? "bg-raised text-ink-secondary hover:bg-raised-hover"
-                  : "bg-accent hover:brightness-110",
+                  : simpleUi
+                    ? "bg-ink text-app hover:brightness-95 disabled:opacity-40"
+                    : "bg-accent hover:brightness-110",
             )}
           >
             {busy && !canSteer ? <Clock size={15} /> : <ArrowUp size={17} />}

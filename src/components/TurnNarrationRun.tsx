@@ -7,16 +7,20 @@ import { Check, ChevronRight } from "lucide-react";
 export function TurnNarrationRun({
   label,
   forceOpen = false,
+  flat = false,
   children,
 }: {
   label: string;
   forceOpen?: boolean;
+  /** Simple UI: the narration as plain bubbles, no "Worked for" toggle */
+  flat?: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(forceOpen);
   useEffect(() => {
     if (forceOpen) setOpen(true);
   }, [forceOpen]);
+  if (flat) return <div className="flex flex-col gap-2">{children}</div>;
 
   return (
     <div className="flex flex-col gap-2">

@@ -101,6 +101,8 @@ import { appendComposerDraft, useReplyDraft } from "@/lib/drafts";
 import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
+import { commDirection, SimpleChatHeader, SimpleCommLine } from "./SimpleChat";
+import { useSimpleUi } from "@/lib/simple-ui";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
  * bury the conversation; bots get full markdown. */
@@ -592,6 +594,8 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
   const { state } = useStore();
   const author =
     state.bots.find((b) => b.id === peer.botId) ?? state.bots.find((b) => b.name === peer.name);
+  const simpleUi = useSimpleUi();
+  if (simpleUi) return <SimpleCommLine direction="from" bot={author} name={peer.name} />;
   const how =
     peer.delivery === "delegate_bot"
       ? t("chat.peer.delegated")
@@ -617,11 +621,24 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
 /** A tool run: spinner while live, check/cross once settled. */
 function ActivityChip({ message, place = "auto" }: { message: Message; place?: EffectivePlace }) {
   const { state, dispatch } = useStore();
+  const simpleUi = useSimpleUi();
   const tool = message.tool;
   if (!tool) return null;
   if (message.threadRef) return <ThreadChip message={message} />;
   // bot⇄bot comm chip: opens the channel where the exchange lives
   const comm = message.comm;
+  const direction = simpleUi && comm ? commDirection(tool.name, comm.withName) : null;
+  if (comm && direction) {
+    return (
+      <SimpleCommLine
+        direction={direction}
+        bot={state.bots.find((b) => b.id === comm.withBotId)}
+        name={comm.withName}
+        color={comm.withColor}
+        onOpen={() => dispatch({ type: "select", id: comm.groupId })}
+      />
+    );
+  }
   if (comm) {
     const withBot = state.bots.find((b) => b.id === comm.withBotId);
     return (
@@ -683,7 +700,9 @@ const MessagesList = memo(function MessagesList({
   onReply: (message: Message) => void;
 }) {
   const { state, dispatch } = useStore();
-  const showToolCalls = showToolCallsEnabled(state.config);
+  const simpleUi = useSimpleUi();
+  // Simple UI shows only the conversation: no tool runs, narration as plain bubbles
+  const showToolCalls = !simpleUi && showToolCallsEnabled(state.config);
   // Finished tool chips become compact runs; settled assistant narration
   // becomes one reversible turn row while the terminal answer stays visible.
   const items = useMemo(() => groupTranscript(messages), [messages, locale]);
@@ -736,6 +755,7 @@ const MessagesList = memo(function MessagesList({
               <TurnNarrationRun
                 label={item.label}
                 forceOpen={item.messages.some((message) => message.id === focusedId)}
+                flat={simpleUi}
               >
                 {item.messages.map((message) => (
                   <div key={message.id} className="contents" data-mid={message.id}>
@@ -934,6 +954,7 @@ function PinnedBanner({
 export function ChatView({ bot: profile }: { bot: Bot }) {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const { state, dispatch } = useStore();
+  const simpleUi = useSimpleUi();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   // Windows has no native caption buttons (renderer-drawn, see
   // WindowCaptionButtons); this header is the window drag region, and the
@@ -1242,7 +1263,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       {/* Call mode covers the thread while the bot is on the line */}
       <CallOverlay bot={bot} />
       {/* Header */}
-      <div
+      {simpleUi ? <SimpleChatHeader bot={bot} dragStyle={headerDragStyle} noDragStyle={headerNoDragStyle} /> : <div
         style={headerDragStyle}
         className={cn(
           // @container so the chips on the right can fold to icon bubbles
@@ -1368,9 +1389,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           </button>}
         </div>
         </div>
-      </div>
+      </div>}
 
-      <BotActivityPicker bot={bot} />
+      {!simpleUi && <BotActivityPicker bot={bot} />}
       {routineExecution && <div className="mx-5 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[11.5px] text-ink-secondary">
         <span className="min-w-0 flex-1 truncate">{t("routines.executionDetails", { name: routineExecution.routineName })}</span>
         {canOpenResults && resultsThreadId && <button type="button" onClick={() => openNotificationTarget(dispatch, { botId: bot.id, threadId: resultsThreadId }, state)} className="rounded px-2 py-1 text-accent hover:bg-raised">{t("routines.results.back")}</button>}
@@ -1555,7 +1576,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           here. In the dock so its height is measured with the composer's:
           the transcript pad, the jump pill and bottom-follow all move with
           it. */}
-      {lastRunStep && showRun(recordedRun) && runDismissed.get(transcriptKey) !== lastRunStep.id && (
+      {!simpleUi && lastRunStep && showRun(recordedRun) && runDismissed.get(transcriptKey) !== lastRunStep.id && (
         <div className="flex justify-end px-5 pb-2">
           <VerifyCard
             key={transcriptKey}

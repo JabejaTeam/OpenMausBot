@@ -7,13 +7,20 @@ import { ChevronRight, MessagesSquare } from "lucide-react";
 import { openThread, useStore, type Message } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { BotAvatar } from "./Avatar";
+import { useSimpleUi } from "@/lib/simple-ui";
+import { commDirection, SimpleCommLine } from "./SimpleChat";
 
 export function ThreadChip({ message }: { message: Message }) {
   const { state, dispatch } = useStore();
+  const simpleUi = useSimpleUi();
   const ref = message.threadRef;
   const tool = message.tool;
   if (!ref || !tool) return null;
   const bot = state.bots.find((candidate) => candidate.id === ref.botId);
+  const direction = simpleUi && bot ? commDirection(tool.name, bot.name) : null;
+  if (direction && bot) {
+    return <SimpleCommLine direction={direction} bot={bot} name={bot.name} onOpen={() => openThread(dispatch, ref, state)} />;
+  }
   return (
     <div className="flex justify-start">
       <button

@@ -8,6 +8,8 @@ import { GuidedTour } from "@/components/onboarding/GuidedTour";
 import { ThreadRefsProvider } from "@/components/ThreadRefs";
 import { initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
+import { SimpleSidebar } from "@/components/SimpleSidebar";
+import { useSimpleUi } from "@/lib/simple-ui";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { BotSettingsDialog } from "@/components/BotSettingsDialog";
@@ -37,6 +39,7 @@ import { effectiveLanguage, useLanguageChoice } from "@/lib/language-preference"
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
+  const simpleUi = useSimpleUi();
   const unreadCount =
     state.bots.filter((bot) => !bot.hidden && bot.unread).length +
     state.groups.filter((group) => group.unread).length;
@@ -259,13 +262,19 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           className="absolute inset-0 z-30 bg-black/50 md:hidden"
         />
       )}
-      {!calendarFocus && <Sidebar
+      {!calendarFocus && (simpleUi ? <SimpleSidebar
         open={drawerOpen}
         onClose={() => {
           setDrawerOpen(false);
           menuButtonRef.current?.focus();
         }}
-      />}
+      /> : <Sidebar
+        open={drawerOpen}
+        onClose={() => {
+          setDrawerOpen(false);
+          menuButtonRef.current?.focus();
+        }}
+      />)}
       {state.activeView === "team-map" ? (
         <TeamMapPage />
       ) : state.activeView === "routines" ? (

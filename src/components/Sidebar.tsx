@@ -120,7 +120,7 @@ function sectionLabel(id: string): string {
   return key ? t(key) : sidebarSectionLabel(id);
 }
 
-function preview(bot: Bot): string {
+export function preview(bot: Bot): string {
   if (bot.activity === "waiting-on-you") return t("sidebar.preview.waiting");
   if (bot.waitingForTeammates) return t("sidebar.preview.waitingOnTeammate");
   if (bot.busy) return t("sidebar.preview.working");
@@ -147,7 +147,7 @@ interface MenuState {
   y: number;
 }
 
-function groupPreview(group: Group, bots: Bot[]): string {
+export function groupPreview(group: Group, bots: Bot[]): string {
   if (group.busyBotId) {
     return t("sidebar.preview.botWorking", {
       name: bots.find((b) => b.id === group.busyBotId)?.name ?? t("sidebar.preview.aBot"),

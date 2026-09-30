@@ -69,6 +69,8 @@ import { PersonLabel } from "./PersonLabel";
 import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
+import { commDirection, SimpleCommLine, SimpleHeaderPill } from "./SimpleChat";
+import { useSimpleUi } from "@/lib/simple-ui";
 
 function dayLabel(at: number): string {
   const d = new Date(at);
@@ -89,10 +91,29 @@ function dayLabel(at: number): string {
  * visible pill. */
 export function RoomToolChip({ message, roomId }: { message: Message; roomId?: string }) {
   const { state, dispatch } = useStore();
+  const simpleUi = useSimpleUi();
   const tool = message.tool;
   if (!tool) return null;
   if (message.threadRef) return <ThreadChip message={message} />;
   const comm = message.comm;
+  const direction = simpleUi && comm ? commDirection(tool.name, comm.withName) : null;
+  if (comm && direction) {
+    return (
+      <SimpleCommLine
+        direction={direction}
+        bot={state.bots.find((b) => b.id === comm.withBotId)}
+        name={comm.withName}
+        color={comm.withColor}
+        onOpen={comm.groupId === roomId ? undefined : () => {
+          dispatch({ type: "select", id: comm.groupId });
+          const destination = state.groups.find(g => g.id === comm.groupId);
+          if (comm.threadId && destination?.tasks?.some(task => task.threadId === comm.threadId)) {
+            dispatch({ type: "switchGroupTask", groupId: comm.groupId, threadId: comm.threadId });
+          }
+        }}
+      />
+    );
+  }
   if (comm && comm.groupId !== roomId) {
     const withBot = state.bots.find((b) => b.id === comm.withBotId);
     return (
@@ -928,6 +949,7 @@ export function GroupView({ group }: { group: Group }) {
   const [bulletinDraft, setBulletinDraft] = useState(group.bulletin);
   const [folderOpen, setFolderOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
+  const simpleUi = useSimpleUi();
   const [findOpen, setFindOpen] = useState(false);
   const { replyTo, selectReply, clearReply, consumeReply, restoreReply } = useReplyDraft(
     group.threadId,
@@ -1169,7 +1191,13 @@ export function GroupView({ group }: { group: Group }) {
         <ManageMembersPanel group={group} onClose={closeMembers} triggerRef={membersTriggerRef} />
       )}
       {/* Header: static member avatars; a ring + dot marks the working bot. */}
-      <div
+      {simpleUi ? <SimpleHeaderPill
+        avatar={<span className="flex -space-x-2">{memberMauses.slice(0, 4)}</span>}
+        name={group.name}
+        onClick={() => { if (!remoteClient && !group.dm) setMembersOpen(true); }}
+        dragStyle={headerDragStyle}
+        noDragStyle={headerNoDragStyle}
+      /> : <div
         style={headerDragStyle}
         className={cn(
           // @container so the header can wrap in a narrow column. A container
@@ -1245,7 +1273,7 @@ export function GroupView({ group }: { group: Group }) {
           )}
         </div>
         </div>
-      </div>
+      </div>}
 
       {findOpen && <ChatFindBar threadId={group.threadId} onClose={() => setFindOpen(false)} />}
 
