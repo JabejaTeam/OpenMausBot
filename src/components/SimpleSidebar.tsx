@@ -20,7 +20,7 @@ import {
   userSectionId,
   type SectionDropPlace,
 } from "@/lib/sidebar-layout";
-import { loadSectionOrder, saveSectionOrder } from "@/lib/sidebar-preferences";
+import { loadCollapsedSections, loadSectionOrder, saveCollapsedSections, saveSectionOrder, toggleCollapsedSection } from "@/lib/sidebar-preferences";
 import { simpleSidebarLayout, type SimpleGroup } from "@/lib/simple-ui-groups";
 import { InitialsAvatar } from "./Avatar";
 import { SimpleBotAvatar as BotAvatar } from "./SimpleBotAvatar";
@@ -230,6 +230,13 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
   const [savedOrder, setSavedOrder] = useState<string[]>(() => loadSectionOrder());
   const orderedIds = orderedSidebarSections(layout.groups.map(idOf), savedOrder);
   const groups = [...layout.groups].sort((a, b) => orderedIds.indexOf(idOf(a)) - orderedIds.indexOf(idOf(b)));
+  // Collapsed teams: the same saved list as the full sidebar's sections
+  const [collapsedIds, setCollapsedIds] = useState<string[]>(() => loadCollapsedSections());
+  const toggleTeam = (id: string) => {
+    const next = toggleCollapsedSection(collapsedIds, id);
+    setCollapsedIds(next);
+    saveCollapsedSections(next);
+  };
   const dragFrom = useRef<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; place: SectionDropPlace } | null>(null);
@@ -332,6 +339,8 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
         {groups.map((group) => {
           const id = idOf(group);
           const reorderable = !q && groups.length > 1;
+          // a search always shows its matches
+          const collapsed = !q && collapsedIds.includes(id);
           return (
           <section
             key={group.id}
@@ -359,13 +368,34 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
                 setDragging(id);
               }}
               onDragEnd={endDrag}
-              title={reorderable ? t("simpleUi.dragTeam") : undefined}
-              className={cn("px-2.5 pb-1.5 text-[13.5px] text-ink-secondary", reorderable && "cursor-grab active:cursor-grabbing")}
+              className="mb-1"
             >
-              {groupLabel(group)}
+              <button
+                type="button"
+                onClick={() => toggleTeam(id)}
+                aria-expanded={!collapsed}
+                title={reorderable ? t("simpleUi.dragTeam") : undefined}
+                className={cn(
+                  "group/team flex w-full items-center justify-between rounded-xl px-2.5 py-1.5 text-left text-[13.5px] text-ink-secondary hover:bg-raised/70 hover:text-ink",
+                  reorderable && "cursor-grab active:cursor-grabbing",
+                )}
+              >
+                <span className="truncate">{groupLabel(group)}</span>
+                {collapsed && (group.bots.some((bot) => bot.unread || bot.tasks?.some((task) => task.unread)) || group.rooms.some((room) => room.unread)) && (
+                  <span className="ml-auto mr-2 size-2 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />
+                )}
+                <ChevronDown
+                  size={16}
+                  aria-hidden="true"
+                  className={cn(
+                    "shrink-0 transition-transform",
+                    collapsed ? "-rotate-90 opacity-100" : "opacity-0 group-hover/team:opacity-100 group-focus-visible/team:opacity-100 max-md:opacity-70",
+                  )}
+                />
+              </button>
             </div>
-            {group.bots.map((bot) => <BotRow key={bot.id} bot={bot} query={q} />)}
-            {group.rooms.map((room) => (
+            {!collapsed && group.bots.map((bot) => <BotRow key={bot.id} bot={bot} query={q} />)}
+            {!collapsed && group.rooms.map((room) => (
               <Row
                 key={room.id}
                 selected={chatView && state.selectedId === room.id}
