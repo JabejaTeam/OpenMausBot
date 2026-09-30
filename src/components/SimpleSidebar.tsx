@@ -17,10 +17,7 @@ import { groupPreview, preview } from "./Sidebar";
 import { profileInitials } from "./SidebarProfileMenu";
 
 function groupLabel(group: SimpleGroup<Bot, Group>): string {
-  if (group.section) return group.section;
-  if (group.id === "clients") return t("simpleUi.clients");
-  if (group.id === "coding") return t("simpleUi.coding");
-  return t("simpleUi.unassigned");
+  return group.section ?? t("simpleUi.unassigned");
 }
 
 function Row({
@@ -100,7 +97,7 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
     .filter((bot) => shownForMe(bot, hiddenForMe, q))
     .filter((bot) => !q || bot.name.toLowerCase().includes(q) || (bot.title ?? "").toLowerCase().includes(q));
   const rooms = state.groups.filter((group) => !q || group.name.toLowerCase().includes(q));
-  const { hero, groups } = simpleSidebarLayout(bots, rooms);
+  const { hero, groups } = simpleSidebarLayout(bots, rooms, state.sections ?? []);
   const chatView = state.activeView === "chat";
   const select = (id: string) => dispatch({ type: "select", id });
 

@@ -18,21 +18,20 @@ describe("simpleSidebarLayout", () => {
     { id: "channel", dm: true },
   ];
 
-  it("files bots like the Grok bot list", () => {
-    const { hero, groups } = simpleSidebarLayout(bots, rooms);
+  it("keeps every bot in its own team, in section order", () => {
+    const { hero, groups } = simpleSidebarLayout(bots, rooms, ["Ripal", "Jabeja"]);
     expect(hero?.id).toBe("jarvis");
     expect(groups.map((g) => [g.id, g.bots.map((b) => b.id), g.rooms.map((r) => r.id)])).toEqual([
-      ["section:Jabeja", ["jabeja-pm", "ads"], ["jabeja-room"]],
-      ["clients", ["ripal-pm"], []],
-      ["coding", ["jabeja-code", "ripal-code"], []],
+      ["section:Ripal", ["ripal-pm", "ripal-code"], []],
+      ["section:Jabeja", ["jabeja-pm", "ads", "jabeja-code"], ["jabeja-room"]],
       ["unassigned", ["loose"], ["sync"]],
     ]);
   });
 
   it("drops empty groups and has no hero without an unsectioned chief", () => {
-    const { hero, groups } = simpleSidebarLayout([{ id: "a", section: "X", kind: "code" }], []);
+    const { hero, groups } = simpleSidebarLayout([{ id: "a", section: "X" }], [], ["Empty"]);
     expect(hero).toBeNull();
-    expect(groups.map((g) => g.id)).toEqual(["coding"]);
+    expect(groups.map((g) => g.id)).toEqual(["section:X"]);
   });
 });
 
