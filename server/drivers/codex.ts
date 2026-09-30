@@ -490,6 +490,34 @@ export function codexNativeIncomingLogMessage(
   return message;
 }
 
+// Codex hands a stdio server the app-server's values for the names in its
+// env_vars, so two custom servers setting the same variable (two Billit
+// companies, both BILLIT_PARTY_ID) would both get whichever was mounted last.
+// Each custom server's values therefore wait under names of its own, and this
+// launcher copies them back to the names the server reads, then starts it.
+const ENV_LAUNCHER = [
+  "const { spawn } = require('node:child_process');",
+  "const [names, command, ...args] = process.argv.slice(1);",
+  "for (const [to, from] of Object.entries(JSON.parse(names))) process.env[to] = process.env[from];",
+  "for (const key of Object.keys(process.env)) if (key.startsWith('OMB_MCP_ENV_') || key === 'ELECTRON_RUN_AS_NODE') delete process.env[key];",
+  "const child = spawn(command, args, { stdio: 'inherit' });",
+  "for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => child.kill(signal));",
+  "child.on('error', (error) => { console.error(error.message); process.exit(127); });",
+  "child.on('exit', (code, signal) => (signal ? process.kill(process.pid, signal) : process.exit(code ?? 1)));",
+].join("\n");
+
+function withOwnEnvNames(name: string, server: McpServerSpec): McpServerSpec {
+  if ("url" in server || !Object.keys(server.env).length) return server;
+  const stem = `OMB_MCP_ENV_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
+  const names: Record<string, string> = {};
+  const env: Record<string, string> = { ELECTRON_RUN_AS_NODE: "1" };
+  Object.entries(server.env).forEach(([variable, value], index) => {
+    names[variable] = `${stem}_${index}`;
+    env[`${stem}_${index}`] = value;
+  });
+  return { command: process.execPath, args: ["-e", ENV_LAUNCHER, JSON.stringify(names), server.command, ...server.args], env };
+}
+
 function mountMcpServer(
   appServerArgs: string[],
   env: Record<string, string | undefined>,
@@ -690,7 +718,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           const mountName = mountedMcpServerName(name, declaredInCodexConfig);
           if (mountName !== name) noteRenamedMcpServer(name, mountName);
-          mountMcpServer(appServerArgs, env, mountName, server, false);
+          mountMcpServer(appServerArgs, env, mountName, withOwnEnvNames(mountName, server), false);
         }
         if (turn.integrations?.phone) {
           const bridge = turn.integrations.phone;

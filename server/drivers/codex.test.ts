@@ -6,6 +6,7 @@
 // The fake is a shebang script — the same constraint codex.cmd itself
 // hits on Windows. resolveCliSpawn covers both, so these run everywhere.
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -728,14 +729,51 @@ describe("CodexDriver turns (fake app-server)", () => {
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     const argv = seen.argv.join(" ");
     expect(argv).toContain("mcp_servers.notes.command");
-    // env value stays in the child env; argv carries names only
+    // env value stays in the child env under a harness name; argv carries names only
     expect(argv).toContain("NOTES_TOKEN");
     expect(argv).not.toContain("tok-notes");
-    expect(seen.env.NOTES_TOKEN).toBe("tok-notes");
+    expect(seen.env.OMB_MCP_ENV_NOTES_0).toBe("tok-notes");
     // the built-in keeps codex's pre-quieted approval mode; the custom
     // server does NOT — its tool calls arrive as approval cards
     expect(argv).toContain('mcp_servers.openmausbot_connectors.default_tools_approval_mode');
     expect(argv).not.toContain('mcp_servers.notes.default_tools_approval_mode');
+  });
+
+  it("gives custom servers that share a variable name each their own value", async () => {
+    await create();
+    const dump = join(scratch, "shared-env-name.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    const printer = join(scratch, "print-party.js");
+    writeFileSync(printer, "process.stdout.write(JSON.stringify({ party: process.env.PARTY, leaked: Object.keys(process.env).filter((k) => k.startsWith('OMB_MCP_ENV_')) }));");
+
+    await instance.adapter.sendTurn({
+      threadId: "t-shared-env-name",
+      text: "go",
+      integrations: {
+        custom: {
+          "billit-a": { command: process.execPath, args: [printer], env: { PARTY: "111" } },
+          "billit-b": { command: process.execPath, args: [printer], env: { PARTY: "222" } },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv.join(" ")).not.toMatch(/111|222/);
+    // start each server the way codex does: its command and args, and the
+    // app-server's values for the names in its env_vars
+    const setting = (key: string) => {
+      const arg = (seen.argv as string[]).find((a) => a.startsWith(`${key}=`));
+      return JSON.parse(arg!.slice(key.length + 1));
+    };
+    const launch = (name: string) => {
+      const prefix = `mcp_servers.${name}`;
+      const names: string[] = setting(`${prefix}.env_vars`);
+      const env = Object.fromEntries(names.map((n) => [n, seen.env[n]]));
+      const run = spawnSync(setting(`${prefix}.command`), setting(`${prefix}.args`), { env, encoding: "utf8" });
+      return JSON.parse(run.stdout);
+    };
+    expect(launch("billit-a")).toEqual({ party: "111", leaked: [] });
+    expect(launch("billit-b")).toEqual({ party: "222", leaked: [] });
   });
 
   it("mounts a custom server under its own name when the user's config.toml already has one by that name", async () => {
