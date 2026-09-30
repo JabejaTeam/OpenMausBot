@@ -87,17 +87,17 @@ export function createForkPeopleRoutes(deps: ForkPeopleRouteDeps): RouteHandler 
       notePerson(key, email);
       const view = () => {
         const profile = readPersonProfile(key);
-        return { id: key, email: profile?.email ?? email, name: profile?.name ?? "", text: profile?.text ?? "", maxLines: PERSON_PROFILE_MAX_LINES };
+        return { id: key, email: profile?.email ?? email, name: profile?.name ?? "", text: profile?.text ?? "", hiddenBots: profile?.hiddenBots ?? [], maxLines: PERSON_PROFILE_MAX_LINES };
       };
       if (method === "GET") return json(res, 200, view());
       if (method === "PUT") {
         const body = await readBody(req);
-        if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "Send { name?, text? }." });
-        const { name, text } = body as { name?: unknown; text?: unknown };
+        if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "Send { name?, text?, hiddenBots? }." });
+        const { name, text, hiddenBots } = body as { name?: unknown; text?: unknown; hiddenBots?: unknown };
         if ((name !== undefined && typeof name !== "string") || (text !== undefined && typeof text !== "string")) {
           return json(res, 400, { error: "name and text must be strings." });
         }
-        const saved = savePersonProfile(key, { name: name as string | undefined, text: text as string | undefined });
+        const saved = savePersonProfile(key, { name: name as string | undefined, text: text as string | undefined, hiddenBots });
         return saved.ok ? json(res, 200, view()) : json(res, 400, { error: saved.error });
       }
       return json(res, 405, { error: "Use GET or PUT." });

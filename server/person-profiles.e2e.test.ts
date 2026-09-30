@@ -121,6 +121,15 @@ posixOnly("a profile per person, carried by the turns done for them", () => {
     expect((await api("PUT", "/api/people/me", { name: "two\nlines" }, ADA)).status).toBe(400);
   });
 
+  it("keeps the bots a member hides to that member", async () => {
+    const hidden = await api("PUT", "/api/people/me", { hiddenBots: ["bot-a", "bot-b"] }, BOB);
+    expect(hidden.status, JSON.stringify(hidden.body)).toBe(200);
+    expect(hidden.body).toMatchObject({ hiddenBots: ["bot-a", "bot-b"], text: "- Writes in French" });
+    expect((await api("GET", "/api/people/me", undefined, ADA)).body.hiddenBots).toEqual([]);
+    expect((await api("PUT", "/api/people/me", { hiddenBots: [42] }, BOB)).status).toBe(400);
+    expect((await api("PUT", "/api/people/me", { hiddenBots: [] }, BOB)).body.hiddenBots).toEqual([]);
+  });
+
   it("lists names by person key for a transcript, never emails or profile text", async () => {
     const ada = (await api("GET", "/api/people/me", undefined, ADA)).body;
     expect(ada.id).toMatch(/^p_/);

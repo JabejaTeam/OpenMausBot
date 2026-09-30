@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, BookOpen, Crown, MessageCircle, Minus, Monitor, MoreHorizontal, Pencil, Plus, Trash2, Users } from "lucide-react";
+import { ArrowRight, BookOpen, Crown, Eye, EyeOff, MessageCircle, Minus, Monitor, MoreHorizontal, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { teamMapStatus, type TeamMapSection } from "@/lib/team-map";
+import { canHideBots, hiddenBotsForMe, setBotHiddenForMe, usePeople } from "@/lib/people";
 import { COMPUTER_DRAG_TYPE, fitTeams, layoutTeams, orderBots, parseBotOrders, parsePositions, reorderBot, zoomAt, type Point, type View } from "@/lib/team-canvas";
 import { BotAvatar } from "./Avatar";
 import { InstanceProviderMark, ProviderMark } from "./ProviderIcons";
@@ -28,11 +29,13 @@ function BotCard({ bot, selected, moving, connected, onComputer, onArrange }: {
   onArrange?: (bot: Bot, delta: number) => void;
 }) {
   const { state, dispatch } = useStore();
+  usePeople();
+  const hiddenForMe = hiddenBotsForMe().has(bot.id);
   const status = teamMapStatus(bot);
   const instance = state.instances.find((item) => item.instanceId === bot.modelSelection.instanceId);
   const model = instance?.models.options.find((item) => item.id === bot.modelSelection.model)?.label ?? bot.modelSelection.model;
   return <article className={cn("relative h-[126px] w-[236px] shrink-0 rounded-xl border bg-card shadow-sm transition-colors",
-    selected ? "border-accent/60 ring-1 ring-accent/15" : connected ? "border-accent/40" : "border-hairline/50 hover:border-ink-secondary/40", moving && "opacity-35")}>
+    selected ? "border-accent/60 ring-1 ring-accent/15" : connected ? "border-accent/40" : "border-hairline/50 hover:border-ink-secondary/40", moving ? "opacity-35" : hiddenForMe && "opacity-55")}>
     <button data-bot-id={bot.id} aria-label={t("canvas.editBot", { name: bot.name })}
       onClick={() => dispatch({ type: "toggleSettings", botId: bot.id, section: "identity", open: true })}
       title={onArrange ? t("canvas.reorderHint") : undefined}
@@ -58,6 +61,10 @@ function BotCard({ bot, selected, moving, connected, onComputer, onArrange }: {
       </span>}
       {selected && onComputer && <button className={cn(iconButton, "size-8")} aria-label={t("canvas.botComputer", { name: bot.name })} title={t("computer.tab.computer")}
         onClick={() => onComputer(bot)}><Monitor size={13} /></button>}
+      {canHideBots() && <button className={cn(iconButton, "size-8", hiddenForMe && "text-ink")} aria-pressed={hiddenForMe}
+        aria-label={t(hiddenForMe ? "canvas.showBotForMe" : "canvas.hideBotForMe", { name: bot.name })}
+        title={hiddenForMe ? t("sidebar.bot.showForMe") : t("sidebar.bot.hideForMe")}
+        onClick={() => void setBotHiddenForMe(bot.id, !hiddenForMe).catch(() => undefined)}>{hiddenForMe ? <EyeOff size={13} /> : <Eye size={13} />}</button>}
       <button aria-label={t("canvas.changeModel", { name: bot.name })} title={`${t("canvas.defaultModel")}: ${model}`}
         onClick={() => dispatch({ type: "toggleSettings", botId: bot.id, section: "model", open: true })}
         className="ml-auto flex h-8 min-w-0 max-w-[130px] items-center gap-1.5 rounded-md px-2 text-[10px] text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">

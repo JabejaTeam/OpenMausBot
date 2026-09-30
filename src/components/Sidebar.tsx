@@ -14,6 +14,8 @@ import {
   ClipboardCopy,
   Copy,
   Crown,
+  Eye,
+  EyeOff,
   FolderMinus,
   FolderPlus,
   Library,
@@ -35,6 +37,7 @@ import {
 } from "lucide-react";
 import { api, useStore, formatTime, visibleMessages, currentTaskBot, type AppState, type Bot, type Group } from "@/state/store";
 import { peerLine } from "@/lib/peer-message";
+import { canHideBots, hiddenBotsForMe, setBotHiddenForMe, usePeople } from "@/lib/people";
 import { liveActivityLabel } from "@/lib/live-activity";
 
 import { BotAvatar, InitialsAvatar } from "./Avatar";
@@ -81,6 +84,7 @@ import {
   partitionSidebarBots,
   partitionSidebarGroups,
   placeSection,
+  shownForMe,
   sameSectionOrder,
   sidebarGoalRunPreview,
   sidebarLayoutInteractive,
@@ -670,6 +674,7 @@ export function BotContextMenu({
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const bot = state.bots.find((b) => b.id === menu.botId);
   const menuRef = useRef<HTMLDivElement>(null);
+  usePeople();
   useLayoutEffect(() => {
     const element = menuRef.current;
     if (!element) return;
@@ -707,6 +712,7 @@ export function BotContextMenu({
 
   if (!bot) return null;
   const deleting = state.deletingBots[bot.id] === true;
+  const hiddenForMe = hiddenBotsForMe().has(bot.id);
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
   const visibleBotCount = state.bots.filter((candidate) => !candidate.hidden).length;
@@ -760,6 +766,12 @@ export function BotContextMenu({
         {item(<FolderPlus size={16} className="text-ink-secondary" />, t("folder.new"), () => onNewFolder(bot.id))}
         {divider("threads")}
       </>}
+      {canHideBots() && item(
+        hiddenForMe ? <Eye size={16} className="text-ink-secondary" /> : <EyeOff size={16} className="text-ink-secondary" />,
+        hiddenForMe ? t("sidebar.bot.showForMe") : t("sidebar.bot.hideForMe"),
+        () => void setBotHiddenForMe(bot.id, !hiddenForMe).catch(() => undefined),
+        { hint: t("sidebar.bot.hideForMeHint") },
+      )}
       {remoteClient ? [
         item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"), () => {
           onClose();
@@ -1550,6 +1562,7 @@ export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete }: {
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { state, dispatch } = useStore();
+  usePeople();
   const showThreads = useShowThreads();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const { capabilities } = useDesktopCapabilities();
@@ -1745,8 +1758,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   // instantly from local state; transcript hits are the SearchResults
   // section below the list (debounced, lands on the message).
 
+  const hiddenForMe = hiddenBotsForMe();
   const matchingBots = state.bots
     .filter((b) => !b.hidden)
+    .filter((b) => shownForMe(b, hiddenForMe, q))
     .filter(
       (b) =>
         !q ||

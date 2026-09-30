@@ -9,6 +9,7 @@ import { peerLine } from "./peer-message";
 
 let me: string | undefined;
 let names: Record<string, string> = {};
+let hiddenBots: ReadonlySet<string> = new Set();
 let version = 0;
 let requested = false;
 const listeners = new Set<() => void>();
@@ -17,14 +18,19 @@ function loadPeople(): void {
   if (requested) return;
   requested = true;
   void Promise.allSettled([
-    api<{ id?: string }>("/api/people/me"),
+    api<{ id?: string; hiddenBots?: string[] }>("/api/people/me"),
     api<{ names?: Record<string, string> }>("/api/people/names"),
   ]).then(([mine, all]) => {
     if (mine.status === "fulfilled" && typeof mine.value?.id === "string") me = mine.value.id;
+    if (mine.status === "fulfilled" && Array.isArray(mine.value?.hiddenBots)) hiddenBots = new Set(mine.value.hiddenBots);
     if (all.status === "fulfilled" && all.value?.names && typeof all.value.names === "object") names = all.value.names;
-    version += 1;
-    for (const listener of listeners) listener();
+    changed();
   });
+}
+
+function changed(): void {
+  version += 1;
+  for (const listener of listeners) listener();
 }
 
 /** Re-render once the people are known. */
@@ -50,9 +56,40 @@ export function otherSenderName(message: Message): string | undefined {
   return names[sender.id] ?? sender.name;
 }
 
+/** Bots the viewer keeps out of their own sidebar (Team map → eye). Empty
+ * without a signed-in person. Call usePeople() to re-render when it loads. */
+export function hiddenBotsForMe(): ReadonlySet<string> {
+  return hiddenBots;
+}
+
+/** Whether this viewer can hide bots: only a signed-in person has a list. */
+export function canHideBots(): boolean {
+  return me !== undefined;
+}
+
+/** Hide or show a bot in the viewer's own lists; saved on their profile so
+ * the web app and phone agree. Rolls back when the save fails. */
+export async function setBotHiddenForMe(botId: string, hidden: boolean): Promise<void> {
+  const before = hiddenBots;
+  const next = new Set(before);
+  if (hidden) next.add(botId); else next.delete(botId);
+  hiddenBots = next;
+  changed();
+  try {
+    const saved = await api<{ hiddenBots?: string[] }>("/api/people/me", { method: "PUT", body: JSON.stringify({ hiddenBots: [...next] }) });
+    if (Array.isArray(saved?.hiddenBots)) hiddenBots = new Set(saved.hiddenBots);
+  } catch (error) {
+    hiddenBots = before;
+    throw error;
+  } finally {
+    changed();
+  }
+}
+
 /** Test seam. */
-export function setPeopleForTest(next: { me?: string; names?: Record<string, string> }): void {
+export function setPeopleForTest(next: { me?: string; names?: Record<string, string>; hiddenBots?: string[] }): void {
   me = next.me;
   names = next.names ?? {};
+  hiddenBots = new Set(next.hiddenBots ?? []);
   requested = true;
 }

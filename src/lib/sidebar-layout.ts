@@ -78,6 +78,12 @@ export function sidebarSectionCollapsed(
   return sidebarLayoutInteractive(density, query) && collapsedIds.includes(id);
 }
 
+/** A bot the viewer hid for themselves (Team map → eye) stays out of their
+ * list, except while a search names it: searching is how they find it again. */
+export function shownForMe(bot: Pick<SidebarBot, "id">, hiddenForMe: ReadonlySet<string>, query: string): boolean {
+  return Boolean(query) || !hiddenForMe.has(bot.id);
+}
+
 /** Pinned bots are a virtual view. Their saved section is left untouched so
  * unpinning returns them to the context they came from. */
 export function partitionSidebarBots<T extends SidebarBot>(bots: T[]) {

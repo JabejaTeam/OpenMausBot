@@ -16,6 +16,7 @@ import { DATA_DIR } from "./config.ts";
 export const PERSON_PROFILE_MAX_LINES = 200;
 export const PERSON_PROFILE_MAX_BYTES = 24_000;
 export const PERSON_NAME_MAX = 100;
+export const HIDDEN_BOTS_MAX = 500;
 export const PEOPLE_DIR = join(DATA_DIR, "people");
 
 export interface PersonProfile {
@@ -23,6 +24,9 @@ export interface PersonProfile {
   name?: string;
   text: string;
   updatedAt?: number;
+  /** Bots this person keeps out of their own sidebar (Team map → eye). Only
+   * their own view: access, delegation and everyone else's lists are untouched. */
+  hiddenBots?: string[];
 }
 
 export type PersonProfileUpdate =
@@ -44,6 +48,7 @@ export function readPersonProfile(key: string | undefined): PersonProfile | unde
       ...(typeof raw.name === "string" ? { name: raw.name } : {}),
       text: typeof raw.text === "string" ? raw.text : "",
       ...(typeof raw.updatedAt === "number" ? { updatedAt: raw.updatedAt } : {}),
+      ...(Array.isArray(raw.hiddenBots) ? { hiddenBots: raw.hiddenBots.filter((id): id is string => typeof id === "string") } : {}),
     };
   } catch {
     return undefined;
@@ -87,8 +92,9 @@ export function notePerson(key: string, email: string): void {
   write(key, { ...(current ?? { text: "" }), email: email.trim().toLowerCase() });
 }
 
-/** The person's own edit from Settings: name and/or the whole text. */
-export function savePersonProfile(key: string, patch: { name?: string; text?: string }, now = Date.now()): PersonProfileUpdate {
+/** The person's own edit from Settings: name, the whole text and/or the
+ * bots they hide from their own lists. */
+export function savePersonProfile(key: string, patch: { name?: string; text?: string; hiddenBots?: unknown }, now = Date.now()): PersonProfileUpdate {
   const current = readPersonProfile(key) ?? { text: "" };
   const next: PersonProfile = { ...current };
   if (patch.name !== undefined) {
@@ -100,6 +106,14 @@ export function savePersonProfile(key: string, patch: { name?: string; text?: st
     const error = overBudget(patch.text);
     if (error) return { ok: false, code: "over-budget", error };
     next.text = patch.text;
+  }
+  if (patch.hiddenBots !== undefined) {
+    const ids = patch.hiddenBots;
+    if (!Array.isArray(ids) || ids.length > HIDDEN_BOTS_MAX || ids.some((id) => typeof id !== "string" || !/^[\w-]{1,100}$/.test(id))) {
+      return { ok: false, code: "invalid", error: `hiddenBots must be a list of at most ${HIDDEN_BOTS_MAX} bot ids.` };
+    }
+    const unique = [...new Set(ids as string[])];
+    if (unique.length) next.hiddenBots = unique; else delete next.hiddenBots;
   }
   next.updatedAt = now;
   return { ok: true, profile: write(key, next) };

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, BookOpen, Box, Loader2, Monitor, Network, Plus, Save, Users, X } from "lucide-react";
+import { ArrowRight, BookOpen, Box, EyeOff, Loader2, Monitor, Network, Plus, Save, Users, X } from "lucide-react";
 
 import { api, formatTime, useStore, type Bot } from "@/state/store";
 import {
@@ -15,6 +15,7 @@ import { TeamCanvas } from "./TeamCanvas";
 import { TeamDialog } from "./TeamDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { t } from "@/lib/i18n";
+import { hiddenBotsForMe, usePeople } from "@/lib/people";
 import { CanvasComputers } from "./CanvasComputers";
 import type { TeamComputer } from "../../shared/team-computer";
 
@@ -267,6 +268,9 @@ export function TeamMapPage() {
   pendingMoveRef.current = pendingMove;
   useEffect(() => () => pendingMoveRef.current?.resolve(false), []);
   const bots = useMemo(() => state.bots.filter((bot) => !bot.hidden), [state.bots]);
+  usePeople();
+  const hiddenForMe = hiddenBotsForMe();
+  const hiddenCount = bots.filter((bot) => hiddenForMe.has(bot.id)).length;
   const sections = useMemo(() => {
     const names = [...new Set([...(state.sections ?? []), ...state.groups.flatMap((group) => group.section ? [group.section] : [])])];
     const order = (key: string) => key === "" ? -1 : names.includes(key) ? names.indexOf(key) : names.length;
@@ -322,6 +326,8 @@ export function TeamMapPage() {
             <Network size={18} className="text-ink-secondary" />
             <h1 className="text-[17px] font-semibold">Team map</h1>
             <span className="ml-1 text-[11px] text-ink-secondary">{t("canvas.botCount", { count: bots.length })}</span>
+            {hiddenCount > 0 && <span className="flex items-center gap-1 text-[11px] text-ink-secondary" title={t("sidebar.bot.hideForMeHint")}>
+              · <EyeOff size={11} /> {t("canvas.hiddenForMe", { count: hiddenCount })}</span>}
           </div>
           <p className="mt-1 text-[12px] text-ink-secondary">{t("canvas.description")}</p>
         </div>

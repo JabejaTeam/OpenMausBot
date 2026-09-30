@@ -28,6 +28,20 @@ describe("person profiles", () => {
     expect(personTurnPreamble(undefined, true)).toBe("");
   });
 
+  it("keeps the bots a person hides with their profile, through a bot's edits", () => {
+    notePerson(ADA, "ada@example.test");
+    expect(savePersonProfile(ADA, { hiddenBots: ["b1", "b2", "b1"] }).ok).toBe(true);
+    expect(readPersonProfile(ADA)?.hiddenBots).toEqual(["b1", "b2"]);
+    expect(updatePersonProfile(ADA, { action: "append", text: "Likes tables" }).ok).toBe(true);
+    expect(readPersonProfile(ADA)?.hiddenBots).toEqual(["b1", "b2"]);
+    expect(personTurnPreamble(readPersonProfile(ADA), true)).not.toContain("b1");
+    expect(readPersonProfile(BOB)?.hiddenBots).toBeUndefined();
+    expect(savePersonProfile(ADA, { hiddenBots: "b1" })).toMatchObject({ ok: false, code: "invalid" });
+    expect(savePersonProfile(ADA, { hiddenBots: ["../x"] })).toMatchObject({ ok: false, code: "invalid" });
+    expect(savePersonProfile(ADA, { hiddenBots: [] }).ok).toBe(true);
+    expect(readPersonProfile(ADA)?.hiddenBots).toBeUndefined();
+  });
+
   it("lets a bot append, replace and remove one fact at a time", () => {
     notePerson(ADA, "ada@example.test");
     expect(updatePersonProfile(ADA, { action: "append", text: "Writes in Dutch" }).ok).toBe(true);
