@@ -1,19 +1,33 @@
 // Simple UI (fork): the one-list sidebar — chief on top, bots and rooms
 // filed by lib/simple-ui-groups, profile and connected apps at the bottom.
-// No density, sections menu, threads or tools rows: those stay in the full UI.
-import { useState } from "react";
-import { Plus, Search, X } from "lucide-react";
+// Threads: hovering a bot shows the thread list toggle and a new-thread button;
+// active and unread threads always show under the bot. Teams reorder by drag,
+// sharing the saved order with the full sidebar.
+import { useRef, useState } from "react";
+import { ChevronDown, Plus, Search, X } from "lucide-react";
 import { useStore, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { stateForBot } from "@/lib/mascot";
 import { hiddenBotsForMe, usePeople } from "@/lib/people";
-import { shownForMe } from "@/lib/sidebar-layout";
+import {
+  BOTS_SECTION_ID,
+  mergeSectionOrder,
+  orderedSidebarSections,
+  placeSection,
+  sameSectionOrder,
+  shownForMe,
+  userSectionId,
+  type SectionDropPlace,
+} from "@/lib/sidebar-layout";
+import { loadSectionOrder, saveSectionOrder } from "@/lib/sidebar-preferences";
 import { simpleSidebarLayout, type SimpleGroup } from "@/lib/simple-ui-groups";
 import { InitialsAvatar } from "./Avatar";
 import { SimpleBotAvatar as BotAvatar } from "./SimpleBotAvatar";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
-import { groupPreview, preview } from "./Sidebar";
+import { BotThreadList, groupPreview, preview } from "./Sidebar";
+import { SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
+import { WorkingDots } from "./WorkingIndicator";
 import { profileInitials } from "./SidebarProfileMenu";
 
 function groupLabel(group: SimpleGroup<Bot, Group>): string {
@@ -26,14 +40,19 @@ function Row({
   avatar,
   name,
   sub,
+  subNode,
   onClick,
+  padRight = false,
 }: {
   selected: boolean;
   unread?: boolean;
   avatar: React.ReactNode;
   name: string;
   sub: string;
+  subNode?: React.ReactNode;
   onClick: () => void;
+  /** room for hover buttons on the right */
+  padRight?: boolean;
 }) {
   return (
     <button
@@ -42,16 +61,123 @@ function Row({
       aria-current={selected ? "page" : undefined}
       className={cn(
         "flex w-full items-center gap-3 rounded-2xl px-2.5 py-2 text-left transition-colors",
+        padRight && "group-hover:pr-[4.5rem] group-focus-within:pr-[4.5rem] max-md:pr-[4.5rem]",
         selected ? "bg-raised" : "hover:bg-raised/50",
       )}
     >
       <span className="flex size-10 shrink-0 items-center justify-center">{avatar}</span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[15px] font-semibold leading-5 text-ink">{name}</span>
-        <span className="block truncate text-[13.5px] leading-5 text-ink-secondary">{sub || " "}</span>
+        {subNode ?? <span className="block truncate text-[13.5px] leading-5 text-ink-secondary">{sub || " "}</span>}
       </span>
-      {unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
+      {unread && <span className={cn("size-2 shrink-0 rounded-full bg-accent", padRight && "group-hover:hidden group-focus-within:hidden")} aria-label={t("task.unread")} />}
     </button>
+  );
+}
+
+/** A bot row: Grok look, plus the full sidebar's threads — a hover toggle
+ * for the whole list and a new-thread button; active/unread threads below. */
+function BotRow({ bot, query }: { bot: Bot; query: string }) {
+  const { state, dispatch } = useStore();
+  const [open, setOpen] = useState(false);
+  const selected = state.activeView === "chat" && state.selectedId === bot.id;
+  const activity = sidebarBotActivityTasks(bot, state.pendingQueued);
+  const working = Boolean(bot.busy) || activity.some((task) => task.busy || task.activity === "working");
+  const unread = Boolean(bot.unread) || activity.some((task) => task.unread);
+  const hasThreadList = (bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0;
+  const hover = "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-70";
+  return (
+    <>
+      <div className="group relative">
+        <Row
+          selected={selected}
+          unread={unread}
+          avatar={
+            <span className="relative flex">
+              <BotAvatar bot={bot} state={working ? stateForBot(bot) : "happy"} size={40} animated={working} />
+              {working && <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-panel bg-success" />}
+            </span>
+          }
+          name={bot.name}
+          sub={working ? "" : preview(bot)}
+          subNode={working ? <span className="flex h-5 items-center" role="status"><WorkingDots size={3.5} /></span> : undefined}
+          onClick={() => dispatch({ type: "select", id: bot.id })}
+          padRight
+        />
+        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+          <button
+            type="button"
+            aria-label={t("task.newShort")}
+            title={t("task.newShort")}
+            onClick={() => { setOpen(true); dispatch({ type: "newTask", botId: bot.id }); }}
+            className={cn("flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink", hover)}
+          >
+            <Plus size={15} />
+          </button>
+          {hasThreadList && (
+            <button
+              type="button"
+              aria-label={t(open ? "task.collapseNamed" : "task.expandNamed", { name: bot.name })}
+              aria-expanded={open}
+              onClick={() => setOpen((value) => !value)}
+              className={cn("flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink", !open && hover)}
+            >
+              <ChevronDown size={15} className={cn("transition-transform", open && "rotate-180")} />
+            </button>
+          )}
+        </div>
+      </div>
+      {open && hasThreadList
+        ? <div className="pl-10"><BotThreadList bot={bot} selected={selected} density="comfortable" query={query} /></div>
+        : <div className="pl-10"><SidebarBotActivity bot={bot} density="comfortable" /></div>}
+    </>
+  );
+}
+
+/** The unsectioned chief, big on top; same thread controls as a bot row. */
+function HeroBot({ bot, query }: { bot: Bot; query: string }) {
+  const { state, dispatch } = useStore();
+  const [open, setOpen] = useState(false);
+  const selected = state.activeView === "chat" && state.selectedId === bot.id;
+  const activity = sidebarBotActivityTasks(bot, state.pendingQueued);
+  const working = Boolean(bot.busy) || activity.some((task) => task.busy || task.activity === "working");
+  const unread = Boolean(bot.unread) || activity.some((task) => task.unread);
+  const hasThreadList = (bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0;
+  const hover = "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-70";
+  const small = "flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink";
+  return (
+    <div className="mb-2">
+      <div className="group relative flex justify-center">
+        <button
+          type="button"
+          onClick={() => dispatch({ type: "select", id: bot.id })}
+          aria-current={selected ? "page" : undefined}
+          className="mt-1 flex flex-col items-center gap-1.5 rounded-2xl px-4 py-2 hover:bg-raised/40"
+        >
+          <span className="relative">
+            <BotAvatar bot={bot} state={working ? stateForBot(bot) : "happy"} size={76} animated={working} />
+            {unread && <span className="absolute right-0 top-1 size-2.5 rounded-full bg-accent" />}
+            {working && <span className="absolute bottom-1 right-1 size-3 rounded-full border-2 border-panel bg-success" />}
+          </span>
+          <span className={cn("text-[13px] font-medium", selected ? "text-ink" : "text-ink-secondary")}>{bot.name}</span>
+        </button>
+        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 flex-col items-center gap-0.5">
+          <button type="button" aria-label={t("task.newShort")} title={t("task.newShort")}
+            onClick={() => { setOpen(true); dispatch({ type: "newTask", botId: bot.id }); }} className={cn(small, hover)}>
+            <Plus size={15} />
+          </button>
+          {hasThreadList && (
+            <button type="button" aria-label={t(open ? "task.collapseNamed" : "task.expandNamed", { name: bot.name })} aria-expanded={open}
+              onClick={() => setOpen((value) => !value)} className={cn(small, !open && hover)}>
+              <ChevronDown size={15} className={cn("transition-transform", open && "rotate-180")} />
+            </button>
+          )}
+        </div>
+      </div>
+      {open && hasThreadList
+        ? <BotThreadList bot={bot} selected={selected} density="comfortable" query={query} />
+        : <SidebarBotActivity bot={bot} density="comfortable" />}
+    </div>
   );
 }
 
@@ -97,7 +223,33 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
     .filter((bot) => shownForMe(bot, hiddenForMe, q))
     .filter((bot) => !q || bot.name.toLowerCase().includes(q) || (bot.title ?? "").toLowerCase().includes(q));
   const rooms = state.groups.filter((group) => !q || group.name.toLowerCase().includes(q));
-  const { hero, groups } = simpleSidebarLayout(bots, rooms, state.sections ?? []);
+  const layout = simpleSidebarLayout(bots, rooms, state.sections ?? []);
+  const hero = layout.hero;
+  // Team order: the same saved order (and ids) as the full sidebar's sections
+  const idOf = (group: SimpleGroup<Bot, Group>) => (group.section ? userSectionId(group.section) : BOTS_SECTION_ID);
+  const [savedOrder, setSavedOrder] = useState<string[]>(() => loadSectionOrder());
+  const orderedIds = orderedSidebarSections(layout.groups.map(idOf), savedOrder);
+  const groups = [...layout.groups].sort((a, b) => orderedIds.indexOf(idOf(a)) - orderedIds.indexOf(idOf(b)));
+  const dragFrom = useRef<string | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; place: SectionDropPlace } | null>(null);
+  const endDrag = () => {
+    dragFrom.current = null;
+    setDragging(null);
+    setDropTarget(null);
+  };
+  const drop = () => {
+    const from = dragFrom.current;
+    if (from && dropTarget) {
+      const next = placeSection(orderedIds, from, dropTarget.id, dropTarget.place);
+      if (!sameSectionOrder(next, orderedIds)) {
+        const merged = mergeSectionOrder(savedOrder, next);
+        setSavedOrder(merged);
+        saveSectionOrder(merged);
+      }
+    }
+    endDrag();
+  };
   const chatView = state.activeView === "chat";
   const select = (id: string) => dispatch({ type: "select", id });
 
@@ -176,35 +328,43 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {hero && (
-          <button
-            type="button"
-            onClick={() => select(hero.id)}
-            className="mx-auto mb-2 mt-1 flex flex-col items-center gap-1.5 rounded-2xl px-4 py-2 hover:bg-raised/40"
+        {hero && <HeroBot bot={hero} query={q} />}
+        {groups.map((group) => {
+          const id = idOf(group);
+          const reorderable = !q && groups.length > 1;
+          return (
+          <section
+            key={group.id}
+            data-simple-section={id}
+            className={cn("mt-3", dragging === id && "opacity-50")}
+            onDragOver={(event) => {
+              if (!dragFrom.current) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              const rect = event.currentTarget.getBoundingClientRect();
+              setDropTarget({ id, place: event.clientY < rect.top + rect.height / 2 ? "before" : "after" });
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              drop();
+            }}
           >
-            <span className="relative">
-              <BotAvatar bot={hero} state={stateForBot(hero)} size={76} />
-              {hero.unread && <span className="absolute right-0 top-1 size-2.5 rounded-full bg-accent" />}
-            </span>
-            <span className={cn("text-[13px] font-medium", chatView && state.selectedId === hero.id ? "text-ink" : "text-ink-secondary")}>
-              {hero.name}
-            </span>
-          </button>
-        )}
-        {groups.map((group) => (
-          <section key={group.id} className="mt-3">
-            <div className="px-2.5 pb-1.5 text-[13.5px] text-ink-secondary">{groupLabel(group)}</div>
-            {group.bots.map((bot) => (
-              <Row
-                key={bot.id}
-                selected={chatView && state.selectedId === bot.id}
-                unread={bot.unread}
-                avatar={<BotAvatar bot={bot} state={stateForBot(bot)} size={40} />}
-                name={bot.name}
-                sub={preview(bot)}
-                onClick={() => select(bot.id)}
-              />
-            ))}
+            {dropTarget?.id === id && dropTarget.place === "before" && dragging !== id && <div className="mx-2 mb-1 h-0.5 rounded-full bg-accent" />}
+            <div
+              draggable={reorderable}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", id);
+                dragFrom.current = id;
+                setDragging(id);
+              }}
+              onDragEnd={endDrag}
+              title={reorderable ? t("simpleUi.dragTeam") : undefined}
+              className={cn("px-2.5 pb-1.5 text-[13.5px] text-ink-secondary", reorderable && "cursor-grab active:cursor-grabbing")}
+            >
+              {groupLabel(group)}
+            </div>
+            {group.bots.map((bot) => <BotRow key={bot.id} bot={bot} query={q} />)}
             {group.rooms.map((room) => (
               <Row
                 key={room.id}
@@ -216,8 +376,10 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
                 onClick={() => select(room.id)}
               />
             ))}
+            {dropTarget?.id === id && dropTarget.place === "after" && dragging !== id && <div className="mx-2 mt-1 h-0.5 rounded-full bg-accent" />}
           </section>
-        ))}
+          );
+        })}
       </div>
 
       <div className="flex items-center gap-2.5 px-4 pb-4 pt-2">
