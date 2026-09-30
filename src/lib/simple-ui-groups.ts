@@ -1,7 +1,7 @@
 // Simple UI (fork): how the one-list sidebar files bots and rooms. The
 // unsectioned chief sits on top on its own; every other bot and room stays in
-// its own team (section), in the workspace's section order; no section →
-// "Unassigned". Bot⇄bot channels are left out: the "Messaged" line in a chat
+// its own team (section), the team's chief first, teams in the workspace's
+// section order; no section → "Unassigned". Bot⇄bot channels are left out: the "Messaged" line in a chat
 // opens them.
 
 export interface SimpleBot {
@@ -49,6 +49,10 @@ export function simpleSidebarLayout<B extends SimpleBot, R extends SimpleRoom>(
   };
   for (const bot of visible) if (bot !== hero) groupFor(bot.section).bots.push(bot);
   for (const room of rooms) if (!room.dm) groupFor(room.section).rooms.push(room);
+  // the team's chief (its PM) always leads the team; the rest keep their order
+  for (const group of sections.values()) {
+    group.bots = [...group.bots.filter((bot) => bot.chiefOfStaff), ...group.bots.filter((bot) => !bot.chiefOfStaff)];
+  }
   const groups = [...sections.values(), unassigned].filter(
     (group) => group.bots.length > 0 || group.rooms.length > 0,
   );

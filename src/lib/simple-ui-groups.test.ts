@@ -7,8 +7,8 @@ describe("simpleSidebarLayout", () => {
     { id: "jabeja-pm", section: "Jabeja", kind: "pm", chiefOfStaff: true },
     { id: "ads", section: "Jabeja" },
     { id: "jabeja-code", section: "Jabeja", kind: "code" },
-    { id: "ripal-pm", section: "Ripal", kind: "pm", chiefOfStaff: true },
     { id: "ripal-code", section: "Ripal", kind: "code" },
+    { id: "ripal-pm", section: "Ripal", kind: "pm", chiefOfStaff: true },
     { id: "gone", section: "Jabeja", hidden: true },
     { id: "loose" },
   ];
