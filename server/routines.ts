@@ -100,6 +100,9 @@ export interface Routine {
   /** Default skips overlapping scheduled occurrences. Queue retains at most
    * one pending scheduled run; manual/webhook requests stay independent. */
   overlap?: "skip" | "queue";
+  /** Fork: "send" lets this routine's Gmail leave directly. Absent means
+   * its runs (and work they delegate) may only create Gmail drafts. */
+  mail?: "send";
   skippedRuns?: number;
   lastSkippedAt?: number;
   /** Derived from retained terminal receipts, not another persisted authority. */
@@ -244,6 +247,8 @@ export interface RoutineInput {
   attachments?: RoutineContextAttachment[];
   continuity?: boolean;
   overlap?: "skip" | "queue";
+  /** Fork: "send" lets runs send Gmail directly; "draft" (default) drafts only. */
+  mail?: "send" | "draft";
   /** Omission preserves routing; null creates a new dedicated results task. */
   resultsThreadId?: string | null;
 }
@@ -766,6 +771,9 @@ function sanitizeInput(input: RoutineInput, after: number): Omit<Routine, "id" |
   if (continuity && target === "room-goal") {
     throw new Error("Room goals do not carry continuity yet");
   }
+  if (input.mail !== undefined && input.mail !== "send" && input.mail !== "draft") {
+    throw new Error("Choose draft or send for this routine's mail");
+  }
   return {
     name,
     prompt,
@@ -780,6 +788,7 @@ function sanitizeInput(input: RoutineInput, after: number): Omit<Routine, "id" |
     attachments,
     ...(continuity ? { continuity: true } : {}),
     ...(input.overlap === "queue" ? { overlap: "queue" as const } : {}),
+    ...(input.mail === "send" ? { mail: "send" as const } : {}),
   };
 }
 
@@ -906,6 +915,15 @@ export class RoutineManager {
   makerOf(id: string): string | undefined | null {
     const routine = this.routines.find((r) => r.id === id);
     return routine ? routine.createdFor : null;
+  }
+
+  /** Fork: the mail setting of the routine a thread is running right now,
+   * or null when no routine run is live there. A finished run's thread may
+   * be a person's own chat again, so only live runs count. */
+  mailModeForThread(threadId: string): "draft" | "send" | null {
+    const run = this.runs.find((r) => r.threadId === threadId && ["queued", "running", "waiting"].includes(r.status));
+    if (!run) return null;
+    return this.routines.find((r) => r.id === run.routineId)?.mail === "send" ? "send" : "draft";
   }
 
   listRoutines(): Routine[] {
@@ -1113,6 +1131,7 @@ export class RoutineManager {
       attachments: patch.attachments ?? routine.attachments,
       continuity: patch.continuity ?? routine.continuity,
       overlap: Object.hasOwn(patch, "overlap") ? patch.overlap : routine.overlap,
+      mail: Object.hasOwn(patch, "mail") ? patch.mail : routine.mail,
     }, now);
     if (this.targetState(clean) === "missing") throw new Error(this.missingTargetMessage(clean.target));
     const scheduleChanged = JSON.stringify(clean.schedule) !== JSON.stringify(routine.schedule);
@@ -1140,6 +1159,7 @@ export class RoutineManager {
       // rather than false, so switching continuity off has to delete it.
       if (!clean.continuity) delete routine.continuity;
       if (clean.overlap !== "queue") delete routine.overlap;
+      if (clean.mail !== "send") delete routine.mail;
       if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) {
         delete routine.timeoutMinutes;
       }

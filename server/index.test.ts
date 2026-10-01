@@ -9951,11 +9951,12 @@ describe("harness HTTP API", () => {
       const allowed = await direct("GMAIL_SEND_EMAIL");
       expect(allowed.status).toBe(200);
       expect(allowed.body.result.content[0].text).toBe("relay-ok");
+      // fork: work no person is watching may only draft (server/email-outbox.ts).
       expect(relayed().at(-1)).toEqual({
         jsonrpc: "2.0",
         id: 11,
         method: "tools/call",
-        params: { name: "GMAIL_SEND_EMAIL", arguments: {} },
+        params: { name: "GMAIL_CREATE_EMAIL_DRAFT", arguments: {} },
       });
 
       // A MULTI_EXECUTE batch whose names are all granted relays as one call.

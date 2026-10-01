@@ -1053,6 +1053,14 @@
             ],
             "description": "While this routine is still working, skip scheduled occurrences (default) or queue at most one run. Queue skips further occurrences until the pending run starts; it never builds an unlimited backlog. Manual and webhook requests are separate."
           },
+          "mail": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "send"
+            ],
+            "description": "Gmail from this routine's runs: draft (default) saves Gmail drafts only; send lets mail go out directly. Use send only when the person said the mail may be sent without them."
+          },
           "for_bot_id": {
             "type": "string",
             "description": "Only when the user asks to schedule this routine for ANOTHER bot in your section: that bot's id from list_bots. Omit to schedule it for yourself. The routine then belongs to that bot and each run uses its engine and permissions."
@@ -1226,6 +1234,14 @@
                   "queue"
                 ],
                 "description": "While this routine is still working, skip scheduled occurrences (default) or queue at most one run. Queue skips further occurrences until the pending run starts; it never builds an unlimited backlog. Manual and webhook requests are separate."
+              },
+              "mail": {
+                "type": "string",
+                "enum": [
+                  "draft",
+                  "send"
+                ],
+                "description": "Gmail from this routine's runs: draft (default) saves Gmail drafts only; send lets mail go out directly. Use send only when the person said the mail may be sent without them."
               }
             },
             "description": "Fields to change when action is update. Omit for every other action."

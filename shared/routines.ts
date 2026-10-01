@@ -98,6 +98,8 @@ export interface Routine {
   /** Optional wall-clock safety limit. Missing means the run is unlimited. */
   timeoutMinutes?: number;
   overlap?: "skip" | "queue";
+  /** Fork: "send" lets runs send Gmail directly; absent means drafts only. */
+  mail?: "draft" | "send";
   skippedRuns?: number;
   lastSkippedAt?: number;
   failureStreak?: number;
@@ -158,6 +160,8 @@ export interface RoutineInput {
   /** `null` explicitly removes the limit; omission preserves it on updates. */
   timeoutMinutes?: number | null;
   overlap?: "skip" | "queue";
+  /** Fork: "send" lets runs send Gmail directly; "draft" (default) drafts only. */
+  mail?: "send" | "draft";
   attachments?: RoutineContextAttachment[];
   /** Omission preserves routing; null creates a new dedicated results task. */
   resultsThreadId?: string | null;

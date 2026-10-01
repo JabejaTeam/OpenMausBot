@@ -379,7 +379,7 @@ export interface WireMessage {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "digest" | "compaction";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "email" | "routine.run" | "goal.run" | "digest" | "compaction";
   text?: string;
   digest?: TurnDigest;
   compaction?: {
@@ -400,6 +400,8 @@ export interface WireMessage {
   >;
   card?: OptionCardData;
   connector?: ConnectorCardData;
+  /** Fork: an outgoing Gmail the person edits, then sends, drafts or drops. */
+  email?: EmailCardData;
   secret?: SecretRequestCardData;
   /** One idempotently updated status card for a routine run. */
   routineRun?: RoutineRunCardData;
@@ -540,6 +542,30 @@ export interface ConnectorCardData {
   error?: string;
   dismissed?: boolean;
   resumed?: boolean;
+}
+
+/** Fork: an outgoing email a bot wrote while a person was in the chat. The
+ * harness carries out the person's choice with their connected Gmail and
+ * appends their Gmail signature; the bot never sends it itself. */
+export interface EmailCardData {
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  /** Plain text; the signature is appended when it leaves. */
+  body: string;
+  /** Gmail thread this answers. A reply keeps that thread's subject. */
+  replyThreadId?: string;
+  /** Second-account alias the bot named. */
+  account?: string;
+  /** What the bot asked for: the card's main button. */
+  requested: "send" | "draft";
+  status: "editable" | "working" | "sent" | "drafted" | "discarded" | "failed";
+  error?: string;
+  /** The person's Gmail send-as signature (HTML), for the preview. */
+  signature?: string;
+  draftId?: string;
+  messageId?: string;
 }
 
 export interface SecretRequestCardData {

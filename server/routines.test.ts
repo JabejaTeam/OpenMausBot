@@ -111,6 +111,38 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
+describe("a routine's mail setting (fork)", () => {
+  const start = Date.parse("2026-09-13T08:00:00Z");
+  const input = () => ({ name: "Weekly update", prompt: "Draft the update", botId: "maus-1",
+    schedule: { type: "interval" as const, everyMinutes: 5, anchorAt: start } });
+
+  it("stores send only, survives a reload, and clears back to drafts", () => {
+    const h = harness(start);
+    expect(h.manager.create(input()).mail).toBeUndefined();
+    expect(h.manager.create({ ...input(), mail: "draft" }).mail).toBeUndefined();
+    const sends = h.manager.create({ ...input(), mail: "send" });
+    expect(sends.mail).toBe("send");
+    expect(h.manager.update(sends.id, { name: "Renamed" })?.mail).toBe("send");
+    expect(new RoutineManager(h.options).listRoutines().find((r) => r.id === sends.id)?.mail).toBe("send");
+    expect(h.manager.update(sends.id, { mail: "draft" })?.mail).toBeUndefined();
+    expect(() => h.manager.create({ ...input(), mail: "later" as never })).toThrow(/draft or send/);
+  });
+
+  it("answers for a thread only while a run is live there", async () => {
+    const h = harness(start);
+    const routine = h.manager.create({ ...input(), mail: "send" });
+    expect(h.manager.mailModeForThread("thread-1")).toBeNull();
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    const threadId = h.started[0]!.threadId;
+    h.manager.handleRuntimeEvent({ eventId: "s", provider: "fake", threadId, createdAt: new Date().toISOString(), type: "turn.started" });
+    expect(h.manager.mailModeForThread(threadId)).toBe("send");
+    h.manager.update(routine.id, { mail: "draft" });
+    expect(h.manager.mailModeForThread(threadId)).toBe("draft");
+    h.manager.handleRuntimeEvent({ eventId: "d", provider: "fake", threadId, createdAt: new Date().toISOString(), type: "turn.completed", ok: true });
+    expect(h.manager.mailModeForThread(threadId)).toBeNull();
+  });
+});
+
 describe("bounded scheduled overlap and run health", () => {
   const start = Date.parse("2026-09-13T08:00:00Z");
   const input = () => ({ name: "Health check", prompt: "Check the fixture", botId: "maus-1",

@@ -327,6 +327,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/(?:resume|dismiss)$/ },
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/status$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/(?:authorize|resume|dismiss)$/ }, // authorize: only the conversation's own person
+  // fork: email cards — only the conversation's own person (or an admin) answers
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/email-cards\/[\w-]+\/(?:send|draft|discard)$/ },
   // connected apps: a member's own Composio user only (requestConnectorIdentity)
   { methods: ["GET"], path: /^\/api\/connectors(?:\/catalog|\/connected)?$/ },
   { methods: ["POST"], path: /^\/api\/connectors\/[\w-]+\/authorize$/ },

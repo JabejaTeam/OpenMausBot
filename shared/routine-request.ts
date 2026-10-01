@@ -60,6 +60,8 @@ export interface RoutineRequestDefinition {
   continuity?: boolean;
   /** Skip by default, or keep at most one scheduled run waiting. */
   overlap?: "skip" | "queue";
+  /** Fork: Gmail drafts only (default), or "send" to let mail go out. */
+  mail?: "draft" | "send";
 }
 
 export type RoutineRequestChanges =

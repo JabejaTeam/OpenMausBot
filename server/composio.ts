@@ -1121,6 +1121,90 @@ async function collectConnectorTools(cfg: AppConfig): Promise<Record<string, Con
   return Object.fromEntries([...grouped.entries()].sort(([a], [b]) => a.localeCompare(b)));
 }
 
+/** One connected-app tool the harness runs itself (not on a bot's behalf
+ * mid-call): `account` is the alias of a second account, as the bots pass it. */
+export interface HarnessToolCall {
+  tool_slug: string;
+  arguments: Record<string, unknown>;
+  account?: string;
+}
+
+export interface HarnessToolResult {
+  tool_slug: string;
+  successful: boolean;
+  data?: Record<string, unknown>;
+  error?: string;
+}
+
+/** Run connected-app tools as the harness, for one person, through the same
+ * Session the bots use (COMPOSIO_MULTI_EXECUTE_TOOL). Results keep call order. */
+export async function executeTools(
+  cfg: AppConfig,
+  tools: HarnessToolCall[],
+  person?: string,
+): Promise<HarnessToolResult[]> {
+  const initialize = await relayMcp(cfg, {
+    jsonrpc: "2.0",
+    id: "omb-harness-initialize",
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-03-26",
+      capabilities: {},
+      clientInfo: { name: "openmausbot-harness", version: "1" },
+    },
+  }, undefined, person);
+  if (initialize.status !== 200) {
+    throw new Error(await responseErrorFromBytes(initialize.status, initialize.bytes));
+  }
+  const transportSessionId = initialize.transportSessionId;
+  await relayMcp(cfg, { jsonrpc: "2.0", method: "notifications/initialized" }, transportSessionId, person)
+    .catch(() => undefined);
+  const call = await relayMcp(cfg, {
+    jsonrpc: "2.0",
+    id: "omb-harness-execute",
+    method: "tools/call",
+    params: {
+      name: "COMPOSIO_MULTI_EXECUTE_TOOL",
+      arguments: { tools: tools as unknown as JsonValue, sync_response_to_workbench: false },
+    },
+  }, transportSessionId, person);
+  if (call.status !== 200) throw new Error(await responseErrorFromBytes(call.status, call.bytes));
+  const frame = parseMcpResponse(new TextDecoder().decode(call.bytes), "omb-harness-execute");
+  const failure = frame && typeof frame.error === "object" && frame.error !== null
+    ? (frame.error as { message?: unknown }).message
+    : undefined;
+  if (typeof failure === "string" && failure) throw new Error(failure);
+  const content = (frame?.result as { content?: unknown } | undefined)?.content;
+  const text = Array.isArray(content) ? (content[0] as { text?: unknown } | undefined)?.text : undefined;
+  let payload: unknown = text;
+  if (typeof text === "string") {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new Error(text.slice(0, 300) || "Composio returned an unreadable result");
+    }
+  }
+  const results = (payload as { data?: { results?: unknown } } | undefined)?.data?.results;
+  if (!Array.isArray(results)) {
+    const error = (payload as { error?: unknown } | undefined)?.error;
+    throw new Error(typeof error === "string" && error ? error : "Composio returned no tool results");
+  }
+  return tools.map((tool, index) => {
+    const entry = results.find((item) => (item as { index?: unknown })?.index === index) ?? results[index];
+    const response = (entry as { response?: unknown; error?: unknown } | undefined)?.response as
+      | { successful?: unknown; data?: unknown; error?: unknown }
+      | undefined;
+    const successful = response?.successful === true;
+    const error = response?.error ?? (entry as { error?: unknown } | undefined)?.error;
+    return {
+      tool_slug: tool.tool_slug,
+      successful,
+      ...(response?.data && typeof response.data === "object" ? { data: response.data as Record<string, unknown> } : {}),
+      ...(!successful ? { error: typeof error === "string" && error ? error : "the tool did not succeed" } : {}),
+    };
+  });
+}
+
 async function responseErrorFromBytes(status: number, bytes: Uint8Array): Promise<string> {
   try {
     const body: unknown = JSON.parse(new TextDecoder().decode(bytes));

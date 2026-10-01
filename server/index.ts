@@ -98,7 +98,7 @@ import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import * as boat from "./boat.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
-import { isEffortLevel, type BotVisibility, type CardAnswerer, type ResolvedSender, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
+import { isEffortLevel, type BotVisibility, type CardAnswerer, type EmailCardData, type ResolvedSender, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boatCreateRecoverySnapshot, retireDeletedBoatCreate } from "./boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "./boat-delete-journal.ts";
@@ -109,6 +109,7 @@ import {
 } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { connectorCallFromFrame, connectorRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
+import * as outbox from "./email-outbox.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { buildRecall } from "./recall.ts";
 import { createMemoryUpkeep, upkeepEnabled } from "./memory-upkeep.ts";
@@ -878,6 +879,48 @@ function queuedWordsPerson(item: { sender?: ResolvedSender; peerAsk?: Message["p
 }
 
 const NO_CONNECTOR_PERSON = "Connected apps belong to a person, and no signed-in person asked for this work. Ask it from your own account.";
+
+// ── outgoing Gmail (fork, server/email-outbox.ts) ──
+/** What Gmail a thread's current work may send, set where the work starts:
+ * a person typing gets the email card; other work drafts, unless the
+ * routine it runs for (or was handed by) may send. */
+const threadMailModes = new Map<string, outbox.MailMode>();
+function threadMailMode(threadId: string): outbox.MailMode {
+  return routines?.mailModeForThread(threadId) ?? threadMailModes.get(threadId) ?? "draft";
+}
+/** Work handed to another thread keeps "send" only: a card there would
+ * wait in a conversation nobody is watching, so it drafts instead. */
+function inheritMailMode(fromThreadId: string, toThreadId: string) {
+  threadMailModes.set(toThreadId, threadMailMode(fromThreadId) === "send" ? "send" : "draft");
+}
+const SIGNATURE_TTL_MS = 10 * 60_000;
+const signatureCache = new Map<string, { html: string; at: number }>();
+/** A person's Gmail send-as signature (HTML), straight from Gmail — the one
+ * place they keep it. "" when they have none; mail then leaves unsigned. */
+async function gmailSignature(person: string | undefined, account?: string): Promise<string> {
+  const key = `${person ?? ""}\u0000${account ?? ""}`;
+  const cached = signatureCache.get(key);
+  if (cached && Date.now() - cached.at < SIGNATURE_TTL_MS) return cached.html;
+  const on = account ? { account } : {};
+  try {
+    const [profile] = await composio.executeTools(cfg, [{ tool_slug: "GMAIL_GET_PROFILE", arguments: { user_id: "me" }, ...on }], person);
+    const address = typeof profile?.data?.emailAddress === "string" ? profile.data.emailAddress : "";
+    let html = "";
+    if (address) {
+      const [sendAs] = await composio.executeTools(cfg, [{
+        tool_slug: "GMAIL_SETTINGS_SEND_AS_GET",
+        arguments: { user_id: "me", send_as_email: address },
+        ...on,
+      }], person);
+      html = typeof sendAs?.data?.signature === "string" ? sendAs.data.signature : "";
+    }
+    signatureCache.set(key, { html, at: Date.now() });
+    return html;
+  } catch (error) {
+    console.warn(`[email] signature lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+    return "";
+  }
+}
 
 /** Whose session may answer a card. The provider CLI's own approval modes and
  * the harness's proposals stay exactly as they are; this adds no card, gate
@@ -8197,6 +8240,14 @@ async function startTurn(
     clearUnattended(threadId);
     delegationWakeBudget.reset(threadId);
   }
+  // Gmail from this turn: a person typing (or answering a card) is watching
+  // the chat, so mail becomes an email card; delegated and webhook work
+  // drafts unless the routine behind it may send. Routine runs are read
+  // from the routine itself (threadMailMode).
+  if (opts?.automationSource === "webhook") threadMailModes.set(threadId, "draft");
+  else if (opts?.commsDepth || opts?.unattended) {
+    if (threadMailModes.get(threadId) !== "send") threadMailModes.set(threadId, "draft");
+  } else if (opts?.automationSource === undefined) threadMailModes.set(threadId, "compose");
   const task = store.taskByThread(bot.id, threadId);
   if (!task) throw Object.assign(new Error("no such task"), { status: 404 });
   if (hostedModels && !hostedModels.allows(bot.modelSelection)) throw Object.assign(new Error(hostedModels.error()), { status: 409 });
@@ -12039,6 +12090,8 @@ function startGroupTurn(
   // Capture the chosen thread once. Manual sends use the active task; a
   // scheduled team goal supplies its detached background task explicitly.
   const threadId = options.threadId ?? group.threadId;
+  // A person's words in a room: their Gmail becomes an email card there.
+  if (options.sender) threadMailModes.set(threadId, "compose");
   const ownsThread = group.dm
     ? group.threadId === threadId
     : Boolean(store.groupTaskByThread(group.id, threadId));
@@ -12384,7 +12437,7 @@ function resolveReplyTarget(threadId: string, value: unknown): Message | undefin
 const CONNECTOR_SLUG = /^[a-z0-9][a-z0-9_-]{0,80}$/;
 const pendingConnectorResumes = new Map<
   string,
-  { botId: string; threadId: string; resumeKey: string; labels: string[] }
+  { botId: string; threadId: string; resumeKey: string; labels: string[]; prompt?: string }
 >();
 
 /** The host folders a bot's own files may be read from in one conversation:
@@ -12840,11 +12893,11 @@ function markConnectorResumeFailed(threadId: string, resumeKey: string, error: s
   }
 }
 
-function dispatchConnectorResume(entry: { botId: string; threadId: string; resumeKey: string; labels: string[] }) {
+function dispatchConnectorResume(entry: { botId: string; threadId: string; resumeKey: string; labels: string[]; prompt?: string }) {
   const owner = connectorThread(entry.botId, entry.threadId);
   if (!owner) return;
   const names = entry.labels.join(", ");
-  const prompt = `OpenMausBot connection update: the user securely connected ${names}. Continue the task that paused for this connection. Do not ask them to connect it again.`;
+  const prompt = entry.prompt ?? `OpenMausBot connection update: the user securely connected ${names}. Continue the task that paused for this connection. Do not ask them to connect it again.`;
   if (!canAdmitDirectTurn(entry.botId, entry.threadId)) {
     pendingConnectorResumes.set(`${entry.threadId}:${entry.resumeKey}`, entry);
     return;
@@ -15740,6 +15793,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 // this coordination serves. The durable pair conversation is
                 // shared by every assignment between two bots, so it names nobody.
                 if (resolved.created && resolved.task.openedBy?.kind === "work") threadStarters.set(resolved.task.threadId, threadPersonKey(address.threadId));
+                inheritMailMode(address.threadId, resolved.task.threadId);
                 if (delegatedFullAccess(internalSender, internalCapability.threadId, store.bot(target.botId)!)) {
                   grantDelegatedFullAccess(internalSender, store.bot(target.botId)!, target.threadId);
                 }
@@ -16037,6 +16091,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() });
           if (!task) return json(res, 500, { error: "couldn't create that thread" });
           threadStarters.set(task.threadId, threadPersonKey(fromThreadId));
+          inheritMailMode(fromThreadId, task.threadId);
           internalCapability.openedThreads += 1;
           const chip: Omit<Message, "id" | "at"> = {
             role: "bot",
@@ -16078,6 +16133,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!task) return json(res, 500, { error: "couldn't create that thread" });
         // The work is still for the person whose request the opener is on.
         threadStarters.set(task.threadId, threadPersonKey(fromThreadId));
+        inheritMailMode(fromThreadId, task.threadId);
         if (delegatedFullAccess(from, fromThreadId, target)) grantDelegatedFullAccess(from, target, task.threadId);
         const queued = queueDelegation(
           commsBus,
@@ -16463,6 +16519,52 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             error: { code: -32001, message: NO_CONNECTOR_PERSON },
           }));
         }
+        // Outgoing Gmail (fork): cards for a watching person, drafts for
+        // unattended work, and the person's Gmail signature on every body.
+        const mail = outbox.mailCallsInFrame(body);
+        let mailNote: string | null = null;
+        if (mail.calls.length) {
+          const answer = (text: string, isError: boolean) => {
+            res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+            return res.end(JSON.stringify({
+              jsonrpc: "2.0",
+              id: (body as { id?: unknown }).id ?? null,
+              result: { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) },
+            }));
+          };
+          const mode = threadMailMode(internalCapability.threadId);
+          if (mode === "compose" && mail.calls.some((call) => outbox.writesMailBody(call.tool))) {
+            if (mail.others.length || !mail.calls.every((call) => outbox.writesMailBody(call.tool))) {
+              return answer(outbox.MIXED_CALL_TEXT, true);
+            }
+            const owner = connectorThread(currentSender.id, internalCapability.threadId);
+            if (!owner) return json(res, 403, { error: "conversation does not belong to this bot" });
+            for (const call of mail.calls) {
+              const signature = await gmailSignature(connector.person, call.account);
+              requireActiveInternalCapability();
+              store.appendMessage(internalCapability.threadId, {
+                role: "bot",
+                kind: "email",
+                ...(owner.group ? { from: { botId: owner.bot.id, name: owner.bot.name, color: owner.bot.color } } : {}),
+                email: { ...outbox.cardFromCall(call), status: "editable", ...(signature ? { signature } : {}) },
+              });
+            }
+            return answer(outbox.cardShownText(mail.calls.length), false);
+          }
+          if (mode === "draft") {
+            const blocked = mail.calls.find((call) => !outbox.writesMailBody(call.tool));
+            if (blocked) return answer(outbox.draftOnlyRefusal(blocked.tool), true);
+            for (const call of mail.calls) {
+              if (!outbox.sendsMail(call.tool)) continue;
+              outbox.rewriteCall(mail, call, outbox.GMAIL_CREATE_EMAIL_DRAFT, outbox.draftInstead(call.tool, call.args));
+              mailNote = outbox.DRAFTED_INSTEAD_NOTE;
+            }
+          }
+          for (const call of mail.calls) {
+            if (outbox.writesMailBody(call.tool)) outbox.signCall(call, await gmailSignature(connector.person, call.account));
+          }
+          requireActiveInternalCapability();
+        }
         const upstream = await composio.relayMcp(
           cfg,
           body,
@@ -16477,7 +16579,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         };
         if (upstream.transportSessionId) headers["mcp-session-id"] = upstream.transportSessionId;
         res.writeHead(upstream.status, headers);
-        return res.end(Buffer.from(upstream.bytes));
+        const relayed = mailNote && upstream.status === 200
+          ? outbox.withResultNote(upstream.bytes, mailNote)
+          : upstream.bytes;
+        return res.end(Buffer.from(relayed));
       }
       // ── computer control: proxies read the hold, bots plead for help ──
       if (path === "/api/internal/computer-control") {
@@ -22138,6 +22243,69 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const state = currentSecretState(m[1], threadId, message.id);
       if (!state) return json(res, 409, { error: "this credential request is no longer available" });
       return json(res, 200, { dismissed: true, resumed: state.resumed });
+    }
+
+    // Fork: email cards. The person's choice is carried out here with their
+    // own connected Gmail and signature, then the bot hears the outcome.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/email-cards\/([\w-]+)\/(send|draft|discard)$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      const threadId = String(body.threadId ?? "");
+      const message = connectorThread(m[1], threadId)
+        ? store.messagesFor(threadId).find((candidate) => candidate.id === m![2] && candidate.kind === "email")
+        : undefined;
+      const card = message?.email;
+      if (!message || !card) return json(res, 404, { error: "no such email" });
+      if (card.status !== "editable" && card.status !== "failed") return json(res, 409, { error: "this email was already handled" });
+      const person = connectorThreadPerson(threadId);
+      // On a shared workspace every bot's shell is a loopback caller too:
+      // only a signed-in person's click may send, draft or drop their mail.
+      if (sharedMembership() && auth.kind !== "session") {
+        return json(res, 403, { error: "Sign in to send this email." });
+      }
+      if (auth.kind === "session" && !auth.scopes.includes("admin") && sharedMembership() && person !== personKey(auth.session)) {
+        return json(res, 403, { error: "Only the person this conversation is for can send this email." });
+      }
+      const action = m[3] as "send" | "draft" | "discard";
+      const resume = (done: EmailCardData) => dispatchConnectorResume({
+        botId: m![1], threadId, resumeKey: `email-${message.id}`, labels: [], prompt: outbox.cardOutcomeText(action, done),
+      });
+      if (action === "discard") {
+        const done: EmailCardData = { ...card, status: "discarded", error: undefined };
+        store.patchMessage(threadId, message.id, { email: done });
+        resume(done);
+        return json(res, 200, { status: done.status });
+      }
+      const identity = connectorIdentity(person);
+      if (!identity) return json(res, 409, { error: NO_CONNECTOR_PERSON });
+      const edits = outbox.cleanCardEdits(body, card);
+      if ("error" in edits) return json(res, 400, { error: edits.error });
+      const edited: EmailCardData = { ...card, ...edits.draft };
+      store.patchMessage(threadId, message.id, { email: { ...edited, status: "working", error: undefined } });
+      try {
+        const { tool, args } = outbox.callForCard(edits.draft, action);
+        const call = { tool, args, item: null, ...(card.account ? { account: card.account } : {}) };
+        outbox.signCall(call, await gmailSignature(identity.person, card.account));
+        const [result] = await composio.executeTools(cfg, [{
+          tool_slug: call.tool,
+          arguments: call.args,
+          ...(card.account ? { account: card.account } : {}),
+        }], identity.person);
+        if (!result?.successful) throw new Error(result?.error ?? "Gmail did not accept the email");
+        const done: EmailCardData = {
+          ...edited,
+          ...outbox.gmailIds(tool, result.data),
+          status: action === "send" ? "sent" : "drafted",
+          error: undefined,
+        };
+        store.patchMessage(threadId, message.id, { email: done });
+        resume(done);
+        return json(res, 200, { status: done.status });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        store.patchMessage(threadId, message.id, { email: { ...edited, status: "failed", error: detail.slice(0, 240) } });
+        return json(res, 502, { error: detail.slice(0, 240) });
+      }
     }
 
     // Inline connection cards are bound to both the bot and the exact task

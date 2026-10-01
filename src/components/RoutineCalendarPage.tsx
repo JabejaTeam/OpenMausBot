@@ -373,6 +373,7 @@ function EventEditor({
   );
   const [intervalTimeoutDefaultApplied, setIntervalTimeoutDefaultApplied] = useState(Boolean(existingRoutine));
   const [overlap, setOverlap] = useState<"skip" | "queue">(existingRoutine?.overlap ?? "skip");
+  const [mail, setMail] = useState<"draft" | "send">(existingRoutine?.mail === "send" ? "send" : "draft");
   const [recurrence, setRecurrence] = useState<RecurrenceChoice>(recurrenceFor(schedule, initialAt));
   const [cronDraft, setCronDraft] = useState(() => cronDraftFor(schedule.type === "cron" ? schedule : undefined, initialAt));
   const [cronChanged, setCronChanged] = useState(false);
@@ -545,6 +546,7 @@ function EventEditor({
           durationMinutes,
           timeoutMinutes,
           overlap,
+          mail,
           attachments: routineTarget === "room-goal" ? [] : attachments as RoutineContextAttachment[],
           ...(routineTarget === "bot" ? { resultsThreadId } : {}),
         };
@@ -851,6 +853,18 @@ function EventEditor({
                     <div id="routine-interval-end-error" className="text-[11px] text-danger">Choose an end date after the first run.</div>
                   )}
                   <div id="routine-interval-help" className="text-[11px] leading-relaxed text-ink-secondary">{t(overlap === "queue" ? "routines.overlapQueueHelp" : "routines.overlapSkipHelp")}</div>
+                </div>
+              )}
+              {kind === "routine" && routineTarget === "bot" && (
+                <div className="rounded-xl border border-hairline/40 bg-inset/40 px-3 py-2.5">
+                  <label className="flex flex-wrap items-center gap-2 text-[12px] text-ink">
+                    <span>{t("routines.mailLabel")}</span>
+                    <select aria-label={t("routines.mailLabel")} value={mail} onChange={event => setMail(event.target.value === "send" ? "send" : "draft")} className="rounded-lg border border-hairline/50 bg-panel px-3 py-2 text-[12px] text-ink outline-none focus:border-accent">
+                      <option value="draft">{t("routines.mailDraft")}</option>
+                      <option value="send">{t("routines.mailSend")}</option>
+                    </select>
+                  </label>
+                  <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink-secondary">{t(mail === "send" ? "routines.mailHelpSend" : "routines.mailHelpDraft")}</p>
                 </div>
               )}
               {kind === "routine" && (

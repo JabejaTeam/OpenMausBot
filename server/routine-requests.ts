@@ -85,6 +85,7 @@ const routineToolDefinitionSchema = z.object({
   timeoutMinutes: z.number().nullable().optional(),
   continuity: z.boolean().optional(),
   overlap: z.enum(["skip", "queue"]).optional(),
+  mail: z.enum(["draft", "send"]).optional(),
 }).strict();
 
 const routineToolChangesSchema = routineToolDefinitionSchema
@@ -212,6 +213,7 @@ const storedDefinitionSchema = z.object({
   timeoutMinutes: z.number().int().min(5).max(240).optional(),
   continuity: z.boolean().optional(),
   overlap: z.enum(["skip", "queue"]).optional(),
+  mail: z.enum(["draft", "send"]).optional(),
 }).strict();
 const storedChangesSchema = storedDefinitionSchema
   .omit({ schedule: true, timeoutMinutes: true })
@@ -561,6 +563,7 @@ function normalizeDefinition(input: RoutineToolDefinitionInput, now: number): Ro
     ...(timeoutMinutes == null ? {} : { timeoutMinutes }),
     ...(input.continuity === true ? { continuity: true } : {}),
     ...(input.overlap === "queue" ? { overlap: "queue" as const } : {}),
+    ...(input.mail === "send" ? { mail: "send" as const } : {}),
   };
 }
 
@@ -574,6 +577,7 @@ function normalizeChanges(input: RoutineToolChangesInput, now: number): RoutineR
   if (input.timeoutMinutes !== undefined) changes.timeoutMinutes = timeout(input.timeoutMinutes);
   if (input.continuity !== undefined) changes.continuity = input.continuity === true;
   if (input.overlap !== undefined) changes.overlap = input.overlap;
+  if (input.mail !== undefined) changes.mail = input.mail;
   return changes;
 }
 
@@ -805,6 +809,7 @@ function effectiveDefinition(operation: RoutineRequestOperation, manager: Routin
     ...(existing.timeoutMinutes === undefined ? {} : { timeoutMinutes: existing.timeoutMinutes }),
     ...(existing.continuity ? { continuity: true } : {}),
     ...(existing.overlap ? { overlap: existing.overlap } : {}),
+    ...(existing.mail === "send" ? { mail: "send" as const } : {}),
   };
   if (operation.action !== "update") return base;
   const { schedule, timeoutMinutes, ...changes } = operation.changes;
@@ -889,6 +894,7 @@ function cardCopy(
       `Run limit: ${definition.timeoutMinutes === undefined ? "No limit" : `${definition.timeoutMinutes} minutes`}`,
       `Continuity: ${definition.continuity ? "Carries the previous run's report into the next run" : "Each run starts fresh"}`,
       `While busy: ${definition.overlap === "queue" ? "Queue one scheduled run; skip further occurrences until it starts" : "Skip overlapping scheduled occurrences"}`,
+      `Email: ${definition.mail === "send" ? "May send Gmail directly" : "Gmail drafts only, never sent"}`,
       // Last before the instructions: the one sentence that says what
       // confirming actually does, in the reader's terms.
       ...(operation.action === "create" || operation.action === "update"
@@ -915,6 +921,7 @@ function inputFromDefinition(definition: RoutineRequestDefinition, botId: string
     ...(definition.timeoutMinutes === undefined ? {} : { timeoutMinutes: definition.timeoutMinutes }),
     ...(definition.continuity ? { continuity: true } : {}),
     ...(definition.overlap === "queue" ? { overlap: "queue" as const } : {}),
+    ...(definition.mail === "send" ? { mail: "send" as const } : {}),
   };
 }
 
@@ -932,6 +939,7 @@ function updateFromChanges(
   if (changes.timeoutMinutes !== undefined) patch.timeoutMinutes = changes.timeoutMinutes;
   if (changes.continuity !== undefined) patch.continuity = changes.continuity;
   if (changes.overlap !== undefined) patch.overlap = changes.overlap;
+  if (changes.mail !== undefined) patch.mail = changes.mail;
   return patch;
 }
 
@@ -1007,6 +1015,7 @@ function revalidateOperation(operation: RoutineRequestOperation, manager: Routin
         || routine.timeoutMinutes !== definition.timeoutMinutes
         || Boolean(routine.continuity) !== Boolean(definition.continuity)
         || (routine.overlap ?? "skip") !== (definition.overlap ?? "skip")
+        || (routine.mail ?? "draft") !== (definition.mail ?? "draft")
         || (routine.attachments?.length ?? 0) > 0) return false;
       // An omitted start means "every N minutes", not a new phase each time
       // the model retries. Explicit starts and all other constraints stay exact.
