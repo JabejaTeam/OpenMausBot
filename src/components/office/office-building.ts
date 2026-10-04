@@ -293,7 +293,9 @@ export class OfficeBuilding {
 
   /** Each frame: walls between the camera and an office drop to a rail;
    * window bands and heads above them fold away. */
-  update(camera: THREE.Camera, deltaSeconds: number): void {
+  /** Eases the cut-away walls; true while any wall is still moving (its shadow changes). */
+  update(camera: THREE.Camera, deltaSeconds: number): boolean {
+    let moving = false;
     const toCamera = new THREE.Vector2();
     const ease = 1 - Math.exp(-deltaSeconds * 8);
     for (const wall of this.walls) {
@@ -302,6 +304,7 @@ export class OfficeBuilding {
       const raised = wall.mesh.position.y > 0;
       const facing = wall.normal.dot(toCamera) > 0.2;
       const target = facing ? (raised ? 0 : Math.min(full, CUT_HEIGHT)) : full;
+      if (Math.abs(target - wall.mesh.scale.y) > 1e-3) moving = true;
       wall.mesh.scale.y += (target - wall.mesh.scale.y) * ease;
       wall.mesh.visible = wall.mesh.scale.y > 0.01;
     }
@@ -309,6 +312,7 @@ export class OfficeBuilding {
     for (const office of this.offices.values()) {
       if (office.logo) office.logo.visible = office.backWall.scale.y > 0.9 * WALL_HEIGHT;
     }
+    return moving;
   }
 
   private clear(): void {

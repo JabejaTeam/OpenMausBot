@@ -17,6 +17,17 @@ import type { TeamLook } from "@/lib/office-team-looks";
 import { FurnitureKit } from "./office-furniture-kit";
 import { advance, EASE_IN_OUT_CSS, easeInOut, glideShift, PANEL_MOVE_MS, progressOf } from "@/lib/office-motion";
 import { linksOf, RECENT_HANDOFF_MS, type DelegationLink } from "@/lib/office-delegations";
+import { beanMood, blinking, headgearFor, MOOD, WAITING_PITCH, workingMotion } from "@/lib/office-bean";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
+// bean agent (preview): baked body + face, headgear instancing — see bean/*.js
+// @ts-expect-error plain JS module (preview)
+import { createAgentMaterial, setExpression } from "./bean/agent.js";
+// @ts-expect-error plain JS module (preview)
+import { HeadgearInstancer } from "./bean/headgear-instancer.js";
+// @ts-expect-error plain JS module (preview)
+import { BODY } from "./bean/bean.js";
+// @ts-expect-error plain JS module (preview)
+import { AdaptiveResolution, ShadowScheduler, warmUp } from "./bean/render-perf.js";
 
 export interface OfficeBotLook {
   name: string;
@@ -48,6 +59,8 @@ interface Seat {
   headRest: THREE.Quaternion;
   /** the robot's body material, own per seat: carries colour and highlight */
   tint: THREE.MeshStandardMaterial;
+  /** bean: its one mesh (eye morphs) and the headgear anchor on the head */
+  agent: { mesh: THREE.SkinnedMesh; anchor: THREE.Object3D } | null;
   screen: THREE.Mesh;
   /** status above the head: faces the camera, keeps a minimum on-screen size */
   marker: THREE.Group;
@@ -68,7 +81,7 @@ const DESK_HEIGHT = 0.75;
 const reducedMotion = () => globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 /** top of a seated robot's head; replaced by the measured value once loaded */
 let HEAD_Y = 1.36;
-const ROBOT_URL = "/office/RobotExpressive.glb";
+const ROBOT_URL = "/office/bean.glb";
 /** gap between the top of the head and the centre of the status marker */
 const MARKER_GAP = 0.24;
 /** the robot's standing height in metres */
@@ -83,6 +96,8 @@ interface Robot {
   offset: THREE.Vector3;
   /** top centre of the seated head, in seat space */
   headTop: THREE.Vector3;
+  /** Head bone → centre of the bean's head sphere (rest pose): headgear anchor */
+  headAnchor: THREE.Matrix4;
 }
 
 /** Measure the robot once: its scale, and how far to move it so that, at the
@@ -104,6 +119,11 @@ function prepareRobot(gltf: GLTF): Robot | null {
   const standingHead = at("Head").y - Math.min(at("Foot.L").y, at("Foot.R").y);
   // the head bone sits at the neck; the head itself is about 0.3 of the height
   const scale = (ROBOT_HEIGHT * 0.7) / Math.max(1e-6, standingHead);
+  // the bean's head is part of its one mesh: its top/centre are points on the Head bone
+  const headBoneAtRest = bone("Head")!;
+  const sphereCentre = new THREE.Vector3(0, BODY.center[1] + BODY.half, 0);
+  const headTopLocal = headBoneAtRest.worldToLocal(sphereCentre.clone().setY(sphereCentre.y + BODY.radius));
+  const headAnchor = headBoneAtRest.matrixWorld.clone().invert().multiply(new THREE.Matrix4().makeTranslation(sphereCentre));
   probe.scale.setScalar(scale);
   const mixer = new THREE.AnimationMixer(probe);
   const action = mixer.clipAction(sitting);
@@ -119,10 +139,15 @@ function prepareRobot(gltf: GLTF): Robot | null {
   probe.traverse((node) => {
     if (!headMesh && (node as THREE.Mesh).isMesh && node.name === "Head") headMesh = node;
   });
-  const box = new THREE.Box3().setFromObject(headMesh ?? probe);
-  const headTop = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2).add(offset);
+  let headTop: THREE.Vector3;
+  if (headMesh) {
+    const box = new THREE.Box3().setFromObject(headMesh);
+    headTop = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2).add(offset);
+  } else {
+    headTop = headBoneAtRest.localToWorld(headTopLocal.clone()).add(offset);
+  }
   HEAD_Y = headTop.y;
-  return { gltf, sitting, scale, offset, headTop };
+  return { gltf, sitting, scale, offset, headTop, headAnchor };
 }
 
 function screenTexture(accent: string): THREE.CanvasTexture {
@@ -202,7 +227,8 @@ export class OfficeScene {
     private events: { onHover: (botId: string | null, away: boolean) => void; onHoverRoom: (deskId: string | null) => void; onPick: (botId: string) => void; onPickDesk: (deskId: string) => void },
   ) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // pixel ratio up to 2, stepping down when frames run late (bean/render-perf)
+    this.resolution = new AdaptiveResolution(this.renderer);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.NeutralToneMapping;
@@ -233,7 +259,12 @@ export class OfficeScene {
     this.scene.add(this.world);
     // the building and its light, which follows the sky over Brussels
     this.building = new OfficeBuilding(this.scene, this.renderer);
-    const sky = () => this.building.applyDaylight(daylight(), this.renderer);
+    // shadows are re-drawn on demand (bean/render-perf): a new sun is a reason
+    this.shadows = new ShadowScheduler(this.renderer);
+    const sky = () => {
+      this.building.applyDaylight(daylight(), this.renderer);
+      this.shadows.invalidate();
+    };
     sky();
     this.daylightTimer = setInterval(sky, 60_000);
 
@@ -264,11 +295,12 @@ export class OfficeScene {
     void this.kit.load().then(() => {
       if (!this.disposed && this.layout) this.setLayout(this.layout, this.looks);
     });
-    new GLTFLoader().loadAsync(ROBOT_URL)
+    new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(ROBOT_URL)
       .then((gltf) => {
         if (this.disposed) return;
         this.robot = prepareRobot(gltf);
         if (this.layout) this.setLayout(this.layout, this.looks);
+        void this.warmUp();
       })
       .catch(() => {
         // no model: the seats keep their invisible hit areas, labels still work
@@ -284,14 +316,31 @@ export class OfficeScene {
     if (this.layout) this.building.applyLooks(this.layout, looks);
   }
   private robot: Robot | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private headgear: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private resolution: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private shadows: any;
+
+  /** Compile every shader and upload every headgear piece before they are first
+   * seen, so neither a new bot nor a new piece hitches (bean/render-perf). */
+  private async warmUp(): Promise<void> {
+    const first = [...this.seats.values()].find((seat) => seat.agent)?.agent;
+    if (!first || this.disposed) return;
+    await warmUp(this.renderer, this.scene, this.camera, (on: boolean) => {
+      if (on) { this.scene.updateMatrixWorld(); this.headgear.showAll(first); }
+      else this.headgear.update(this.clock.elapsedTime, 0);
+    });
+  }
   private layout: OfficeLayout | null = null;
   private disposed = false;
 
   /** A tinted, seated robot for one seat. */
-  private seatRobot(color: string): Pick<Seat, "avatar" | "mixer" | "headBone" | "headRest" | "tint"> {
-    const tint = new THREE.MeshStandardMaterial({ color, roughness: 0.45 });
+  private seatRobot(color: string): Pick<Seat, "avatar" | "mixer" | "headBone" | "headRest" | "tint" | "agent"> {
+    const tint = createAgentMaterial(color) as THREE.MeshStandardMaterial;
     const robot = this.robot;
-    if (!robot) return { avatar: null, mixer: null, headBone: null, headRest: new THREE.Quaternion(), tint };
+    if (!robot) return { avatar: null, mixer: null, headBone: null, headRest: new THREE.Quaternion(), tint, agent: null };
     const avatar = cloneSkinned(robot.gltf.scene);
     avatar.scale.setScalar(robot.scale);
     avatar.position.copy(robot.offset);
@@ -303,13 +352,13 @@ export class OfficeScene {
       mesh.castShadow = true;
       // skinned bounds come from the bind pose; never cull a seated robot
       mesh.frustumCulled = false;
-      const material = mesh.material as THREE.MeshStandardMaterial;
-      if (material.name === "Main") {
-        tint.roughness = material.roughness;
-        tint.metalness = material.metalness;
-        mesh.material = tint;
-      }
+      mesh.material = tint; // the bean is one mesh, one material
     });
+    const bean = avatar.getObjectByName("Bean") as THREE.SkinnedMesh;
+    const anchor = new THREE.Object3D();
+    anchor.matrixAutoUpdate = false;
+    anchor.matrix.copy(robot.headAnchor);
+    (headBone as THREE.Object3D | null)?.add(anchor);
     const mixer = new THREE.AnimationMixer(avatar);
     const action = mixer.clipAction(robot.sitting);
     action.setLoop(THREE.LoopOnce, 1);
@@ -317,7 +366,7 @@ export class OfficeScene {
     action.play();
     mixer.setTime(robot.sitting.duration);
     const headRest = (headBone as THREE.Object3D | null)?.quaternion.clone() ?? new THREE.Quaternion();
-    return { avatar, mixer, headBone, headRest, tint };
+    return { avatar, mixer, headBone, headRest, tint, agent: { mesh: bean, anchor } };
   }
 
   private geo<T extends THREE.BufferGeometry>(geometry: T): T {
@@ -338,6 +387,8 @@ export class OfficeScene {
     }
     for (const geometry of this.geometries.splice(1)) geometry.dispose(); // keep the floor
     this.seats.clear();
+    this.headgear ??= new HeadgearInstancer(this.scene);
+    this.headgear.wearers.clear();
     this.pickables = [];
     this.desks = layout.desks;
     this.looks = looks;
@@ -449,10 +500,12 @@ export class OfficeScene {
         const walker = this.makeWalker(body, robot, root);
         const seat: Seat = { botId: placed.botId, root, ...robot, screen, marker, spinner, alert, dot, phase: Math.random() * Math.PI * 2, body, walker, markerHome: marker.position.clone(), homeId: desk.id, placed };
         this.showStatus(seat, look);
+        if (seat.agent) this.headgear.wear(seat.agent, headgearFor(placed.botId, look?.chief), look?.color ?? "#8e8e93");
         this.seats.set(placed.botId, seat);
       }
     }
 
+    this.shadows?.invalidate();
     // the offices round the desks; their floors fly you to the team
     this.building.build(layout, this.teamLooks, this.kit);
     this.pickables.push(...this.building.floors);
@@ -585,6 +638,7 @@ export class OfficeScene {
       const look = looks.get(seat.botId);
       if (!look) continue;
       seat.tint.color.set(look.color);
+      if (seat.agent) this.headgear?.setColor(seat.agent, look.color);
       this.showStatus(seat, look);
     }
   }
@@ -927,7 +981,7 @@ export class OfficeScene {
 
     this.screenMap.offset.y = (this.screenMap.offset.y + delta * 0.12) % 1;
     this.drawArcs(time);
-    this.building.update(this.camera, delta);
+    let animating = this.building.update(this.camera, delta) || Boolean(this.flight);
     // screens light up more in the evening
     this.materials.screenWorking.emissiveIntensity = 1 + this.building.lampLevel * 0.5;
     for (const seat of this.seats.values()) {
@@ -944,15 +998,16 @@ export class OfficeScene {
           const local = seat.root.worldToLocal(this.toCamera.copy(this.camera.position));
           const yaw = THREE.MathUtils.clamp(Math.atan2(local.x, local.z), -1, 1);
           seat.avatar.position.y = base;
-          this.turnHead(seat, -0.12, yaw);
+          this.turnHead(seat, WAITING_PITCH, yaw);
         } else if (look?.working) {
           // typing: a small quick bob and a nod at the screen
-          seat.avatar.position.y = base + Math.abs(Math.sin(time * 9 + seat.phase)) * 0.01;
-          this.turnHead(seat, 0.18 + Math.sin(time * 2.2 + seat.phase) * 0.08, 0);
+          const { bob, pitch } = workingMotion(time, seat.phase);
+          seat.avatar.position.y = base + bob;
+          this.turnHead(seat, pitch, 0);
         } else {
-          // idle: slow breathing, a look around now and then
-          seat.avatar.position.y = base + Math.sin(time * 1.4 + seat.phase) * 0.006;
-          this.turnHead(seat, 0, Math.sin(time * 0.5 + seat.phase) * 0.25);
+          // idle: frozen (lib/office-bean MOOD) — nothing moves until there is work
+          seat.avatar.position.y = base;
+          this.turnHead(seat, 0, 0);
         }
       }
       if (seat.marker.visible) {
@@ -962,6 +1017,18 @@ export class OfficeScene {
         if (seat.alert.visible) seat.alert.scale.setScalar(0.26 * (1 + Math.sin(time * 3) * 0.06));
       }
     }
+
+    // bean: eyes show the status; headgear follows the (now final) head poses
+    for (const seat of this.seats.values()) {
+      if (!seat.agent) continue;
+      const mood = MOOD[beanMood(this.looks.get(seat.botId))];
+      if (mood.moves || seat.walker?.away) animating = true;
+      setExpression(seat.agent, mood.expression, mood.blinks && blinking(time, seat.phase));
+    }
+    this.scene.updateMatrixWorld();
+    this.headgear?.update(time, delta);
+    this.shadows.tick(animating);
+    this.resolution.tick(this.clockDeltaMs);
 
     this.renderer.render(this.scene, this.camera);
 

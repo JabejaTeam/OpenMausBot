@@ -2,6 +2,8 @@
 // a calm default) and its logo. The looks themselves live on the server
 // (/api/team-looks, server/team-looks.ts) so everyone sees the same office.
 
+import type { OfficeLayout } from "./office-layout";
+
 export interface TeamLook {
   color?: string;
   logo?: string;
@@ -21,6 +23,17 @@ export const TEAM_WALL_SWATCHES = [
 
 export function wallColorFor(roomId: string, index: number, looks: Record<string, TeamLook>): string {
   return looks[roomId]?.color ?? DEFAULT_WALL_COLORS[index % DEFAULT_WALL_COLORS.length];
+}
+
+/** Agents wear their team's wall colour: everyone in an office matches its
+ * walls (the same pick as the walls, so they change together). */
+export function agentColorsFor(layout: Pick<OfficeLayout, "rooms" | "desks">, looks: Record<string, TeamLook>): Map<string, string> {
+  const colors = new Map<string, string>();
+  layout.rooms.forEach((room, index) => {
+    const color = wallColorFor(room.id, index, looks);
+    for (const seat of layout.desks.find((desk) => desk.id === room.id)?.seats ?? []) colors.set(seat.botId, color);
+  });
+  return colors;
 }
 
 /** Light walls get dark writing, dark walls light (for anything drawn on them). */

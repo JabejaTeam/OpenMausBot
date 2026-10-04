@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_WALL_COLORS, isDarkWall, logoSize, looksKey, NAME_MAX_HEIGHT, TEAM_TEXT_SWATCHES, TEAM_WALL_SWATCHES, wallColorFor, wallSignFor } from "./office-team-looks";
+import { agentColorsFor, DEFAULT_WALL_COLORS, isDarkWall, logoSize, looksKey, NAME_MAX_HEIGHT, TEAM_TEXT_SWATCHES, TEAM_WALL_SWATCHES, wallColorFor, wallSignFor } from "./office-team-looks";
 
 describe("wallColorFor", () => {
   it("uses the team's own colour, else a calm default by order", () => {
@@ -56,5 +56,19 @@ describe("wallSignFor", () => {
     expect(wallSignFor("X", { logo: "data:image/png;base64,AA==", textColor: "#ffffff" }, "#000000").kind).toBe("logo");
     expect(logoSize(1.5, 7, NAME_MAX_HEIGHT).height).toBeCloseTo(1.2);
     for (const color of TEAM_TEXT_SWATCHES) expect(color).toMatch(/^#[0-9a-f]{6}$/);
+  });
+});
+
+describe("agentColorsFor", () => {
+  it("gives every bot its office's wall colour", () => {
+    const seat = (botId: string) => ({ botId, x: 0, z: 0, rotY: 0 });
+    const layout = {
+      rooms: [{ id: "a" }, { id: "b" }],
+      desks: [{ id: "a", seats: [seat("pm"), seat("dev")] }, { id: "b", seats: [seat("seo")] }],
+    } as unknown as Parameters<typeof agentColorsFor>[0];
+    const colors = agentColorsFor(layout, { b: { color: "#c2453a" } });
+    expect(colors.get("pm")).toBe(DEFAULT_WALL_COLORS[0]);
+    expect(colors.get("dev")).toBe(colors.get("pm"));
+    expect(colors.get("seo")).toBe("#c2453a");
   });
 });

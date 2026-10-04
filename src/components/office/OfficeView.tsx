@@ -7,7 +7,7 @@ import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { botLabel, botLabelLine, threadTitle } from "@/lib/bot-label";
-import { MAUS_COLORS, stateForBot } from "@/lib/mascot";
+import { MAUS_COLORS } from "@/lib/mascot";
 import { hiddenBotsForMe, usePeople } from "@/lib/people";
 import { BOTS_SECTION_ID, orderedSidebarSections, shownForMe, userSectionId } from "@/lib/sidebar-layout";
 import { loadSectionOrder } from "@/lib/sidebar-preferences";
@@ -20,13 +20,14 @@ import { setOfficeView } from "@/lib/office-view";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { ChatView } from "../ChatView";
 import { BotThreadList } from "../Sidebar";
-import { SimpleBotAvatar as BotAvatar } from "../SimpleBotAvatar";
 import { sidebarBotActivityTasks } from "../SidebarBotActivity";
 import type { OfficeBotLook, OfficeScene, OfficeTheme } from "./office-scene";
 import { OfficeStatusRail, StatusSymbol } from "./OfficeStatusRail";
 import { OfficeSearch } from "./OfficeSearch";
 import { OfficeLookEditor, useTeamLooks } from "./OfficeLookEditor";
-import { looksKey as teamLooksKeyOf } from "@/lib/office-team-looks";
+import { agentColorsFor, looksKey as teamLooksKeyOf } from "@/lib/office-team-looks";
+import { beanMood, headgearFor } from "@/lib/office-bean";
+import { BeanPortrait } from "./BeanPortrait";
 
 function readTheme(): OfficeTheme {
   const css = getComputedStyle(document.documentElement);
@@ -178,11 +179,13 @@ export function OfficeView() {
   const teamOf = new Map<string, string>();
   for (const team of teams) for (const bot of team.bots) teamOf.set(bot.id, team.label);
 
+  // a bean wears its team's wall colour (lib/office-team-looks)
+  const agentColors = agentColorsFor(layout, teamLooks.looks);
   const looks = new Map<string, OfficeBotLook>();
   for (const bot of bots) {
     looks.set(bot.id, {
       name: bot.name,
-      color: MAUS_COLORS[bot.color] ?? MAUS_COLORS.blue,
+      color: agentColors.get(bot.id) ?? MAUS_COLORS[bot.color] ?? MAUS_COLORS.blue,
       working: isWorking(bot, state.pendingQueued),
       waiting: botStatus(bot) === "waiting",
       unread: hasUnread(bot),
@@ -442,7 +445,7 @@ export function OfficeView() {
           <div ref={hoverRef} style={{ visibility: "hidden" }} className="absolute left-0 top-0 pb-1.5" aria-hidden={!hoveredBot}>
             {hoveredBot && (
               <div className={cn("flex items-center gap-2 rounded-full py-1 pl-1 pr-3", glass)} role="tooltip">
-                <BotAvatar bot={hoveredBot} state={stateForBot(hoveredBot)} size={22} motion="none" motionKey={0} animated={false} />
+                <BeanAvatar botId={hoveredBot.id} looks={looks} size={22} still />
                 <span className="text-[13.5px] font-semibold text-ink">{botLabel(hoveredBot).name}</span>
                 {teamOf.get(hoveredBot.id) && <span className="text-[12.5px] text-ink-secondary">{teamOf.get(hoveredBot.id)}</span>}
                 {hoveredAway && <span className="text-[12.5px] text-ink-secondary">{t("office.away")}</span>}
@@ -509,7 +512,7 @@ export function OfficeView() {
               title={t("chat.openProfile")}
               className="flex min-w-0 items-center gap-2 rounded-full py-1 pl-1 pr-3 hover:bg-raised/60"
             >
-              <BotAvatar bot={openBot} state={stateForBot(openBot)} size={28} />
+              <BeanAvatar botId={openBot.id} looks={looks} size={28} />
               <span className="min-w-0 text-left">
                 <span className="block truncate text-[15px] font-semibold leading-5 text-ink">{botLabel(openBot).name}</span>
                 <PanelSubtitle bot={openBot} team={teamOf.get(openBot.id)} />
@@ -571,4 +574,10 @@ export function OfficeView() {
       </aside>
     </main>
   );
+}
+
+/** The bot's bean portrait, from the same look the scene uses. `still`: no motion (hover chip). */
+function BeanAvatar({ botId, looks, size, still }: { botId: string; looks: Map<string, OfficeBotLook>; size: number; still?: boolean }) {
+  const look = looks.get(botId);
+  return <BeanPortrait color={look?.color ?? "#8e8e93"} headgear={headgearFor(botId, look?.chief)} mood={still ? "idle" : beanMood(look)} size={size} />;
 }
