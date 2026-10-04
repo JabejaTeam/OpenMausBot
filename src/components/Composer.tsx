@@ -5,6 +5,7 @@ import { useSimpleUi } from "@/lib/simple-ui";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
+import { botLabel } from "@/lib/bot-label";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import {
   draftRevision,
@@ -150,7 +151,7 @@ export function Composer({
   const busyName = group
     ? (members?.find((b) => b.id === group.busyBotId)?.name ??
       (group.working ? t("composer.busy.team") : t("composer.busy.aBot")))
-    : (bot?.name ?? t("composer.busy.theBot"));
+    : (bot ? botLabel(bot).name : t("composer.busy.theBot"));
   // Per-thread draft: switching bots unmounts this component, so both the
   // text and its attachment chips have to outlive it (see lib/drafts).
   const draftId = group
@@ -1139,9 +1140,9 @@ export function Composer({
                         name: group.name,
                         hint: groupComposerHint(group, members ?? []),
                       })
-                  : t("composer.placeholder.bot", { name: bot?.name ?? "" })
+                  : t("composer.placeholder.bot", { name: bot ? botLabel(bot).name : "" })
           }
-          aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
+          aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot ? botLabel(bot).name : "") })}
             className="block max-h-[9rem] min-h-6 w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-[15px] leading-6 placeholder:text-ink-secondary focus:outline-none"
           />
           <div className="flex items-center gap-1">
@@ -1157,7 +1158,7 @@ export function Composer({
             <Square size={14} className="fill-current" />
           </button>
         )}
-        {!locked && !busy && (!hasContent || simpleUi) && capabilities.dictation.available && (
+        {!locked && !busy && !hasContent && capabilities.dictation.available && (
           <button
             onClick={toggleMic}
             aria-label={recording ? t("composer.dictation.stop") : t("composer.dictation.start")}
@@ -1172,7 +1173,8 @@ export function Composer({
             <Mic size={18} />
           </button>
         )}
-        {(hasContent || (simpleUi && !busy)) && !locked && (
+        {/* like Messages: the send button appears once there is something to send */}
+        {hasContent && !locked && (
           <button
             onClick={send}
             disabled={attachmentPending || !hasContent}

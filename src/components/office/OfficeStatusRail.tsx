@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { botLabel } from "@/lib/bot-label";
 import { stateForBot } from "@/lib/mascot";
 import type { OfficeStatus } from "@/lib/office-status";
 import { SimpleBotAvatar as BotAvatar } from "../SimpleBotAvatar";
@@ -145,7 +146,7 @@ export function OfficeStatusRail({
               >
                 <BotAvatar bot={bot} state={stateForBot(bot)} size={30} motion="none" motionKey={0} animated={false} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[14px] font-semibold leading-5 text-ink">{bot.name}</span>
+                  <span className="block truncate text-[14px] font-semibold leading-5 text-ink">{botLabel(bot).name}</span>
                   {teamOf.get(bot.id) && <span className="block truncate text-[12.5px] leading-4 text-ink-secondary">{teamOf.get(bot.id)}</span>}
                 </span>
               </button>

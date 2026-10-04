@@ -49,11 +49,11 @@ describe("sidebar bot threads", () => {
     expect(single).not.toContain('disabled=""');
   });
 
-  it("shows fresh threads with a relative stamp while the tooltip keeps the full date", () => {
-    const recent = Date.now() - 5 * 60_000;
+  it("shows recent threads with a short stamp while the tooltip keeps the full date", () => {
+    const recent = Date.now() - 2 * 86_400_000;
     const fresh = { ...bot, unread: false, busy: false, activity: "idle" as const, tasks: [{ threadId: "fresh", title: "Fresh question", createdAt: recent, busy: false, activity: "idle" as const }] };
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot: fresh, selected: true })));
-    expect(markup).toContain("5 min ago");
+    expect(markup).toContain(new Date(recent).toLocaleDateString("en", { weekday: "long" }));
     expect(markup).toContain(`title="Fresh question · ${formatUpdatedAt(recent)}"`);
   });
 

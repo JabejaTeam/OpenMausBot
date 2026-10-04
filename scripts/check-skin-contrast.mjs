@@ -202,11 +202,13 @@ for (const [id, tokens] of skins) {
   if (skinFailed) failed = true;
 }
 
-// The inverted Daylight bubble has its own inherited context: the editor,
-// labels, quotes and file chips explicitly use these tokens, not parent color.
+// The coloured user bubble (Daylight, Midnight) has its own inherited
+// context: the editor, labels, quotes and file chips explicitly use these
+// tokens, not parent color.
+for (const skin of ["daylight", "midnight"]) {
 const daylightBubble = {
-  ...skins.get("daylight"),
-  ...declarations(css.match(/@scope \(\[data-skin="daylight"\]\) to \(\[data-skin\]\)\s*\{\s*\.bg-bubble-user\s*\{([^}]*)\}/)?.[1] ?? ""),
+  ...skins.get(skin),
+  ...declarations(css.match(new RegExp(`@scope \\(\\[data-skin="${skin}"\\]\\) to \\(\\[data-skin\\]\\)\\s*\\{\\s*\\.bg-bubble-user\\s*\\{([^}]*)\\}`))?.[1] ?? ""),
 };
 for (const [fg, bg] of [
   ["--color-ink", "--color-bubble-user"],
@@ -227,9 +229,10 @@ for (const [fg, bg] of [
   const ratio = contrast(daylightBubble[fg] ?? "", daylightBubble[bg] ?? "");
   if (ratio === null || ratio < 4.5) {
     failed = true;
-    console.log(`✗ daylight bubble — ${fg} on ${bg}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs 4.5:1)`);
+    console.log(`✗ ${skin} bubble — ${fg} on ${bg}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs 4.5:1)`);
   }
 }
+}
 
-if (!failed) console.log("✓ daylight bubble — editor, controls and paired fills above 4.5:1");
+if (!failed) console.log("✓ daylight + midnight bubble — editor, controls and paired fills above 4.5:1");
 process.exit(failed ? 1 : 0);

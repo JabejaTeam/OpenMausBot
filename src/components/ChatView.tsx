@@ -107,7 +107,8 @@ import { appendComposerDraft, useReplyDraft } from "@/lib/drafts";
 import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
-import { commDirection, SimpleChatHeader, SimpleCommLine } from "./SimpleChat";
+import { startsTimeBlock } from "@/lib/time-separator";
+import { BotName, ChatHomeTeam, commDirection, SimpleChatHeader, SimpleCommLine } from "./SimpleChat";
 import { useSimpleUi } from "@/lib/simple-ui";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
@@ -129,8 +130,8 @@ function dayLabel(at: number): string {
 
 function DaySeparator({ at }: { at: number }) {
   return (
-    <div className="py-3 text-center text-[13px] text-ink-secondary">
-      {dayLabel(at)} {formatTime(at)}
+    <div className="py-2 text-center text-[12px] text-ink-tertiary">
+      <span className="font-medium">{dayLabel(at)}</span> {formatTime(at)}
     </div>
   );
 }
@@ -237,7 +238,7 @@ class MessageBoundary extends Component<{ children: ReactNode; fallbackText: str
   render() {
     if (this.state.failed) {
       return (
-        <div className="chat-text w-fit max-w-[min(42rem,78%)] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-ink">
+        <div className="chat-text w-fit max-w-[min(42rem,78%)] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-snug whitespace-pre-wrap text-ink">
           {this.props.fallbackText}
         </div>
       );
@@ -283,7 +284,7 @@ function BubbleEditor({
           if (e.key === "Escape") onCancel();
         }}
         rows={Math.min(10, Math.max(2, draft.split("\n").length))}
-        className="w-full resize-none bg-transparent text-[15px] leading-relaxed text-ink focus:outline-none"
+        className="w-full resize-none bg-transparent text-[15px] leading-snug text-ink focus:outline-none"
       />
       <div className="mt-2 flex items-center justify-end gap-2">
         <button
@@ -435,7 +436,7 @@ function Bubble({
         )}
         <div
           className={cn(
-            "w-fit max-w-[min(42rem,78%)] rounded-2xl text-[15px] leading-relaxed",
+            "w-fit max-w-[min(42rem,78%)] rounded-2xl text-[15px] leading-snug",
             emerging && "turn-answer",
             user && webhookView
               ? "overflow-hidden border border-accent/25 bg-card text-ink shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
@@ -632,7 +633,7 @@ function AgentLabels({ agents }: { agents: Array<{ botId: string; threadId: stri
             className="flex items-center gap-1.5 text-[11px] font-medium text-ink-secondary hover:text-ink"
           >
             <BotAvatar bot={agent} state="happy" size={16} motion="none" motionKey={0} animated={false} />
-            {agent.name}
+            <BotName bot={agent} />
           </button>
         );
       })}
@@ -662,7 +663,7 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
         motionKey={0}
         animated={false}
       />
-      <span className="text-[11px] font-medium text-ink-secondary">{peer.name}</span>
+      <span className="text-[11px] font-medium text-ink-secondary"><BotName bot={author} fallback={peer.name} /></span>
       <span className="text-[11px] text-ink-tertiary">· {how}</span>
     </div>
   );
@@ -837,7 +838,8 @@ const MessagesList = memo(function MessagesList({
         const previous = items[i - 1];
         const prev = previous && (previous.kind === "message" ? previous.message : previous.messages.at(-1));
         const first = item.kind === "message" ? item.message : item.messages[0];
-        const newDay = !prev || new Date(prev.at).toDateString() !== new Date(first.at).toDateString();
+        // a centred time at the start, on a new day and after a pause (lib/time-separator)
+        const newDay = startsTimeBlock(prev?.at, first.at);
         if (item.kind === "turn") {
           return (
             <div key={item.id} className="contents">
@@ -1370,6 +1372,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const canOpenResults = resultsThreadId && [...state.bots, ...state.groups].some((owner) => owner.threadId === resultsThreadId || owner.tasks?.some((task) => task.threadId === resultsThreadId));
 
   return (
+    <ChatHomeTeam.Provider value={bot.section?.trim() || undefined}>
     <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
       {/* Call mode covers the thread while the bot is on the line */}
       <CallOverlay bot={bot} />
@@ -1720,6 +1723,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       </div>
 
     </main>
+    </ChatHomeTeam.Provider>
   );
 }
 

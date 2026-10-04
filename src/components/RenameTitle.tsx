@@ -10,6 +10,7 @@ import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile";
 
 export function RenameTitle({
   value,
+  display,
   onCommit,
   onEditingChange,
   onActivate,
@@ -18,6 +19,8 @@ export function RenameTitle({
   inputClassName,
 }: {
   value: string;
+  /** fork: what shows while not editing (a bot's role, lib/bot-label); rename edits `value` */
+  display?: string;
   onCommit: (next: string) => void;
   onEditingChange?: (editing: boolean) => void;
   /** Optional single-click action for locations where the title opens a profile. */
@@ -92,10 +95,10 @@ export function RenameTitle({
             className={cn("min-w-0 truncate text-left", className)}
             title={t("chat.openProfile")}
           >
-            {value}
+            {display ?? value}
           </button>
         ) : (
-          <span className={cn("min-w-0 truncate", className)}>{value}</span>
+          <span className={cn("min-w-0 truncate", className)}>{display ?? value}</span>
         )}
         <button
           type="button"
@@ -124,7 +127,7 @@ export function RenameTitle({
         }
       }}
     >
-      {value}
+      {display ?? value}
     </span>
   );
 }

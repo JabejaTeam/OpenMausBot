@@ -2,9 +2,12 @@
 // title; a name match beats a team or title match, an earlier match in the
 // name beats a later one, and among equals whoever needs you comes first.
 import { botStatus, type OfficeStatus, type StatusBot } from "./office-status";
+import { botLabel } from "./bot-label";
 
 export interface SearchBot extends StatusBot {
   name: string;
+  kind?: string;
+  section?: string;
   title?: string | null;
 }
 
@@ -13,8 +16,11 @@ const STATUS_RANK: Record<OfficeStatus, number> = { waiting: 0, working: 1, unre
 const fold = (text: string) => text.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 /** 0 best: name starts with it, 1 a word in the name does, 2 the name has
- * it, 3 team or title has it; null no match. */
+ * it, 3 team or title has it; null no match. The name is both the shown
+ * role ("Manager") and the real name ("Ripal PM"). */
 function matchRank(bot: SearchBot, team: string, query: string): number | null {
+  const shown = fold(botLabel(bot).name);
+  if (shown.startsWith(query)) return 0;
   const name = fold(bot.name);
   if (name.startsWith(query)) return 0;
   if (name.split(/[\s\-_.]+/).some((word) => word.startsWith(query))) return 1;

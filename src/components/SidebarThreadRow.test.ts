@@ -247,46 +247,32 @@ describe("formatUpdatedAt", () => {
 });
 
 describe("threadUpdatedLabel", () => {
-  const now = Date.UTC(2026, 8, 25, 12, 0, 0);
-  const label = (ageMs: number) => threadUpdatedLabel(now - ageMs, now);
+  // local calendar days, like Messages: 25 Sep 2026 (a Friday), 14:30
+  const now = new Date(2026, 8, 25, 14, 30).getTime();
+  const at = (day: number, hour: number, minute = 0) => new Date(2026, 8, day, hour, minute).getTime();
 
-  it("sharpens the newest work, then falls back to the absolute date past a week", () => {
-    expect(label(10_000)).toBe("just now");
-    expect(label(44_000)).toBe("just now");
-    expect(label(5 * 60_000)).toBe("5 min ago");
-    expect(label(59 * 60_000)).toBe("59 min ago");
-    expect(label(3 * 3_600_000)).toBe("3 h ago");
-    expect(label(26 * 3_600_000)).toBe("yesterday");
-    expect(label(2 * 86_400_000)).toBe("2 d ago");
-    expect(label(6 * 86_400_000)).toBe("6 d ago");
-    expect(label(7 * 86_400_000)).toBe(formatUpdatedAt(now - 7 * 86_400_000));
+  it("shows the clock time today, yesterday, the weekday, then the date", () => {
+    expect(threadUpdatedLabel(at(25, 14, 29), now)).toBe(new Date(at(25, 14, 29)).toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit" }));
+    expect(threadUpdatedLabel(at(25, 0, 5), now)).toBe(new Date(at(25, 0, 5)).toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit" }));
+    expect(threadUpdatedLabel(at(24, 23, 55), now)).toBe("yesterday");
+    expect(threadUpdatedLabel(at(23, 9), now)).toBe("Wednesday");
+    expect(threadUpdatedLabel(at(19, 9), now)).toBe("Saturday");
+    expect(threadUpdatedLabel(at(18, 9), now)).toBe(new Date(at(18, 9)).toLocaleDateString("en", { dateStyle: "short" }));
   });
 
-  it("keeps the seventh day relative until a full week has elapsed", () => {
-    // six and a half days rounds to "7 d ago" without reaching the week
-    expect(label(6 * 86_400_000 + 12 * 3_600_000)).toBe("7 d ago");
-  });
-
-  it("keeps a same-day update in the hour tier until a full day has elapsed", () => {
-    // 00:15 -> 23:45 on the same date: 23.5 h reads as hours, not "yesterday"
-    const morning = Date.UTC(2026, 8, 25, 0, 15, 0);
-    const night = Date.UTC(2026, 8, 25, 23, 45, 0);
-    expect(threadUpdatedLabel(morning, night)).toBe("24 h ago");
-  });
-
-  it("skips a missing stamp and clamps a future clock to just now", () => {
+  it("skips a missing stamp and shows a future clock as today", () => {
     expect(threadUpdatedLabel(0, now)).toBe("");
     expect(threadUpdatedLabel(Number.NaN, now)).toBe("");
-    expect(label(-30_000)).toBe("just now");
+    expect(threadUpdatedLabel(now + 30_000, now)).toBe(new Date(now + 30_000).toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit" }));
   });
 
-  it("renders relative on the row while the tooltip and the ISO stamp stay absolute", () => {
-    const at = Date.now() - 5 * 60_000;
+  it("renders the short stamp on the row while the tooltip and the ISO stamp stay absolute", () => {
+    const at = Date.now() - 2 * 86_400_000;
     const markup = renderToStaticMarkup(createElement(SidebarThreadRow, {
       task: { threadId: "t", title: "Notes", updatedAt: at },
       ownerId: "b", current: false, now: Date.now(), onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
     }));
-    expect(markup).toContain("5 min ago");
+    expect(markup).toContain(new Date(at).toLocaleDateString("en", { weekday: "long" }));
     expect(markup).toContain(`title="Notes · ${formatUpdatedAt(at)}"`);
     expect(markup).toContain(`dateTime="${new Date(at).toISOString()}"`);
   });
@@ -302,8 +288,8 @@ describe("threadUpdatedLabel", () => {
 
   it("translates through the locale catalog", () => {
     setLocale("pt-br");
-    expect(threadUpdatedLabel(now - 5 * 60_000, now)).toBe("há 5 min");
-    expect(threadUpdatedLabel(now - 26 * 3_600_000, now)).toBe("ontem");
+    expect(threadUpdatedLabel(at(24, 9), now)).toBe("ontem");
+    expect(threadUpdatedLabel(at(23, 9), now)).toBe("quarta-feira");
   });
 });
 

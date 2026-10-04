@@ -1,11 +1,24 @@
 // Simple UI (fork): the chat pieces that replace the full header and the
 // bot⇄bot chips — a floating name pill on top, and a centered
 // "Messaged ◉ Name" / "Message from ◉ Name" line in the transcript.
-import type { CSSProperties, ReactNode } from "react";
+import { createContext, useContext, type CSSProperties, type ReactNode } from "react";
 import { useStore, type Bot, type MausColor } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { botLabel } from "@/lib/bot-label";
 import { stateForBot } from "@/lib/mascot";
 import { SimpleBotAvatar as BotAvatar } from "./SimpleBotAvatar";
+
+/** The team of the chat being read: a teammate from that team is named by
+ * role alone ("Code"), anyone else with their team ("Manager · Ripal"). */
+export const ChatHomeTeam = createContext<string | undefined>(undefined);
+
+/** A bot's name as people read it in a chat (lib/bot-label). */
+export function BotName({ bot, fallback }: { bot?: { name: string; kind?: string; section?: string }; fallback?: string }) {
+  const home = useContext(ChatHomeTeam);
+  if (!bot) return <>{fallback ?? ""}</>;
+  const { name, team } = botLabel(bot);
+  return <>{team && team !== home ? `${name} · ${team}` : name}</>;
+}
 
 export function SimpleHeaderPill({
   avatar,
@@ -43,7 +56,7 @@ export function SimpleChatHeader({ bot, dragStyle, noDragStyle }: { bot: Bot; dr
   return (
     <SimpleHeaderPill
       avatar={<BotAvatar bot={bot} state={stateForBot(bot)} size={24} />}
-      name={bot.name}
+      name={botLabel(bot).name}
       title={t("chat.openProfile")}
       onClick={() => dispatch({ type: "toggleSettings", open: true })}
       dragStyle={dragStyle}
@@ -80,7 +93,7 @@ export function SimpleCommLine({
     <>
       <span>{direction === "to" ? t("simpleUi.messaged") : t("simpleUi.messageFrom")}</span>
       <BotAvatar bot={bot ?? { name, color: color ?? "blue" }} state="happy" size={18} motion="none" motionKey={0} animated={false} />
-      <span className="font-medium text-ink/80">{name}</span>
+      <span className="font-medium text-ink/80"><BotName bot={bot} fallback={name} /></span>
     </>
   );
   return (

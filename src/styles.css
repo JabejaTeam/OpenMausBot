@@ -182,8 +182,9 @@
   --color-accent-border: #459ffe;
   --color-accent-text: #7fc0ff;
   --color-accent-ink: #ffffff;
-  --color-bubble-user: #5a5a5a;
-  --color-bubble-user-ink: #fcfcfc;   /* = ink: unchanged */
+  /* fork: your own messages in blue, like Messages; white clears AA on it */
+  --color-bubble-user: #0b62c4;
+  --color-bubble-user-ink: #ffffff;
   --color-success: #38d591;
   --color-danger: #ff5667;
   --color-danger-ink: #ffffff;
@@ -551,8 +552,8 @@
   --color-composer: #fcfcfc;
   --color-composer-ring: #e4e4e4;
   --color-menu: #fcfcfc;          /* menus sit on the page tone, not the bubble */
-  --color-bubble-user: #070707;   /* your own messages, inverted */
-  --color-bubble-user-ink: #fcfcfc;
+  --color-bubble-user: #0b62c4;   /* fork: your own messages in blue, like Messages */
+  --color-bubble-user-ink: #ffffff;
 
   --color-success: #1f7a4d;
   --color-danger: #c02b3a;
@@ -1378,28 +1379,52 @@ body {
   color: var(--color-bubble-user-ink);
 }
 
-/* Daylight's inverted bubble is a dark surface, including its editor,
-   quoted replies and attachment controls. Keep their normal semantic tokens
-   together; overriding only the parent's color leaves explicit child ink dark.
-   Stop at a nested skin so the picker previews retain their own palettes. */
+/* The user's own bubble is a blue surface (fork, Messages style), including
+   its editor, quoted replies and attachment controls. Keep their normal
+   semantic tokens together; overriding only the parent's color leaves
+   explicit child ink dark. Stop at a nested skin so the picker previews
+   retain their own palettes. One block per skin: the contrast check reads
+   each by name. */
 @scope ([data-skin="daylight"]) to ([data-skin]) {
   .bg-bubble-user {
-    --color-ink: #fcfcfc;
-    --color-ink-secondary: #c4c4c4;
-    --color-ink-tertiary: #aaaaaa;
-    --color-panel: #111111;
-    --color-inset: #191919;
-    --color-raised: #2f2f2f;
-    --color-raised-hover: #3d3d3d;
-    --color-control: #2f2f2f;
-    --color-hairline: #666666;
-    --color-accent: #7fc0ff;
-    --color-accent-text: #7fc0ff;
-    --color-accent-ink: #070707;
-    --color-focus: #7fc0ff;
-    --color-danger: #ff7788;
+    --color-ink: #ffffff;
+    --color-ink-secondary: #e6eefc;
+    --color-ink-tertiary: #dce6f8;
+    --color-panel: #0a58b0;
+    --color-inset: #0a58b0;
+    --color-raised: #0a55aa;
+    --color-raised-hover: #0d4c97;
+    --color-control: #0a55aa;
+    --color-hairline: #8fb6ea;
+    --color-accent: #ffffff;
+    --color-accent-text: #ffffff;
+    --color-accent-ink: #0b62c4;
+    --color-focus: #ffffff;
+    --color-danger: #ffc2cb;
     --color-danger-ink: #070707;
-    --color-success: #63b58a;
+    --color-success: #b6f0cf;
+    --color-success-ink: #070707;
+  }
+}
+
+@scope ([data-skin="midnight"]) to ([data-skin]) {
+  .bg-bubble-user {
+    --color-ink: #ffffff;
+    --color-ink-secondary: #e6eefc;
+    --color-ink-tertiary: #dce6f8;
+    --color-panel: #0a58b0;
+    --color-inset: #0a58b0;
+    --color-raised: #0a55aa;
+    --color-raised-hover: #0d4c97;
+    --color-control: #0a55aa;
+    --color-hairline: #8fb6ea;
+    --color-accent: #ffffff;
+    --color-accent-text: #ffffff;
+    --color-accent-ink: #0b62c4;
+    --color-focus: #ffffff;
+    --color-danger: #ffc2cb;
+    --color-danger-ink: #070707;
+    --color-success: #b6f0cf;
     --color-success-ink: #070707;
   }
 }

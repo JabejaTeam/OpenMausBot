@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Archive, ArchiveRestore, BellOff, Clock, Clock3, FolderInput, Link2, Loader2, MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
 import type { BotProject, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
 import { threadRefUrl } from "@/lib/thread-refs";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -23,28 +23,21 @@ export function formatUpdatedAt(at: number): string {
   return new Date(at).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
 }
 
-/** The visible stamp on a thread row: "just now" for the freshest work, then
- * minutes, hours, and days, then the full date once a thread is a week old.
- * The caller supplies "now" so one clock tick re-renders a whole list
- * instead of each row keeping its own timer. */
+/** The visible stamp on a thread row, the way Messages dates a
+ * conversation (fork): the clock time today, "yesterday", the weekday within
+ * the week, then the short date. Calendar days in local time, not elapsed
+ * hours. The caller supplies "now" so one clock tick re-renders a whole
+ * list instead of each row keeping its own timer. */
 export function threadUpdatedLabel(at: number, now: number): string {
   if (!Number.isFinite(at) || at <= 0) return "";
   if (!Number.isFinite(now)) return formatUpdatedAt(at);
-  const seconds = Math.max(0, Math.round((now - at) / 1000));
-  if (seconds < 45) return t("task.updated.justNow");
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return t("task.updated.minutes", { count: minutes });
-  const hours = Math.round(minutes / 60);
-  // Tier on unrounded time like the week gate below: 23.5 hours rounds to
-  // a display of "24 h ago" without a day having actually passed.
-  if (seconds < 86_400) return t("task.updated.hours", { count: hours });
-  const days = Math.round(hours / 24);
+  const locale = activeLocale();
+  const startOfDay = (ms: number) => new Date(ms).setHours(0, 0, 0, 0);
+  const days = Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000);
+  if (days <= 0) return new Date(at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   if (days === 1) return t("task.updated.yesterday");
-  // Gate the fallback on unrounded elapsed time: six and a half days rounds
-  // to "7 d ago" but is still inside the week, so the absolute date waits
-  // for a full seven days.
-  if (seconds < 7 * 86_400) return t("task.updated.days", { count: days });
-  return formatUpdatedAt(at);
+  if (days < 7) return new Date(at).toLocaleDateString(locale, { weekday: "long" });
+  return new Date(at).toLocaleDateString(locale, { dateStyle: "short" });
 }
 
 /** Newest message, else when the thread was created. Missing stamps sort as
@@ -225,7 +218,7 @@ export function orderedSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
 
 /** One quiet row for bot and group histories. Surface denotes selection;
  * working/waiting/unread remain independent signals, never different cards. */
-export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onDelete, onMove, onArchive, onPin, onSnooze, activityLabel, now }: {
+export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onDelete, onMove, onArchive, onPin, onSnooze, activityLabel, now, shownTitle }: {
   task: ThreadRowTask;
   /** the bot or room that owns the thread: the link's ?bot= */
   ownerId: string;
@@ -234,6 +227,9 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   folders?: BotProject[];
   /** Live verb the chat pane already derives ("Reading a file"); shown only while the row is working. */
   activityLabel?: string;
+  /** The title as people read it (fork, lib/bot-label threadTitle); the
+   * stored title stays what rename and the tooltip use. */
+  shownTitle?: { title: string; fromOpener: boolean };
   /** The list's shared clock tick; the visible stamp renders relative to it.
    * Omit to keep the absolute date everywhere. */
   now?: number;
@@ -253,7 +249,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   const menuRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
   const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWaitingOnTeammate(task) ? t("task.waitingOnTeammate") : isWorking(task) ? activityLabel ?? t("chat.activity.working") : task.queued ? t("task.queued") : null;
-  const byline = threadByline(task);
+  const byline = shownTitle?.fromOpener ? threadByline({ ...task, openedBy: undefined }) : threadByline(task);
   const updatedAt = threadRecency(task);
   const updatedStamp = formatUpdatedAt(updatedAt);
   const updatedLabel = now === undefined ? updatedStamp : threadUpdatedLabel(updatedAt, now);
@@ -314,7 +310,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
         onKeyDown={(event) => { if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
         className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", compact ? "min-h-7 py-1" : "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink")}>
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-          <span className={cn("min-w-0 truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{task.title}</span>
+          <span className={cn("min-w-0 truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{shownTitle?.title ?? task.title}</span>
           {byline && (
             // the same line and size as the title, only quieter: a second
             // line per thread made the list twice as tall as it needs to be

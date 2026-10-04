@@ -118,8 +118,9 @@ describe("relative clock tick", () => {
     };
     fixture.index = 0; fixture.effects = [];
     const markup = renderToStaticMarkup(createElement(BotThreadList, { bot, selected: true }));
-    expect(markup).toContain("just now");
-    expect(markup).toContain("5 min ago");
+    const clock = (ms: number) => new Date(ms).toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit" });
+    expect(markup).toContain(clock(now - 10_000));
+    expect(markup).toContain(clock(now - 5 * 60_000));
     runEffects();
     expect(intervals.filter((entry) => !entry.cleared)).toHaveLength(1);
     expect(intervals[0]!.delay).toBe(30_000);

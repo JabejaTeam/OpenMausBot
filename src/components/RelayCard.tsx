@@ -12,6 +12,7 @@ import { openThread, useStore, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { relayAnswerText, relayDelegateText } from "../../shared/relay-question";
 import { BotAvatar } from "./Avatar";
+import { BotName } from "./SimpleChat";
 
 /** Still waiting on the person: neither answered nor put aside. */
 export function isOpenRelay(message: Message): boolean {
@@ -31,7 +32,7 @@ export function AgentTag({ label, botId, threadId }: { label: string; botId: str
         onClick={() => threadId && openThread(dispatch, { botId, threadId }, state)}
         className="flex items-center gap-1.5 text-[12px] text-ink-tertiary transition-colors enabled:hover:text-ink-secondary"
       >
-        <span className="font-medium">{bot?.name ?? "Teammate"}</span>
+        <span className="font-medium"><BotName bot={bot} fallback="Teammate" /></span>
         {bot && <BotAvatar bot={bot} state="happy" size={18} motion="none" motionKey={0} animated={false} />}
         {label}
       </button>
@@ -59,7 +60,7 @@ export function RelayCard({ botId, threadId, message }: { botId: string; threadI
       <div data-relay-id={message.id} className="flex justify-center py-0.5">
         <span className="flex items-center gap-1 text-[11.5px] text-ink-tertiary">
           <Check size={11} strokeWidth={2.25} />
-          <span className="font-medium">{relay.name}</span>
+          <span className="font-medium"><BotName bot={asker} fallback={relay.name} /></span>
           <span className="max-w-[420px] truncate">· {card.answered ?? "afgevinkt"}</span>
         </span>
       </div>
@@ -102,10 +103,10 @@ export function RelayCard({ botId, threadId, message }: { botId: string; threadI
         className="mb-1 flex items-center gap-1.5 pl-0.5 text-[11px] font-medium text-ink-secondary enabled:hover:text-ink"
       >
         {asker && <BotAvatar bot={asker} state="happy" size={16} motion="none" motionKey={0} animated={false} />}
-        {relay.name}
+        <BotName bot={asker} fallback={relay.name} />
         <span className="size-1.5 rounded-full bg-accent" aria-label="wacht op je antwoord" />
       </button>
-      <div className="w-fit max-w-[min(42rem,78%)] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-ink">
+      <div className="w-fit max-w-[min(42rem,78%)] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-snug whitespace-pre-wrap text-ink">
         {card.subtitle}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">

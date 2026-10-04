@@ -2,10 +2,11 @@
 // desk; hover a bot for its name, click it to open its newest conversation in
 // a side panel, switch threads from the panel header. three.js loads lazily.
 import { Activity, memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, List, Paintbrush, PanelLeft, Plus, Scan, Search, X } from "lucide-react";
+import { ChevronRight, List, Paintbrush, PanelLeft, Scan, Search, SquarePen, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { botLabel, botLabelLine, threadTitle } from "@/lib/bot-label";
 import { MAUS_COLORS, stateForBot } from "@/lib/mascot";
 import { hiddenBotsForMe, usePeople } from "@/lib/people";
 import { BOTS_SECTION_ID, orderedSidebarSections, shownForMe, userSectionId } from "@/lib/sidebar-layout";
@@ -43,7 +44,11 @@ function isWorking(bot: Bot, pendingQueued: Parameters<typeof sidebarBotActivity
 
 /** Team, and what the bot is on: the thread a click opens, in its status. */
 function PanelSubtitle({ bot, team }: { bot: Bot; team?: string }) {
-  const { status, title } = focusTask(bot);
+  const { state } = useStore();
+  const { status, title: stored } = focusTask(bot);
+  // the same title the thread list shows (lib/bot-label threadTitle)
+  const task = stored ? bot.tasks?.find((item) => item.title.trim() === stored) : undefined;
+  const title = task ? threadTitle(task, state.bots).title : stored;
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-[12.5px] leading-4 text-ink-secondary">
       {status !== "idle" && <StatusSymbol status={status} size={11} />}
@@ -55,6 +60,39 @@ function PanelSubtitle({ bot, team }: { bot: Bot; team?: string }) {
 }
 
 const THREAD_COLUMN_KEY = "omb-office-thread-column";
+
+/** The bot's threads as Messages lists conversations: a search field and a
+ * compose button on top, then every thread in one scrolling list. */
+function OfficeThreads({ bot, onNew }: { bot: Bot; onNew: () => void }) {
+  const [query, setQuery] = useState("");
+  return (
+    <>
+      <div className="sticky top-0 z-10 flex items-center gap-1 bg-app pb-1.5 pt-1">
+        <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-inset px-2 text-ink-secondary">
+          <Search size={14} className="shrink-0" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Escape" && query) { event.stopPropagation(); setQuery(""); } }}
+            placeholder={t("sidebar.search")}
+            aria-label={t("task.search")}
+            className="min-w-0 flex-1 bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={onNew}
+          title={t("task.newShort")}
+          aria-label={t("task.newShort")}
+          className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
+        >
+          <SquarePen size={16} />
+        </button>
+      </div>
+      <BotThreadList bot={bot} selected density="comfortable" query={query} everything />
+    </>
+  );
+}
 
 /** Fires once its chat has committed visibly: on first render, and each
  * time a hidden (cached) chat is shown again. */
@@ -236,16 +274,16 @@ export function OfficeView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the selection changes
   }, [state.selectedId]);
 
-  // ⌘F always finds an agent, chat open or not; finding inside the chat is
-  // the panel header's search button. ⌥↑/⌥↓ step to the previous/next agent.
+  // ⌘F finds an agent; with the focus in the open chat it finds in that chat
+  // instead (the chat's own find bar), like Messages. ⌥↑/⌥↓ step to the
+  // previous/next agent.
   const orderRef = useRef(officeBots);
   orderRef.current = officeBots;
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f") {
-        // the header button's own ⌘F, meant for the chat's find bar
-        if ((event as KeyboardEvent & { officeChatFind?: boolean }).officeChatFind) return;
+        if (openIdRef.current && target && panelRef.current?.contains(target)) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         setSearchOpen(true);
@@ -405,7 +443,7 @@ export function OfficeView() {
             {hoveredBot && (
               <div className={cn("flex items-center gap-2 rounded-full py-1 pl-1 pr-3", glass)} role="tooltip">
                 <BotAvatar bot={hoveredBot} state={stateForBot(hoveredBot)} size={22} motion="none" motionKey={0} animated={false} />
-                <span className="text-[13.5px] font-semibold text-ink">{hoveredBot.name}</span>
+                <span className="text-[13.5px] font-semibold text-ink">{botLabel(hoveredBot).name}</span>
                 {teamOf.get(hoveredBot.id) && <span className="text-[12.5px] text-ink-secondary">{teamOf.get(hoveredBot.id)}</span>}
                 {hoveredAway && <span className="text-[12.5px] text-ink-secondary">{t("office.away")}</span>}
                 {botStatus(hoveredBot) !== "idle" && (
@@ -454,12 +492,12 @@ export function OfficeView() {
       <aside
         ref={panelRef}
         data-office-panel
-        aria-label={openBot?.name}
+        aria-label={openBot ? botLabelLine(openBot) : undefined}
         aria-hidden={!openBot}
         inert={!openBot}
         style={{ transform: "translateX(100%)" }}
         className={cn(
-          "absolute inset-y-0 right-0 z-30 flex flex-col border-l border-hairline/40 bg-app shadow-2xl shadow-black/40 will-change-transform max-md:w-full",
+          "absolute inset-y-0 right-0 z-30 flex flex-col bg-app shadow-2xl shadow-black/40 will-change-transform max-md:w-full",
           threadColumn ? "w-[min(820px,100%)]" : "w-[min(560px,100%)]",
         )}
       >
@@ -473,7 +511,7 @@ export function OfficeView() {
             >
               <BotAvatar bot={openBot} state={stateForBot(openBot)} size={28} />
               <span className="min-w-0 text-left">
-                <span className="block truncate text-[15px] font-semibold leading-5 text-ink">{openBot.name}</span>
+                <span className="block truncate text-[15px] font-semibold leading-5 text-ink">{botLabel(openBot).name}</span>
                 <PanelSubtitle bot={openBot} team={teamOf.get(openBot.id)} />
               </span>
             </button>
@@ -482,7 +520,7 @@ export function OfficeView() {
                 <button
                   type="button"
                   onClick={() => open(next.bot.id)}
-                  title={t("office.nextTitle", { name: next.bot.name })}
+                  title={t("office.nextTitle", { name: botLabelLine(next.bot) })}
                   className="flex h-8 items-center gap-0.5 rounded-full bg-raised/50 pl-3 pr-2 text-[13.5px] text-ink hover:bg-raised"
                 >
                   {t("office.next")}
@@ -505,29 +543,6 @@ export function OfficeView() {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  // ChatView opens its find bar on ⌘F; send it one marked as ours
-                  const find = new KeyboardEvent("keydown", { key: "f", metaKey: true, ctrlKey: !/Mac|iPhone|iPad/.test(navigator.platform), bubbles: true });
-                  Object.assign(find, { officeChatFind: true });
-                  window.dispatchEvent(find);
-                }}
-                title={t("office.findInChat")}
-                aria-label={t("office.findInChat")}
-                className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
-              >
-                <Search size={16} />
-              </button>
-              <button
-                type="button"
-                onClick={() => { setThreadsOpen(false); dispatch({ type: "newTask", botId: openBot.id }); }}
-                title={t("task.newShort")}
-                aria-label={t("task.newShort")}
-                className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
-              >
-                <Plus size={17} />
-              </button>
-              <button
-                type="button"
                 onClick={close}
                 title={t("common.close")}
                 aria-label={t("common.close")}
@@ -540,14 +555,14 @@ export function OfficeView() {
         )}
         {openBot && threadsOpen && (
           <div className={cn("absolute inset-x-3 top-14 z-20 max-h-[60%] overflow-y-auto rounded-2xl border border-hairline/40 bg-panel p-2 md:hidden", "shadow-xl shadow-black/30")}>
-            <BotThreadList bot={openBot} selected density="comfortable" />
+            <OfficeThreads bot={openBot} onNew={() => { setThreadsOpen(false); dispatch({ type: "newTask", botId: openBot.id }); }} />
           </div>
         )}
         <div className="flex min-h-0 flex-1">
           {/* the bot's threads, one tap to switch — the sidebar's own list */}
           {openBot && threadColumn && (
-            <nav aria-label={t("office.threadsAria", { name: openBot.name })} className="hidden w-60 shrink-0 overflow-y-auto border-r border-hairline/40 px-2 pb-3 pt-1 md:block">
-              <BotThreadList bot={openBot} selected density="comfortable" />
+            <nav aria-label={t("office.threadsAria", { name: botLabelLine(openBot) })} className="hidden w-60 shrink-0 overflow-y-auto border-r border-hairline/40 px-2 pb-3 pt-1 md:block">
+              <OfficeThreads bot={openBot} onNew={() => dispatch({ type: "newTask", botId: openBot.id })} />
             </nav>
           )}
           {/* the open chat shows; the others stay rendered, hidden, for an instant switch */}
