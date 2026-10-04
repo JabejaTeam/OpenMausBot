@@ -520,62 +520,64 @@ function Bubble({
         {!user && (
           // Reply sits right beside the bubble on hover (always shown on
           // touch): the quickest way to tell the bot which message you mean.
-          <button
-            type="button"
-            onClick={onReply}
-            aria-label={t("chat.replyToMessage")}
-            title={t("chat.reply")}
-            className={cn(messageActionClass, "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 touch:opacity-100")}
-          >
-            <Reply size={15} />
-          </button>
-        )}
-        {!user && (
-          <MessageActions side="bot" forceOpen={viewRaw || speaking}>
-            {text && <CopyButton text={text} className="opacity-100" />}
-            {text && <RawToggleAction active={viewRaw} onToggle={() => setViewRaw((r) => !r)} className="opacity-100" />}
-            {message.kind === "text" && text && !peer && (
-              <SpeakButton text={text} botId={bot.id} messageId={message.id} voiceId={bot.voice} className="opacity-100" />
-            )}
-            {isLastBotText && !bot.busy && onRegenerate && (
-              <button
-                onClick={onRegenerate}
-                aria-label={t("chat.regenerate")}
-                title={t("chat.regenerate")}
-                className={messageActionClass}
-              >
-                <RefreshCw size={14} />
-              </button>
-            )}
+          // It shares the bottom edge with the "…" tray and the time, so the
+          // three read as one small action group.
+          <div className="flex items-end self-end">
             <button
               type="button"
               onClick={onReply}
               aria-label={t("chat.replyToMessage")}
               title={t("chat.reply")}
-              className={messageActionClass}
+              className={cn(messageActionClass, "mb-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 touch:opacity-100")}
             >
-              <MessageSquareReply size={14} />
+              <Reply size={15} />
             </button>
-            <button
-              onClick={() =>
-                dispatch({
-                  type: "updateTask",
-                  botId: bot.id,
-                  threadId: bot.threadId,
-                  patch: { pinnedMessageId: bot.pinnedMessageId === message.id ? "" : message.id },
-                })
-              }
-              aria-label={bot.pinnedMessageId === message.id ? t("chat.unpinMessage") : t("chat.pinMessage")}
-              title={bot.pinnedMessageId === message.id ? t("chat.unpinHint") : t("chat.pinHint")}
-              className={cn(messageActionClass, remoteClient && "hidden")}
-            >
-              {bot.pinnedMessageId === message.id ? <PinOff size={14} /> : <Pin size={14} />}
-            </button>
-          </MessageActions>
+            <MessageActions side="bot" forceOpen={viewRaw || speaking}>
+              {text && <CopyButton text={text} className="opacity-100" />}
+              {text && <RawToggleAction active={viewRaw} onToggle={() => setViewRaw((r) => !r)} className="opacity-100" />}
+              {message.kind === "text" && text && !peer && (
+                <SpeakButton text={text} botId={bot.id} messageId={message.id} voiceId={bot.voice} className="opacity-100" />
+              )}
+              {isLastBotText && !bot.busy && onRegenerate && (
+                <button
+                  onClick={onRegenerate}
+                  aria-label={t("chat.regenerate")}
+                  title={t("chat.regenerate")}
+                  className={messageActionClass}
+                >
+                  <RefreshCw size={14} />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onReply}
+                aria-label={t("chat.replyToMessage")}
+                title={t("chat.reply")}
+                className={messageActionClass}
+              >
+                <MessageSquareReply size={14} />
+              </button>
+              <button
+                onClick={() =>
+                  dispatch({
+                    type: "updateTask",
+                    botId: bot.id,
+                    threadId: bot.threadId,
+                    patch: { pinnedMessageId: bot.pinnedMessageId === message.id ? "" : message.id },
+                  })
+                }
+                aria-label={bot.pinnedMessageId === message.id ? t("chat.unpinMessage") : t("chat.pinMessage")}
+                title={bot.pinnedMessageId === message.id ? t("chat.unpinHint") : t("chat.pinHint")}
+                className={cn(messageActionClass, remoteClient && "hidden")}
+              >
+                {bot.pinnedMessageId === message.id ? <PinOff size={14} /> : <Pin size={14} />}
+              </button>
+            </MessageActions>
+          </div>
         )}
         <span
           className={cn(
-            "self-end pb-1 text-[11px] tabular-nums text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100",
+            "self-end pb-1 text-[11px] tabular-nums text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100 shrink-0 whitespace-nowrap",
             user ? "order-first mr-2" : "ml-2",
           )}
         >
