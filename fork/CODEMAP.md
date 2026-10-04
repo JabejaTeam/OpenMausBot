@@ -37,3 +37,23 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
   (`FORK_EXTRA_BYTES`, `FORK_ROOM_EXTRA_BYTES`; regenerate goldens with
   `UPDATE_AGENTS_CATALOG_GOLDENS=1`).
 - `fork/deploy-beast.sh`: build the current commit on beast, back up, roll out, health check.
+
+## Office view (3D)
+- Switch: `src/lib/office-view.ts`; page: `src/components/office/OfficeView.tsx`; three.js scene
+  (lazy): `office-scene.ts`; rail/search: `OfficeStatusRail.tsx`, `OfficeSearch.tsx`.
+- Rules live in `src/lib/office-*.ts`, each tested: desks and seats (`office-layout`),
+  status and which thread a click opens (`office-status`), search ranking (`office-search`),
+  cached chats (`office-recent`), motion (`office-motion`), who works for whom — the
+  delegation arcs, from each thread's `openedBy` (`office-delegations`).
+- Motion, so the open animation never stutters again: moves advance by capped frames
+  (`advance`), never wall time; while a panel opens, the view's shift is solved each frame
+  so the bot glides straight to the visible middle (`glideShift`; easing the shift on its
+  own overshoots); opening a panel is ONE movement — slide and flight share `PANEL_MOVE_MS` and
+  `EASE_IN_OUT_CSS` (a panel on its own faster curve reads as a jolt); OfficeView sets all
+  state and renders the chat first, starts the move from `ChatReady`, and keeps the chats
+  memoised (`OfficeChats`) so no re-render (hover, a state change) lands mid-move.
+  The office's boxes are `overflow-clip`, never `overflow-hidden`: the off-screen panel's
+  composer takes focus and the browser scrolls a hidden-overflow box sideways (the whole
+  office jumps ~700px, then slides back).
+  Check a change by tracing frames in headless Chrome (bot screen x must never reverse,
+  the canvas must stay at x=0).

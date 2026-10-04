@@ -10,6 +10,8 @@ import { initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
 import { SimpleSidebar } from "@/components/SimpleSidebar";
 import { useSimpleUi } from "@/lib/simple-ui";
+import { OfficeView } from "@/components/office/OfficeView";
+import { useOfficeView } from "@/lib/office-view";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { BotSettingsDialog } from "@/components/BotSettingsDialog";
@@ -40,6 +42,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
   const simpleUi = useSimpleUi();
+  const officeView = useOfficeView();
   const unreadCount =
     state.bots.filter((bot) => !bot.hidden && bot.unread).length +
     state.groups.filter((group) => group.unread).length;
@@ -89,6 +92,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
   const calendarFocus = state.activeView === "routines";
+  // Office view (fork): the 3D office replaces the list and the chat column
+  const office = officeView && state.activeView === "chat";
 
   // Nothing on this machine can run a bot. A missing cloud login does not
   // count — that CLI can still host a local model. Wait for the first
@@ -245,7 +250,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {/* fixed-position popup, bottom-left — outside the layout flow */}
       <UpdateBanner />
       <div className="relative flex min-h-0 flex-1">
-      {!calendarFocus && <button
+      {!calendarFocus && !office && <button
         type="button"
         ref={menuButtonRef}
         aria-label="Open bot list"
@@ -262,7 +267,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           className="absolute inset-0 z-30 bg-black/50 md:hidden"
         />
       )}
-      {!calendarFocus && (simpleUi ? <SimpleSidebar
+      {!calendarFocus && !office && (simpleUi ? <SimpleSidebar
         open={drawerOpen}
         onClose={() => {
           setDrawerOpen(false);
@@ -290,6 +295,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <CloudEngineSignIn />
       ) : noEngines ? (
         <NoEngines />
+      ) : office ? (
+        <OfficeView />
       ) : group ? (
         <GroupView key={group.id} group={group} />
       ) : bot ? (

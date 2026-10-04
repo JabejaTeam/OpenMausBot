@@ -4,7 +4,7 @@
 // active and unread threads always show under the bot. Teams reorder by drag,
 // sharing the saved order with the full sidebar.
 import { useRef, useState } from "react";
-import { ChevronDown, Plus, Search, X } from "lucide-react";
+import { Box, ChevronDown, Plus, Search, X } from "lucide-react";
 import { useStore, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -22,6 +22,7 @@ import {
 } from "@/lib/sidebar-layout";
 import { loadCollapsedSections, loadSectionOrder, saveCollapsedSections, saveSectionOrder, toggleCollapsedSection } from "@/lib/sidebar-preferences";
 import { simpleSidebarLayout, type SimpleGroup } from "@/lib/simple-ui-groups";
+import { setOfficeView } from "@/lib/office-view";
 import { InitialsAvatar } from "./Avatar";
 import { SimpleBotAvatar as BotAvatar } from "./SimpleBotAvatar";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
@@ -285,6 +286,15 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
       <div className="flex items-center justify-between px-4 pb-1 pt-3" style={dragStyle}>
         <div className={macInset ? "w-14" : undefined} />
         <div className="flex items-center gap-2" style={noDragStyle}>
+          <button
+            type="button"
+            onClick={() => setOfficeView(true)}
+            aria-label={t("simpleUi.office")}
+            title={t("simpleUi.office")}
+            className={circle}
+          >
+            <Box size={18} />
+          </button>
           <button
             type="button"
             onClick={() => {

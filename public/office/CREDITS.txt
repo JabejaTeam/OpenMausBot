@@ -1,0 +1,2 @@
+RobotExpressive.glb — by Tomás Laulhé (Quaternius), CC0 1.0.
+Modified by Don McCurdy (expressions, FBX2glTF). Source: three.js examples/models/gltf/RobotExpressive (r180).
