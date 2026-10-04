@@ -11,6 +11,11 @@ describe("botStatus", () => {
     expect(botStatus(bot("d"))).toBe("idle");
   });
 
+  it("never counts an unread routine run, even through the bot's own flag", () => {
+    expect(botStatus(bot("j", { unread: true, tasks: [{ threadId: "run", createdAt: 1, unread: true, routineRunId: "r" }, { threadId: "c", createdAt: 2 }] }))).toBe("idle");
+    expect(botStatus(bot("k", { unread: true }))).toBe("unread");
+  });
+
   it("ignores routine runs", () => {
     expect(botStatus(bot("r", { tasks: [{ threadId: "run", createdAt: 1, routineRunId: "x", activity: "waiting-on-you" }] }))).toBe("idle");
   });

@@ -12,7 +12,7 @@ import { BOTS_SECTION_ID, orderedSidebarSections, shownForMe, userSectionId } fr
 import { loadSectionOrder } from "@/lib/sidebar-preferences";
 import { simpleSidebarLayout } from "@/lib/simple-ui-groups";
 import { officeLayout, officeSignature, type OfficeTeam } from "@/lib/office-layout";
-import { attentionThreadId, botStatus, focusTask, nextNeedingYou, statusGroups } from "@/lib/office-status";
+import { attentionThreadId, botStatus, focusTask, hasUnread, nextNeedingYou, statusGroups } from "@/lib/office-status";
 import { prewarm, remember } from "@/lib/office-recent";
 import { delegationLinks } from "@/lib/office-delegations";
 import { setOfficeView } from "@/lib/office-view";
@@ -48,10 +48,6 @@ function readTheme(): OfficeTheme {
 
 function isWorking(bot: Bot, pendingQueued: Parameters<typeof sidebarBotActivityTasks>[1]): boolean {
   return Boolean(bot.busy) || sidebarBotActivityTasks(bot, pendingQueued).some((task) => task.busy || task.activity === "working");
-}
-
-function isUnread(bot: Bot): boolean {
-  return Boolean(bot.unread) || Boolean(bot.tasks?.some((task) => task.unread));
 }
 
 /** Team, and what the bot is on: the thread a click opens, in its status. */
@@ -151,7 +147,7 @@ export function OfficeView() {
       color: MAUS_COLORS[bot.color] ?? MAUS_COLORS.blue,
       working: isWorking(bot, state.pendingQueued),
       waiting: botStatus(bot) === "waiting",
-      unread: isUnread(bot),
+      unread: hasUnread(bot),
     });
   }
   const looksKey = [...looks].map(([id, look]) => `${id}:${look.color}:${look.working ? 1 : 0}${look.waiting ? 1 : 0}${look.unread ? 1 : 0}`).join("|");

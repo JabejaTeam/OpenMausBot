@@ -35,10 +35,17 @@ const waitingTasks = (bot: StatusBot) => conversations(bot).filter((task) => tas
 const workingTasks = (bot: StatusBot) => conversations(bot).filter((task) => task.busy || task.activity === "working");
 const unreadTasks = (bot: StatusBot) => conversations(bot).filter((task) => task.unread);
 
+/** Unread conversations only. The bot's own `unread` flag also counts
+ * routine runs (read from their run receipt, not the thread list), so it is
+ * only trusted when the bot's threads are not known. */
+export function hasUnread(bot: StatusBot): boolean {
+  return bot.tasks ? unreadTasks(bot).length > 0 : Boolean(bot.unread);
+}
+
 export function botStatus(bot: StatusBot): OfficeStatus {
   if (bot.activity === "waiting-on-you" || waitingTasks(bot).length) return "waiting";
   if (bot.busy || bot.activity === "working" || workingTasks(bot).length) return "working";
-  if (bot.unread || unreadTasks(bot).length) return "unread";
+  if (hasUnread(bot)) return "unread";
   return "idle";
 }
 
