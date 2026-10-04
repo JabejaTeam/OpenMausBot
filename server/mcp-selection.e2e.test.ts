@@ -2,6 +2,7 @@ import { request } from "node:http";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
+import { MAX_MCP_SERVERS } from "./mcp-registry.ts";
 
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 
@@ -115,7 +116,7 @@ it("validates MCP grants, refuses live changes and client sessions, and rechecks
   await withFixture("hang", async ({ api, control, dump, clearDump, url, evidence }) => {
     const { bot } = await control(["new-bot", "--name", "Working fixture"]) as { bot: Bot };
     const { bot: idle } = await control(["new-bot", "--name", "Idle fixture"]) as { bot: Bot };
-    for (const mcpServers of ["notes", [""], ["bad.name"], ["agents"], [1], Array.from({ length: 21 }, (_, i) => `server-${i}`)]) {
+    for (const mcpServers of ["notes", [""], ["bad.name"], ["agents"], [1], Array.from({ length: MAX_MCP_SERVERS + 1 }, (_, i) => `server-${i}`)]) {
       expect((await api("PATCH", `/api/bots/${bot.id}`, { mcpServers })).status).toBe(400);
     }
     expect((await api("PATCH", `/api/bots/${bot.id}`, { mcpServers: ["notes", "notes"] })).body.bot.mcpServers).toEqual(["notes"]);

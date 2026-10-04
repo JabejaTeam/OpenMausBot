@@ -33,6 +33,16 @@ describe("workspace rules by kind of bot", () => {
     expect(kindInstructionsSystemPrompt("code")).not.toContain("Hand code questions to the code agent.");
   });
 
+  it("gives test agents their own rules and not the pm rules", () => {
+    writeKindInstructions("pm", "Hand code questions to the code agent.");
+    writeKindInstructions("test", "Test every card on staging.");
+    const tester = kindInstructionsSystemPrompt("test");
+    expect(tester).toContain("test agents");
+    expect(tester).toContain("Test every card on staging.");
+    expect(tester).not.toContain("Hand code questions to the code agent.");
+    expect(kindInstructionsSystemPrompt("pm")).not.toContain("Test every card on staging.");
+  });
+
   it("clears a scope with empty text and refuses oversized text", () => {
     writeKindInstructions("code", "rules");
     expect(writeKindInstructions("code", "   ")).toBeNull();

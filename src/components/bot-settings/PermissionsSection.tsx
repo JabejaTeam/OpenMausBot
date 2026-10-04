@@ -12,7 +12,7 @@
 // warnings remember which bot they were opened for, so a bot switch while
 // one is up never applies the choice to the newly selected bot.
 import { useState } from "react";
-import { Briefcase, Code2, Crown } from "lucide-react";
+import { Briefcase, Code2, Crown, FlaskConical } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -32,6 +32,7 @@ import { useBotEditor } from "./BotEditorContext";
 const KIND_SWITCHES = [
   { kind: "code", Icon: Code2, title: "botSettings.codeAgent.title", body: "botSettings.codeAgent.body" },
   { kind: "pm", Icon: Briefcase, title: "botSettings.pmAgent.title", body: "botSettings.pmAgent.body" },
+  { kind: "test", Icon: FlaskConical, title: "botSettings.testAgent.title", body: "botSettings.testAgent.body" },
 ] as const;
 
 export function PermissionsSection({
