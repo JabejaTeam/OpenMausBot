@@ -15,8 +15,8 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
   launch?: { integration: AgentsIntegration; system: string; evidence?: Record<string, unknown> },
   progress?: (text: string) => void): Promise<string> {
   const arg = (flag: string) => argv[argv.indexOf(flag) + 1];
-  const integration = launch?.integration ?? Object.values(JSON.parse(readFileSync(arg("--mcp-config"), "utf8")).mcpServers as Record<string, AgentsIntegration>)
-    .find(s => s.env?.OMB_BOT_ID);
+  const mounted = launch ? undefined : JSON.parse(readFileSync(arg("--mcp-config"), "utf8")).mcpServers as Record<string, AgentsIntegration>;
+  const integration = launch?.integration ?? Object.values(mounted!).find(s => s.env?.OMB_BOT_ID);
   // A depth-capped delegated turn mounts no agents server: answer from the prompt alone.
   if (!integration) {
     // Nothing in such a launch's argv says which bot it is — only the task
@@ -125,6 +125,6 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
       model: argv.includes("--model") ? arg("--model") : undefined,
       permissionMode: argv.includes("--permission-mode") ? arg("--permission-mode") : undefined,
       snapshotMode: argv.includes("--system-prompt-snapshot") ? arg("--system-prompt-snapshot") : undefined,
-      resumed, system, prompt, evidence, ...launch?.evidence }) + "\n");
+      resumed, system, prompt, evidence, ...(mounted ? { mcpServers: Object.keys(mounted) } : {}), ...launch?.evidence }) + "\n");
   }
 }
