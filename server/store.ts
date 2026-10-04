@@ -871,7 +871,7 @@ export class Store {
         task.turnStartedAt = undefined;
       }
       this.mirrorActiveTask(b, active);
-      b.unread = b.tasks.some((task) => task.unread);
+      if (this.refreshUnread(b)) botsMigrated = true;
     }
     if (botsMigrated) this.saveBots();
     // Search reads SQLite directly, so migrate every known legacy transcript
@@ -1933,7 +1933,7 @@ export class Store {
           Object.assign(task, { [key]: structuredClone(patch[key]) });
         }
       }
-      bot.unread = bot.tasks!.some((candidate) => candidate.unread);
+      this.refreshUnread(bot);
     }
     this.saveBots();
     this.emit({ type: "bot", botId: id });
@@ -2399,6 +2399,25 @@ export class Store {
     };
   }
 
+  /** Fork: the one place a bot's `unread` is derived. A routine's own
+   * execution is never unread — its result is unread in the conversation that
+   * asked for it (see where turns settle in index.ts) — so whichever writer
+   * marked it (an external context update did), it is read again here.
+   * Returns whether anything changed. */
+  private refreshUnread(bot: BotRecord): boolean {
+    let changed = false;
+    for (const task of bot.tasks ?? []) {
+      if (task.routineRunId && task.unread) {
+        task.unread = false;
+        changed = true;
+      }
+    }
+    const unread = (bot.tasks ?? []).some((task) => task.unread);
+    if (bot.unread !== unread) changed = true;
+    bot.unread = unread;
+    return changed;
+  }
+
   patchTask(botId: string, threadId: string, patch: TaskPatch): TaskRecord | null {
     const bot = this.bot(botId);
     const task = this.taskByThread(botId, threadId);
@@ -2417,7 +2436,7 @@ export class Store {
     if (typeof patch.title === "string") task.title = patch.title.trim().slice(0, 80) || UNTITLED_THREAD;
     if (Object.prototype.hasOwnProperty.call(patch, "pinned") && task.pinned !== true) delete task.pinned;
     if (bot.threadId === threadId) this.mirrorActiveTask(bot, task);
-    bot.unread = bot.tasks!.some((candidate) => candidate.unread);
+    this.refreshUnread(bot);
     this.saveBots();
     this.emit({ type: "bot", botId });
     return task;
@@ -2718,7 +2737,7 @@ export class Store {
       this.mirrorActiveTask(bot, visible);
     }
     this.deleteThreadRecord(threadId);
-    bot.unread = bot.tasks.some((task) => task.unread);
+    this.refreshUnread(bot);
     this.refreshBotActivity(bot);
     this.saveBots();
     this.emit({ type: "bot", botId });
