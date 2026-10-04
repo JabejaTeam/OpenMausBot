@@ -175,6 +175,7 @@ export class OfficeScene {
    * view by half of what it covers, on the same clock as the camera flight. */
   private panel: HTMLElement | null = null;
   private panelClosing: ReturnType<typeof setTimeout> | null = null;
+  private returnView: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
   private inset = 0;
   private resize: ResizeObserver;
   private sun: THREE.DirectionalLight;
@@ -679,6 +680,9 @@ export class OfficeScene {
   openPanel(panel: HTMLElement, botId: string): void {
     if (this.panelClosing) clearTimeout(this.panelClosing);
     this.panelClosing = null;
+    // the view to come back to when the panel closes: the one before it
+    // opened (reopening while it slides out keeps the first one)
+    this.returnView ??= { position: this.camera.position.clone(), target: this.controls.target.clone() };
     this.panel = panel;
     this.slide(panel, "translateX(0)");
     this.focusBot(botId, reducedMotion() ? 0 : PANEL_MOVE_MS, true);
@@ -688,6 +692,10 @@ export class OfficeScene {
     const panel = this.panel;
     if (!panel) return onClosed();
     this.slide(panel, "translateX(100%)");
+    // zoom back out to where you were, with the slide: one movement
+    const back = this.returnView;
+    this.returnView = null;
+    if (back) this.flyTo(back.position, back.target, true, reducedMotion() ? 0 : PANEL_MOVE_MS);
     if (this.panelClosing) clearTimeout(this.panelClosing);
     this.panelClosing = setTimeout(() => {
       this.panelClosing = null;

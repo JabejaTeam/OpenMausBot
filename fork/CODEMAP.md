@@ -52,6 +52,7 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
   `EASE_IN_OUT_CSS` (a panel on its own faster curve reads as a jolt); OfficeView sets all
   state and renders the chat first, starts the move from `ChatReady`, and keeps the chats
   memoised (`OfficeChats`) so no re-render (hover, a state change) lands mid-move.
+  Closing flies back to the view from before the panel opened (`returnView`), with the slide.
   The office's boxes are `overflow-clip`, never `overflow-hidden`: the off-screen panel's
   composer takes focus and the browser scrolls a hidden-overflow box sideways (the whole
   office jumps ~700px, then slides back).
