@@ -51,11 +51,15 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
   (`office-daylight`, sun position + phases, never a jump between minutes).
 - Furniture: Kenney Furniture Kit (CC0) in `public/office/furniture`, sizes, palette and
   placement in `office-furniture`, loaded by `office-furniture-kit.ts`.
-- Team looks (wall colour + logo): `server/team-looks.ts` + `server/routes/fork-office.ts`
-  (`/api/team-looks`: everyone reads, admin writes; logos only PNG/JPEG/WebP data URLs),
-  client rule `office-team-looks`, editor `OfficeLookEditor.tsx`.
+- Team looks (wall colour + logo, or else the name in a text colour): `server/team-looks.ts`
+  + `server/routes/fork-office.ts` (`/api/team-looks`: everyone reads, admin writes; logos
+  only PNG/JPEG/WebP data URLs), client rule `office-team-looks` (`wallSignFor`: logo wins,
+  a text colour only counts without one; `logoSize`: how big a sign hangs), editor
+  `OfficeLookEditor.tsx`. Team names over the doors show only on hover (touch: always).
 - Wandering: idle non-chief bots walk the corridors now and then (`office-wander`: who,
   when — seeded so every screen agrees — and the route); `office-walker.ts` animates it.
+  A bot in a handoff (either end) walks back to its desk, and its delegation arc follows
+  it there (arc ends are read from the markers every frame, never fixed at creation).
 - Motion, so the open animation never stutters again: moves advance by capped frames
   (`advance`), never wall time; while a panel opens, the view's shift is solved each frame
   so the bot glides straight to the visible middle (`glideShift`; easing the shift on its
