@@ -420,7 +420,7 @@ export class OfficeScene {
 
         // the real chair, keyboard and mouse once the furniture is in;
         // until then the simple chair stands in
-        const chair = this.kit.place({ model: "chairDesk", x: 0, z: -0.08, rotY: Math.PI });
+        const chair = this.kit.place({ model: "chairDesk", x: 0, z: -0.08 });
         if (chair) {
           const keyboard = this.kit.place({ model: "computerKeyboard", x: 0, z: 0.68, y: DESK_HEIGHT + 0.025 });
           const mouse = this.kit.place({ model: "computerMouse", x: 0.32, z: 0.7, y: DESK_HEIGHT + 0.025 });
