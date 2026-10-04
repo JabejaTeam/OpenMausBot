@@ -40,11 +40,33 @@ export interface OfficeDesk {
   seats: OfficeSeat[];
 }
 
+/** A team's closed office: walls all round, a glass front on the corridor
+ * (+z, towards the camera) with the door in it. */
+export interface OfficeRoom {
+  id: string;
+  label: string;
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  /** centre of the door in the front wall */
+  doorX: number;
+  /** the unsectioned chief's office, in front of the rest */
+  hero?: boolean;
+}
+
 export interface OfficeLayout {
   desks: OfficeDesk[];
-  /** floor rectangle around every desk */
+  rooms: OfficeRoom[];
+  /** the building's floor: every room and the corridors round them */
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
 }
+
+/** room between a team's desks and its walls */
+export const ROOM_PAD = 1.2;
+/** corridor between offices, and round the building */
+export const CORRIDOR = 2.6;
+export const DOOR_WIDTH = 1.1;
 
 export const SEAT_PITCH = 1.5;
 export const DESK_DEPTH = 1.8;
@@ -56,8 +78,6 @@ export const CHIEF_DESK = { width: 1, depth: 1.5 };
 export const CHIEF_GAP = 1.4;
 /** room behind a seated bot for its chair */
 const CHAIR = 0.6;
-const CELL_GAP_X = 2.5;
-const CELL_GAP_Z = 4;
 
 /** A team's zone centred on the origin, with its tables and seats. */
 export function deskFor(team: OfficeTeam): OfficeDesk {
@@ -98,34 +118,58 @@ function place(desk: OfficeDesk, x: number, z: number): OfficeDesk {
   };
 }
 
-/** Teams in rows of `columns` desks (about square), the hero desk in front. */
+/** The building: one closed office per team on a grid of corridors (rows
+ * run away from the camera, team order reads left to right, back to front),
+ * each office sized to its team, columns and rows lined up like a real floor
+ * plan; the hero's office in front, across a corridor. */
 export function officeLayout(teams: OfficeTeam[], hero: OfficeTeam | null = null): OfficeLayout {
   const desks = teams.filter((team) => team.bots.length > 0).map(deskFor);
   const columns = Math.max(1, Math.ceil(Math.sqrt(desks.length)));
-  const cellWidth = Math.max(0, ...desks.map((desk) => desk.width)) + CELL_GAP_X;
-  const cellDepth = Math.max(0, ...desks.map((desk) => desk.depth)) + CELL_GAP_Z;
   const rows = Math.ceil(desks.length / columns);
-  const placed = desks.map((desk, index) => {
-    const row = Math.floor(index / columns);
-    const inRow = Math.min(columns, desks.length - row * columns);
+  const colWidths = Array.from({ length: columns }, (_, col) =>
+    Math.max(0, ...desks.filter((_, i) => i % columns === col).map((desk) => desk.width + 2 * ROOM_PAD)));
+  const rowDepths = Array.from({ length: rows }, (_, row) =>
+    Math.max(0, ...desks.slice(row * columns, row * columns + columns).map((desk) => desk.depth + 2 * ROOM_PAD)));
+  const across = (sizes: number[]) => sizes.reduce((sum, size) => sum + size, 0) + CORRIDOR * Math.max(0, sizes.length - 1);
+  const centres = (sizes: number[]) => {
+    let at = -across(sizes) / 2;
+    return sizes.map((size) => {
+      const centre = at + size / 2;
+      at += size + CORRIDOR;
+      return centre;
+    });
+  };
+  const colX = centres(colWidths);
+  const rowZ = centres(rowDepths);
+  const placed: OfficeDesk[] = [];
+  const rooms: OfficeRoom[] = [];
+  desks.forEach((desk, index) => {
     const col = index % columns;
-    // rows run away from the camera (-z); a short last row stays centred
-    return place(desk, (col - (inRow - 1) / 2) * cellWidth, -(row - (rows - 1) / 2) * cellDepth);
+    const row = Math.floor(index / columns);
+    const x = colX[col];
+    const z = rowZ[row];
+    placed.push(place(desk, x, z));
+    rooms.push({ id: desk.id, label: desk.label, x, z, width: colWidths[col], depth: rowDepths[row], doorX: x });
   });
   if (hero && hero.bots.length) {
-    const front = placed.length ? Math.max(...placed.map((desk) => desk.z)) + cellDepth : 0;
     const desk = deskFor({ ...hero, bots: hero.bots.map((bot) => ({ id: bot.id })) });
-    placed.push(place(desk, 0, front));
+    // room for a lounge corner beside the desk
+    const width = Math.max(desk.width + 2 * ROOM_PAD, 8);
+    const depth = desk.depth + 2 * ROOM_PAD;
+    const front = rooms.length ? across(rowDepths) / 2 + CORRIDOR : 0;
+    const z = front + depth / 2;
+    placed.push(place(desk, 0, z));
+    rooms.push({ id: desk.id, label: desk.label, x: 0, z, width, depth, doorX: 0, hero: true });
   }
-  const bounds = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
-  for (const desk of placed) {
-    const { width, depth } = desk;
-    bounds.minX = Math.min(bounds.minX, desk.x - width / 2);
-    bounds.maxX = Math.max(bounds.maxX, desk.x + width / 2);
-    bounds.minZ = Math.min(bounds.minZ, desk.z - depth / 2);
-    bounds.maxZ = Math.max(bounds.maxZ, desk.z + depth / 2);
+  const bounds = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
+  for (const room of rooms) {
+    bounds.minX = Math.min(bounds.minX, room.x - room.width / 2 - CORRIDOR);
+    bounds.maxX = Math.max(bounds.maxX, room.x + room.width / 2 + CORRIDOR);
+    bounds.minZ = Math.min(bounds.minZ, room.z - room.depth / 2 - CORRIDOR);
+    bounds.maxZ = Math.max(bounds.maxZ, room.z + room.depth / 2 + CORRIDOR);
   }
-  return { desks: placed, bounds };
+  if (!rooms.length) Object.assign(bounds, { minX: 0, maxX: 0, minZ: 0, maxZ: 0 });
+  return { desks: placed, rooms, bounds };
 }
 
 /** One string per layout shape, so the scene only rebuilds when seats move. */

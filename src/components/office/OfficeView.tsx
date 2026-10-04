@@ -2,7 +2,7 @@
 // desk; hover a bot for its name, click it to open its newest conversation in
 // a side panel, switch threads from the panel header. three.js loads lazily.
 import { Activity, memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, List, PanelLeft, Plus, Scan, Search, X } from "lucide-react";
+import { ChevronRight, List, Paintbrush, PanelLeft, Plus, Scan, Search, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -24,25 +24,16 @@ import { sidebarBotActivityTasks } from "../SidebarBotActivity";
 import type { OfficeBotLook, OfficeScene, OfficeTheme } from "./office-scene";
 import { OfficeStatusRail, StatusSymbol } from "./OfficeStatusRail";
 import { OfficeSearch } from "./OfficeSearch";
+import { OfficeLookEditor, useTeamLooks } from "./OfficeLookEditor";
+import { looksKey as teamLooksKeyOf } from "@/lib/office-team-looks";
 
 function readTheme(): OfficeTheme {
   const css = getComputedStyle(document.documentElement);
   const value = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
-  const background = value("--color-app", "#070707");
-  const probe = document.createElement("canvas").getContext("2d")!;
-  probe.fillStyle = background;
-  const hex = probe.fillStyle.startsWith("#") ? probe.fillStyle : "#000000";
-  const luminance = (parseInt(hex.slice(1, 3), 16) * 0.299 + parseInt(hex.slice(3, 5), 16) * 0.587 + parseInt(hex.slice(5, 7), 16) * 0.114) / 255;
-  const dark = luminance < 0.5;
   return {
-    background,
-    floor: dark ? "#161618" : "#f2f2f7",
-    pad: dark ? "#202023" : "#e5e5ea",
-    desk: dark ? "#48484a" : "#ffffff",
     accent: value("--color-accent", "#1084fe"),
     success: value("--color-success", "#38d591"),
     warning: value("--color-warning", "#ff9f0a"),
-    dark,
   };
 }
 
@@ -121,6 +112,10 @@ export function OfficeView() {
     }
   };
   const [searchOpen, setSearchOpen] = useState(false);
+  // each team's wall colour and logo, edited from its name over the door
+  const teamLooks = useTeamLooks();
+  const [lookFor, setLookFor] = useState<string | null>(null);
+  const closeLook = useMemo(() => () => setLookFor(null), []);
   const openIdRef = useRef(openId);
   openIdRef.current = openId;
 
@@ -148,9 +143,10 @@ export function OfficeView() {
       working: isWorking(bot, state.pendingQueued),
       waiting: botStatus(bot) === "waiting",
       unread: hasUnread(bot),
+      chief: Boolean(bot.chiefOfStaff),
     });
   }
-  const looksKey = [...looks].map(([id, look]) => `${id}:${look.color}:${look.working ? 1 : 0}${look.waiting ? 1 : 0}${look.unread ? 1 : 0}`).join("|");
+  const looksKey = [...looks].map(([id, look]) => `${id}:${look.color}:${look.working ? 1 : 0}${look.waiting ? 1 : 0}${look.unread ? 1 : 0}${look.chief ? 1 : 0}`).join("|");
   // the rail lists bots in the office's own order: the hero, then team by team
   const officeBots = [...(hero?.bots ?? []), ...teams.flatMap((team) => team.bots)] as Bot[];
   const groups = statusGroups(officeBots);
@@ -302,6 +298,12 @@ export function OfficeView() {
   useEffect(() => {
     if (sceneReady) sceneRef.current?.setLinks(linksRef.current);
   }, [sceneReady, linksKey, layout]);
+  const teamLooksRef = useRef(teamLooks.looks);
+  teamLooksRef.current = teamLooks.looks;
+  const teamLooksKey = teamLooksKeyOf(teamLooks.looks);
+  useEffect(() => {
+    if (sceneReady) sceneRef.current?.setTeamLooks(teamLooksRef.current);
+  }, [sceneReady, teamLooksKey]);
   useEffect(() => {
     sceneRef.current?.setOverlays(labelRefs.current, hoverRef.current);
   });
@@ -351,19 +353,36 @@ export function OfficeView() {
         {/* team names over each desk; click flies there */}
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
           {layout.desks.map((desk) => (
-            <button
+            <div
               key={desk.id}
-              type="button"
               ref={(element) => {
                 if (element) labelRefs.current.set(desk.id, element);
                 else labelRefs.current.delete(desk.id);
               }}
-              onClick={() => sceneRef.current?.focusDesk(desk.id)}
               style={{ visibility: "hidden" }}
-              className="pointer-events-auto absolute left-0 top-0 whitespace-nowrap rounded-full px-3 py-1 text-[13px] font-medium text-ink-secondary transition-colors hover:bg-panel/70 hover:text-ink"
+              className={cn("group/label pointer-events-auto absolute left-0 top-0", lookFor === desk.id && "z-40")}
             >
-              {desk.label}
-            </button>
+              <div className="flex items-center gap-0.5 rounded-full bg-panel/75 py-0.5 pl-3 pr-0.5 shadow-md shadow-black/20 backdrop-blur-md">
+                <button type="button" onClick={() => sceneRef.current?.focusDesk(desk.id)} className="whitespace-nowrap py-0.5 text-[12.5px] font-semibold text-ink">
+                  {desk.label}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLookFor((current) => (current === desk.id ? null : desk.id))}
+                  title={t("office.look.edit")}
+                  aria-label={t("office.look.edit")}
+                  aria-expanded={lookFor === desk.id}
+                  className={cn("flex size-6 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink", lookFor === desk.id ? "opacity-100" : "opacity-0 group-hover/label:opacity-100 focus-visible:opacity-100 touch:opacity-100")}
+                >
+                  <Paintbrush size={12} />
+                </button>
+              </div>
+              {lookFor === desk.id && (
+                <div className="absolute left-1/2 top-full z-30 mt-2 -translate-x-1/2">
+                  <OfficeLookEditor teamId={desk.id} label={desk.label} look={teamLooks.looks[desk.id]} onSave={teamLooks.save} onClose={closeLook} />
+                </div>
+              )}
+            </div>
           ))}
           {/* the hovered bot's name, above its head */}
           <div ref={hoverRef} style={{ visibility: "hidden" }} className="absolute left-0 top-0 pb-1.5" aria-hidden={!hoveredBot}>

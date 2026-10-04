@@ -1,2 +1,4 @@
 RobotExpressive.glb — by Tomás Laulhé (Quaternius), CC0 1.0.
 Modified by Don McCurdy (expressions, FBX2glTF). Source: three.js examples/models/gltf/RobotExpressive (r180).
+
+furniture/*.glb — Kenney Furniture Kit 2.0 (www.kenney.nl), CC0 1.0. Source: https://kenney.nl/assets/furniture-kit

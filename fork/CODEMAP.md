@@ -45,6 +45,17 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
   status and which thread a click opens (`office-status`), search ranking (`office-search`),
   cached chats (`office-recent`), motion (`office-motion`), who works for whom — the
   delegation arcs, from each thread's `openedBy` (`office-delegations`).
+- The building: `office-layout` (closed offices on a corridor grid, `rooms`), drawn by
+  `components/office/office-building.ts` (walls drop to a rail when they face the camera,
+  glass fronts, window walls, lamps). Light follows the real sky over Brussels
+  (`office-daylight`, sun position + phases, never a jump between minutes).
+- Furniture: Kenney Furniture Kit (CC0) in `public/office/furniture`, sizes, palette and
+  placement in `office-furniture`, loaded by `office-furniture-kit.ts`.
+- Team looks (wall colour + logo): `server/team-looks.ts` + `server/routes/fork-office.ts`
+  (`/api/team-looks`: everyone reads, admin writes; logos only PNG/JPEG/WebP data URLs),
+  client rule `office-team-looks`, editor `OfficeLookEditor.tsx`.
+- Wandering: idle non-chief bots walk the corridors now and then (`office-wander`: who,
+  when — seeded so every screen agrees — and the route); `office-walker.ts` animates it.
 - Motion, so the open animation never stutters again: moves advance by capped frames
   (`advance`), never wall time; while a panel opens, the view's shift is solved each frame
   so the bot glides straight to the visible middle (`glideShift`; easing the shift on its

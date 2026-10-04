@@ -8,7 +8,13 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
-import type { OfficeDesk, OfficeLayout } from "@/lib/office-layout";
+import type { OfficeDesk, OfficeLayout, OfficeSeat } from "@/lib/office-layout";
+import { mayWander, walkPath, WANDER_BUDGET_MS, wanderPlan } from "@/lib/office-wander";
+import { Walker } from "./office-walker";
+import { daylight } from "@/lib/office-daylight";
+import { OfficeBuilding, WALL_HEIGHT } from "./office-building";
+import type { TeamLook } from "@/lib/office-team-looks";
+import { FurnitureKit } from "./office-furniture-kit";
 import { advance, EASE_IN_OUT_CSS, easeInOut, glideShift, PANEL_MOVE_MS, progressOf } from "@/lib/office-motion";
 import { linksOf, RECENT_HANDOFF_MS, type DelegationLink } from "@/lib/office-delegations";
 
@@ -19,17 +25,16 @@ export interface OfficeBotLook {
   /** waiting on you (an approval or a question): beats working */
   waiting: boolean;
   unread: boolean;
+  /** a chief (a team's PM, the hero) never leaves its desk */
+  chief?: boolean;
 }
 
+/** The app's own colours for the status marks; the office's light comes
+ * from the real sky (lib/office-daylight), not the app theme. */
 export interface OfficeTheme {
-  background: string;
-  floor: string;
-  pad: string;
-  desk: string;
   accent: string;
   success: string;
   warning: string;
-  dark: boolean;
 }
 
 interface Seat {
@@ -50,6 +55,13 @@ interface Seat {
   alert: THREE.Sprite;
   dot: THREE.Sprite;
   phase: number;
+  /** the robot and its hit area: what walks when the bot wanders */
+  body: THREE.Group;
+  walker: Walker | null;
+  /** the marker's seated place; a walking bot's marker follows it */
+  markerHome: THREE.Vector3;
+  homeId: string;
+  placed: OfficeSeat;
 }
 
 const DESK_HEIGHT = 0.75;
@@ -136,22 +148,6 @@ function screenTexture(accent: string): THREE.CanvasTexture {
   return texture;
 }
 
-function roundedRect(width: number, depth: number, radius: number): THREE.Shape {
-  const x = -width / 2;
-  const y = -depth / 2;
-  const shape = new THREE.Shape();
-  shape.moveTo(x + radius, y);
-  shape.lineTo(x + width - radius, y);
-  shape.quadraticCurveTo(x + width, y, x + width, y + radius);
-  shape.lineTo(x + width, y + depth - radius);
-  shape.quadraticCurveTo(x + width, y + depth, x + width - radius, y + depth);
-  shape.lineTo(x + radius, y + depth);
-  shape.quadraticCurveTo(x, y + depth, x, y + depth - radius);
-  shape.lineTo(x, y + radius);
-  shape.quadraticCurveTo(x, y, x + radius, y);
-  return shape;
-}
-
 export class OfficeScene {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
@@ -178,10 +174,9 @@ export class OfficeScene {
   private returnView: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
   private inset = 0;
   private resize: ResizeObserver;
-  private sun: THREE.DirectionalLight;
+  private building: OfficeBuilding;
+  private daylightTimer: ReturnType<typeof setInterval>;
   private materials: {
-    floor: THREE.MeshStandardMaterial;
-    pad: THREE.MeshStandardMaterial;
     desk: THREE.MeshStandardMaterial;
     metal: THREE.MeshStandardMaterial;
     chair: THREE.MeshStandardMaterial;
@@ -210,18 +205,16 @@ export class OfficeScene {
     this.renderer.domElement.style.touchAction = "none";
     host.appendChild(this.renderer.domElement);
 
-    this.scene.background = new THREE.Color(theme.background);
-    this.scene.fog = new THREE.Fog(theme.background, 40, 110);
+    this.scene.fog = new THREE.Fog("#000000", 40, 110);
 
     this.screenMap = screenTexture(theme.accent);
     this.accent = theme.accent;
     this.arcMaterials.bead.color.set(theme.accent);
     this.materials = {
-      floor: new THREE.MeshStandardMaterial({ color: theme.floor, roughness: 0.95 }),
-      pad: new THREE.MeshStandardMaterial({ color: theme.pad, roughness: 0.9 }),
-      desk: new THREE.MeshStandardMaterial({ color: theme.desk, roughness: 0.55 }),
-      metal: new THREE.MeshStandardMaterial({ color: theme.dark ? "#8e8e93" : "#c7c7cc", roughness: 0.35, metalness: 0.6 }),
-      chair: new THREE.MeshStandardMaterial({ color: theme.dark ? "#3a3a3c" : "#d1d1d6", roughness: 0.7 }),
+      // white oak tops, white steel, dark fabric: a modern office
+      desk: new THREE.MeshStandardMaterial({ color: "#d8c3a2", roughness: 0.6 }),
+      metal: new THREE.MeshStandardMaterial({ color: "#e4e4e6", roughness: 0.35, metalness: 0.4 }),
+      chair: new THREE.MeshStandardMaterial({ color: "#2e2f33", roughness: 0.8 }),
       monitor: new THREE.MeshStandardMaterial({ color: "#1c1c1e", roughness: 0.4, metalness: 0.3 }),
       screenIdle: new THREE.MeshStandardMaterial({ color: "#000000", emissive: "#1c2433", emissiveIntensity: 0.6, roughness: 0.2 }),
       screenWorking: new THREE.MeshStandardMaterial({ color: "#000000", emissive: "#ffffff", emissiveMap: this.screenMap, emissiveIntensity: 1.1, roughness: 0.2 }),
@@ -232,19 +225,12 @@ export class OfficeScene {
       busy: new THREE.MeshBasicMaterial({ color: theme.success, depthTest: false }),
     };
 
-    const floor = new THREE.Mesh(this.geo(new THREE.PlaneGeometry(400, 400)), this.materials.floor);
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    this.scene.add(floor);
     this.scene.add(this.world);
-
-    this.scene.add(new THREE.HemisphereLight(theme.dark ? "#d8e2ff" : "#ffffff", theme.dark ? "#202024" : "#d9d4cc", theme.dark ? 1.6 : 1.8));
-    this.sun = new THREE.DirectionalLight("#ffffff", theme.dark ? 2 : 2.2);
-    this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.radius = 6;
-    this.sun.shadow.bias = -0.0004;
-    this.scene.add(this.sun, this.sun.target);
+    // the building and its light, which follows the sky over Brussels
+    this.building = new OfficeBuilding(this.scene, this.renderer);
+    const sky = () => this.building.applyDaylight(daylight(), this.renderer);
+    sky();
+    this.daylightTimer = setInterval(sky, 60_000);
 
     // Maps-like: drag pans the floor, right-drag (or two fingers) turns, scroll zooms
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -270,6 +256,9 @@ export class OfficeScene {
     this.fitCanvas();
     this.renderer.setAnimationLoop(this.frame);
 
+    void this.kit.load().then(() => {
+      if (!this.disposed && this.layout) this.setLayout(this.layout, this.looks);
+    });
     new GLTFLoader().loadAsync(ROBOT_URL)
       .then((gltf) => {
         if (this.disposed) return;
@@ -281,6 +270,14 @@ export class OfficeScene {
       });
   }
 
+  private kit = new FurnitureKit();
+  private teamLooks: Record<string, TeamLook> = {};
+
+  /** Each team's wall colour and logo (server/team-looks). */
+  setTeamLooks(looks: Record<string, TeamLook>): void {
+    this.teamLooks = looks;
+    if (this.layout) this.building.applyLooks(this.layout, looks);
+  }
   private robot: Robot | null = null;
   private layout: OfficeLayout | null = null;
   private disposed = false;
@@ -355,17 +352,6 @@ export class OfficeScene {
     for (const desk of layout.desks) {
       const group = new THREE.Group();
       group.position.set(desk.x, 0, desk.z);
-      // the team's floor pad: a soft rounded zone, clickable to fly there
-      const pad = new THREE.Mesh(
-        this.geo(new THREE.ShapeGeometry(roundedRect(desk.width + 1.4, desk.depth + 1.4, 0.8), 6)),
-        this.materials.pad,
-      );
-      pad.rotation.x = -Math.PI / 2;
-      pad.position.y = 0.005;
-      pad.receiveShadow = true;
-      pad.userData.deskId = desk.id;
-      this.pickables.push(pad);
-      group.add(pad);
       // the team's shared desk, and the chief's own desk beside it
       for (const table of desk.tables) {
         const top = new THREE.Mesh(this.geo(new RoundedBoxGeometry(table.width, 0.05, table.depth, 4, 0.025)), this.materials.desk);
@@ -432,26 +418,34 @@ export class OfficeScene {
         dot.renderOrder = 11;
         marker.add(spinner, alert, dot);
 
-        root.add(chairSeat, chairBack, chairPost, hit, monitor, screen, stand, foot);
-        if (robot.avatar) root.add(robot.avatar);
+        // the real chair, keyboard and mouse once the furniture is in;
+        // until then the simple chair stands in
+        const chair = this.kit.place({ model: "chairDesk", x: 0, z: -0.08, rotY: Math.PI });
+        if (chair) {
+          const keyboard = this.kit.place({ model: "computerKeyboard", x: 0, z: 0.68, y: DESK_HEIGHT + 0.025 });
+          const mouse = this.kit.place({ model: "computerMouse", x: 0.32, z: 0.7, y: DESK_HEIGHT + 0.025 });
+          root.add(chair, ...[keyboard, mouse].filter((item): item is THREE.Object3D => Boolean(item)));
+        } else {
+          root.add(chairSeat, chairBack, chairPost);
+        }
+        // the robot and its hit area move together when it goes for a walk
+        const body = new THREE.Group();
+        body.add(hit);
+        if (robot.avatar) body.add(robot.avatar);
+        root.add(body, monitor, screen, stand, foot);
         this.world.add(marker);
         this.world.add(root);
         this.pickables.push(hit, chairBack, chairSeat, screen);
-        const seat: Seat = { botId: placed.botId, root, ...robot, screen, marker, spinner, alert, dot, phase: Math.random() * Math.PI * 2 };
+        const walker = this.makeWalker(body, robot, root);
+        const seat: Seat = { botId: placed.botId, root, ...robot, screen, marker, spinner, alert, dot, phase: Math.random() * Math.PI * 2, body, walker, markerHome: marker.position.clone(), homeId: desk.id, placed };
         this.showStatus(seat, look);
         this.seats.set(placed.botId, seat);
       }
     }
 
-    // shadows cover the whole office
-    const { minX, maxX, minZ, maxZ } = layout.bounds;
-    const cx = (minX + maxX) / 2;
-    const cz = (minZ + maxZ) / 2;
-    const half = Math.max(maxX - minX, maxZ - minZ) / 2 + 4;
-    this.sun.position.set(cx + half * 0.5, 30, cz + half * 0.8);
-    this.sun.target.position.set(cx, 0, cz);
-    Object.assign(this.sun.shadow.camera, { left: -half, right: half, top: half, bottom: -half, near: 1, far: 90 });
-    this.sun.shadow.camera.updateProjectionMatrix();
+    // the offices round the desks; their floors fly you to the team
+    this.building.build(layout, this.teamLooks, this.kit);
+    this.pickables.push(...this.building.floors);
     if (firstLayout) this.fitAll(false);
     // seats moved: draw the arcs again between the new desks (no flash)
     this.syncArcs(false);
@@ -590,6 +584,37 @@ export class OfficeScene {
     return texture;
   }
 
+  /** A seat's walker, once the robot (and its clips) are in. */
+  private makeWalker(body: THREE.Group, robot: Pick<Seat, "avatar" | "mixer">, seat: THREE.Object3D): Walker | null {
+    const clips = this.robot?.gltf.animations ?? [];
+    const clip = (name: string) => clips.find((item) => item.name === name);
+    const [sitting, standing, walking, idle] = [clip("Sitting"), clip("Standing"), clip("Walking"), clip("Idle")];
+    if (!robot.avatar || !robot.mixer || !sitting || !standing || !walking || !idle) return null;
+    return new Walker(body, robot.avatar, robot.avatar.position.clone(), seat, this.world, robot.mixer, { sitting, standing, walking, idle, wave: clip("Wave") });
+  }
+
+  /** Idle bots go for a walk now and then (lib/office-wander); a chief, a
+   * bot with work, one waiting on you or the one you opened stays or comes back. */
+  private wander(seat: Seat, look: OfficeBotLook | undefined): void {
+    const walker = seat.walker;
+    if (!walker || !this.layout) return;
+    const now = performance.now();
+    const stay = !look || !mayWander({ chief: Boolean(look.chief), working: look.working, waiting: look.waiting }) || seat.botId === this.selected || reducedMotion();
+    if (stay) walker.recall(now);
+    else if (!walker.away) {
+      const clock = Date.now();
+      const plan = wanderPlan(seat.botId, clock, this.layout.rooms.map((room) => room.id), seat.homeId);
+      if (plan && walker.walkedSlot !== plan.slot && clock >= plan.startAt && clock < plan.startAt + WANDER_BUDGET_MS) {
+        walker.walkedSlot = plan.slot;
+        walker.start(walkPath(this.layout, seat.placed, seat.homeId, plan.visit), now);
+      }
+    }
+    walker.update(now, this.clockDeltaMs / 1000);
+    // the status mark rides along over a walking bot's head
+    if (walker.away) walker.position(seat.marker.position).setY(ROBOT_HEIGHT + MARKER_GAP + 0.1);
+    else seat.marker.position.copy(seat.markerHome);
+  }
+
   private textures: THREE.Texture[] = [];
   private toCamera = new THREE.Vector3();
 
@@ -604,14 +629,9 @@ export class OfficeScene {
   }
 
   fitAll(animate = true): void {
-    if (!this.desks.length) return;
-    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const desk of this.desks) {
-      minX = Math.min(minX, desk.x - desk.width / 2 - 0.5);
-      maxX = Math.max(maxX, desk.x + desk.width / 2 + 0.5);
-      minZ = Math.min(minZ, desk.z - desk.depth / 2 - 0.5);
-      maxZ = Math.max(maxZ, desk.z + desk.depth / 2 + 0.5);
-    }
+    if (!this.layout || !this.desks.length) return;
+    // the whole building, corridors and all
+    const { minX, maxX, minZ, maxZ } = this.layout.bounds;
     // aim a little in front of the middle: perspective makes the near row bigger
     const target = new THREE.Vector3((minX + maxX) / 2, 0, (minZ + maxZ) / 2 + (maxZ - minZ) * 0.06);
     const vFov = (this.camera.fov * Math.PI) / 180;
@@ -636,7 +656,8 @@ export class OfficeScene {
   focusBot(botId: string, ms?: number, withPanel = false): void {
     const seat = this.seats.get(botId);
     if (!seat) return;
-    const target = seat.root.position.clone().setY(0.9);
+    // where the bot is now: at its desk, or out in the corridor
+    const target = seat.body.getWorldPosition(new THREE.Vector3()).setY(0.9);
     // keep the current viewing angle, just come closer
     const offset = this.camera.position.clone().sub(this.controls.target);
     offset.setLength(Math.min(offset.length(), 12));
@@ -853,13 +874,17 @@ export class OfficeScene {
 
     this.screenMap.offset.y = (this.screenMap.offset.y + delta * 0.12) % 1;
     this.drawArcs(time);
+    this.building.update(this.camera, delta);
+    // screens light up more in the evening
+    this.materials.screenWorking.emissiveIntensity = 1 + this.building.lampLevel * 0.5;
     for (const seat of this.seats.values()) {
       const look = this.looks.get(seat.botId);
       const lit = seat.botId === this.hovered || seat.botId === this.selected;
       seat.tint.emissive.set(lit ? "#ffffff" : "#000000");
       seat.tint.emissiveIntensity = seat.botId === this.hovered ? 0.22 : lit ? 0.12 : 0;
+      this.wander(seat, look);
       // the seated pose is static (set once); small motion goes on top of it
-      if (seat.avatar) {
+      if (seat.avatar && !seat.walker?.away) {
         const base = this.robot?.offset.y ?? 0;
         if (look?.waiting) {
           // waiting on you: turn round and look at you
@@ -889,7 +914,9 @@ export class OfficeScene {
 
     for (const desk of this.desks) {
       const label = this.labels.get(desk.id);
-      if (label) this.place(label, desk.x, DESK_HEIGHT + 1.35, desk.z - desk.depth / 2 - 0.3);
+      // the team's name over its office door
+      const room = this.layout?.rooms.find((item) => item.id === desk.id);
+      if (label && room) this.place(label, room.doorX, WALL_HEIGHT + 0.25, room.z + room.depth / 2);
     }
     if (this.hoverLabel) {
       const seat = this.hovered ? this.seats.get(this.hovered) : null;
@@ -922,6 +949,9 @@ export class OfficeScene {
     for (const geometry of this.geometries) geometry.dispose();
     this.screenMap.dispose();
     for (const texture of this.textures) texture.dispose();
+    clearInterval(this.daylightTimer);
+    this.building.dispose();
+    this.kit.dispose();
     for (const arc of this.arcs.values()) this.dropArc(arc);
     this.arcGeometry.bead.dispose();
     this.arcGeometry.comet.dispose();

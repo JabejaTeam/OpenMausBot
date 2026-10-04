@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deskFor, DESK_DEPTH, latestThreadId, officeLayout, officeSignature, SEAT_PITCH } from "./office-layout";
+import { CORRIDOR, deskFor, DESK_DEPTH, DOOR_WIDTH, latestThreadId, officeLayout, officeSignature, ROOM_PAD, SEAT_PITCH } from "./office-layout";
 
 const team = (id: string, n: number, chief = false) => ({
   id,
@@ -76,6 +76,50 @@ describe("officeLayout", () => {
   it("changes signature only when seats change", () => {
     expect(officeSignature([team("a", 2)], null)).toBe(officeSignature([team("a", 2)], null));
     expect(officeSignature([team("a", 2)], null)).not.toBe(officeSignature([team("a", 3)], null));
+  });
+});
+
+describe("officeLayout: the building", () => {
+  const teams = Array.from({ length: 15 }, (_, i) => team(`t${i}`, i === 3 ? 10 : (i % 4) + 1, i % 2 === 0));
+  const { desks, rooms, bounds } = officeLayout(teams, { id: "hero", label: "Jarvis", bots: [{ id: "jarvis" }] });
+
+  it("gives every team a closed office its desk fits in, with room to spare", () => {
+    expect(rooms).toHaveLength(desks.length);
+    desks.forEach((desk, i) => {
+      const room = rooms[i];
+      expect(room.id).toBe(desk.id);
+      expect(desk.x - desk.width / 2).toBeGreaterThanOrEqual(room.x - room.width / 2 + ROOM_PAD - 1e-9);
+      expect(desk.x + desk.width / 2).toBeLessThanOrEqual(room.x + room.width / 2 - ROOM_PAD + 1e-9);
+      expect(desk.z - desk.depth / 2).toBeGreaterThanOrEqual(room.z - room.depth / 2 + ROOM_PAD - 1e-9);
+      expect(desk.z + desk.depth / 2).toBeLessThanOrEqual(room.z + room.depth / 2 - ROOM_PAD + 1e-9);
+    });
+  });
+
+  it("keeps a corridor between every two offices, and round the building", () => {
+    for (const a of rooms) for (const b of rooms) {
+      if (a === b) continue;
+      const gapX = Math.abs(a.x - b.x) - (a.width + b.width) / 2;
+      const gapZ = Math.abs(a.z - b.z) - (a.depth + b.depth) / 2;
+      expect(Math.max(gapX, gapZ)).toBeGreaterThanOrEqual(CORRIDOR - 1e-9);
+    }
+    for (const room of rooms) {
+      expect(room.x - room.width / 2 - bounds.minX).toBeGreaterThanOrEqual(CORRIDOR - 1e-9);
+      expect(bounds.maxZ - (room.z + room.depth / 2)).toBeGreaterThanOrEqual(CORRIDOR - 1e-9);
+    }
+  });
+
+  it("puts the door in the front wall, inside the office's width", () => {
+    for (const room of rooms) {
+      expect(Math.abs(room.doorX - room.x)).toBeLessThanOrEqual(room.width / 2 - DOOR_WIDTH / 2);
+    }
+  });
+
+  it("lines offices up in columns and rows, the hero's office in front", () => {
+    const hero = rooms.at(-1)!;
+    expect(hero.hero).toBe(true);
+    expect(hero.z - hero.depth / 2).toBeGreaterThan(Math.max(...rooms.slice(0, -1).map((room) => room.z + room.depth / 2)));
+    const lefts = new Set(rooms.slice(0, -1).map((room) => (room.x - room.width / 2).toFixed(3)));
+    expect(lefts.size).toBeLessThanOrEqual(4);
   });
 });
 
