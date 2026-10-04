@@ -5,4 +5,7 @@ FROM node:24-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git libasound2 libnss3 libgbm1 libgtk-3-0 libxss1 libxshmfence1 libdrm2 \
     && rm -rf /var/lib/apt/lists/* \
-    && corepack enable
+    && corepack enable \
+    # The verification server's PATH is node's own folder (/usr/local/bin
+    # here); on a Mac and on the live beast that folder also holds git.
+    && ln -s /usr/bin/git /usr/local/bin/git

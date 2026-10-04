@@ -6655,7 +6655,11 @@ describe("harness HTTP API", () => {
     expect(empty.status).toBe(400);
 
     // the seeded bot's selection points at the ghost instance — sending a
-    // real message must fail loudly, not 202-and-hang
+    // real message must fail loudly, not 202-and-hang. Jabeja fork: set it
+    // here when an earlier test has not, so the test also runs on its own.
+    if (bot.modelSelection?.instanceId !== "ghost") {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "ghost", model: "ghost-1" } })).status).toBe(200);
+    }
     const send = await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello?" });
     expect(send.status).toBe(409);
     expect(send.body.error).toContain("unavailable");

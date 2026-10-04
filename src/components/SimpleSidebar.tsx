@@ -61,7 +61,7 @@ function Row({
       aria-current={selected ? "page" : undefined}
       className={cn(
         "flex w-full items-center gap-3 rounded-2xl px-2.5 py-2 text-left transition-colors",
-        padRight && "group-hover:pr-[4.5rem] group-focus-within:pr-[4.5rem] max-md:pr-[4.5rem]",
+        padRight && "group-hover:pr-[4.5rem] group-focus-within:pr-[4.5rem] max-md:pr-[4.5rem] touch:pr-[4.5rem]",
         selected ? "bg-raised" : "hover:bg-raised/50",
       )}
     >
@@ -85,7 +85,7 @@ function BotRow({ bot, query }: { bot: Bot; query: string }) {
   const working = Boolean(bot.busy) || activity.some((task) => task.busy || task.activity === "working");
   const unread = Boolean(bot.unread) || activity.some((task) => task.unread);
   const hasThreadList = (bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0;
-  const hover = "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-70";
+  const hover = "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-70 touch:opacity-100";
   return (
     <>
       <div className="group relative">
@@ -143,7 +143,7 @@ function HeroBot({ bot, query }: { bot: Bot; query: string }) {
   const working = Boolean(bot.busy) || activity.some((task) => task.busy || task.activity === "working");
   const unread = Boolean(bot.unread) || activity.some((task) => task.unread);
   const hasThreadList = (bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0;
-  const hover = "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-70";
+  const hover = "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-70 touch:opacity-100";
   const small = "flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink";
   return (
     <div className="mb-2">
@@ -389,7 +389,7 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
                   aria-hidden="true"
                   className={cn(
                     "shrink-0 transition-transform",
-                    collapsed ? "-rotate-90 opacity-100" : "opacity-0 group-hover/team:opacity-100 group-focus-visible/team:opacity-100 max-md:opacity-70",
+                    collapsed ? "-rotate-90 opacity-100" : "opacity-0 group-hover/team:opacity-100 group-focus-within/team:opacity-100 max-md:opacity-70 touch:opacity-100",
                   )}
                 />
               </button>
