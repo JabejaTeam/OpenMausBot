@@ -9,6 +9,7 @@ import {
   Copy,
   Crown,
   MessageSquareReply,
+  Reply,
   Monitor,
   Pencil,
   Pin,
@@ -25,6 +26,7 @@ import { useSpeech } from "@/lib/tts/useSpeech";
 import { useCaptionChrome, useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { contextChip, contextDetail, contextShare, costCaption, formatUsd, hasFiniteCost, lastTurnDetail, usageChip, usageDetail } from "@/lib/usage";
 import {
+  openThread,
   api,
   currentTaskBot,
   useStore,
@@ -62,6 +64,9 @@ import { ThreadRefText } from "./ThreadRefs";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { QuestionCard } from "./QuestionCard";
+import { AgentTag, RelayCard } from "./RelayCard";
+import { isPersonalChief, isRelayReplyText } from "../../shared/relay-question";
+import { SubThreadsBar } from "./SubThreadsBar";
 import { Composer } from "./Composer";
 import { ChatFindBar } from "./ChatFindBar";
 import { ReplyQuote } from "./ReplyQuote";
@@ -312,6 +317,7 @@ function Bubble({
   onRegenerate,
   replyTarget,
   onReply,
+  agents,
 }: {
   bot: Bot;
   message: Message;
@@ -325,6 +331,8 @@ function Bubble({
   onRegenerate?: () => void;
   replyTarget?: Message;
   onReply: () => void;
+  /** In a Chief's chat: the teammates whose results this update reports. */
+  agents?: Array<{ botId: string; threadId: string }>;
 }) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
@@ -382,6 +390,7 @@ function Bubble({
     <div className={cn("group flex w-full flex-col", user ? "animate-msg-in items-end" : "items-start")}>
       {peer && <PeerLabel peer={peer} />}
       {senderName && <PersonLabel name={senderName} />}
+      {agents?.length ? <AgentLabels agents={agents} /> : null}
       <div className={cn("flex w-full items-center gap-1.5", user ? "justify-end" : "justify-start")}>
         {user && (
           <MessageActions side="user">
@@ -509,6 +518,19 @@ function Bubble({
           )}
         </div>
         {!user && (
+          // Reply sits right beside the bubble on hover (always shown on
+          // touch): the quickest way to tell the bot which message you mean.
+          <button
+            type="button"
+            onClick={onReply}
+            aria-label={t("chat.replyToMessage")}
+            title={t("chat.reply")}
+            className={cn(messageActionClass, "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 touch:opacity-100")}
+          >
+            <Reply size={15} />
+          </button>
+        )}
+        {!user && (
           <MessageActions side="bot" forceOpen={viewRaw || speaking}>
             {text && <CopyButton text={text} className="opacity-100" />}
             {text && <RawToggleAction active={viewRaw} onToggle={() => setViewRaw((r) => !r)} className="opacity-100" />}
@@ -591,6 +613,31 @@ function Bubble({
  * same shape as a room's cluster label. Looked up by id, then by name for
  * rows that predate Message.peerAsk; a peer since renamed or deleted still
  * shows the name the line carries. */
+/** Who an update in a Chief's chat comes from: avatar and name, right on
+ * top of the bubble; a click opens that teammate's thread. */
+function AgentLabels({ agents }: { agents: Array<{ botId: string; threadId: string }> }) {
+  const { state, dispatch } = useStore();
+  return (
+    <div className="mb-1 flex items-center gap-3 pl-0.5">
+      {agents.map((ref) => {
+        const agent = state.bots.find((candidate) => candidate.id === ref.botId);
+        if (!agent) return null;
+        return (
+          <button
+            key={ref.threadId}
+            type="button"
+            onClick={() => openThread(dispatch, ref, state)}
+            className="flex items-center gap-1.5 text-[11px] font-medium text-ink-secondary hover:text-ink"
+          >
+            <BotAvatar bot={agent} state="happy" size={16} motion="none" motionKey={0} animated={false} />
+            {agent.name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function PeerLabel({ peer }: { peer: PeerLine }) {
   const { state } = useStore();
   const author =
@@ -617,6 +664,20 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
       <span className="text-[11px] text-ink-tertiary">· {how}</span>
     </div>
   );
+}
+
+/** In a Chief's chat only the handoffs show, as one quiet line each:
+ * "Stuurt X" when work went out, "Update van X" when its result came back.
+ * Every other step (tool calls, waiting chips, resumes) stays out of view. */
+function BossActivity({ message }: { message: Message }) {
+  const name = message.tool?.name ?? "";
+  const ref = message.threadRef
+    ?? (message.comm ? { botId: message.comm.withBotId, threadId: message.comm.threadId } : undefined);
+  if (!ref) return null;
+  if (/^(Sent to|Opened thread|Messaged)\b/.test(name)) return <AgentTag label="gestuurd" botId={ref.botId} threadId={ref.threadId} />;
+  // a teammate's work that failed or was withheld is news the person needs
+  if (/^Result withheld|\u2014 (failed|cancelled)/.test(name)) return <AgentTag label="vastgelopen" botId={ref.botId} threadId={ref.threadId} />;
+  return null;
 }
 
 /** A tool run: spinner while live, check/cross once settled. */
@@ -704,9 +765,35 @@ const MessagesList = memo(function MessagesList({
   const simpleUi = useSimpleUi();
   // Simple UI shows only the conversation: no tool runs, narration as plain bubbles
   const showToolCalls = !simpleUi && showToolCallsEnabled(state.config);
+  // A Chief's chat reads like a manager's inbox: who it sent work to, the
+  // updates that came back, and the questions; the steps in between stay in
+  // the teammates' own threads.
+  const boss = isPersonalChief(bot);
+  // The update a teammate's result led to carries that teammate's name on
+  // its own bubble, so the handoff chip itself never shows here.
+  const updateFrom = useMemo(() => {
+    const byText = new Map<string, Array<{ botId: string; threadId: string }>>();
+    if (!boss) return byText;
+    let pending: Array<{ botId: string; threadId: string }> = [];
+    for (const message of messages) {
+      const ref = message.threadRef
+        ?? (message.comm?.threadId ? { botId: message.comm.withBotId, threadId: message.comm.threadId } : undefined);
+      if (message.kind === "activity" && ref && /\breplied\b/.test(message.tool?.name ?? "")) {
+        if (!pending.some((known) => known.botId === ref.botId)) pending.push(ref);
+      } else if (message.role === "bot" && message.kind === "text" && pending.length) {
+        byText.set(message.id, pending);
+        pending = [];
+      }
+    }
+    return byText;
+  }, [boss, messages]);
   // Finished tool chips become compact runs; settled assistant narration
   // becomes one reversible turn row while the terminal answer stays visible.
-  const items = useMemo(() => groupTranscript(messages), [messages, locale]);
+  const items = useMemo(
+    () => groupTranscript(boss ? messages.filter((m) => !(m.role === "user" && isRelayReplyText(m.text))) : messages),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- locale refreshes the turn labels
+    [messages, locale, boss],
+  );
   // Where this conversation works, for the place icon on screen and page tools.
   const place = effectivePlace(bot, bot.tasks?.find((task) => task.threadId === bot.threadId));
   const newestMessageId = messages.at(-1)?.id;
@@ -756,7 +843,7 @@ const MessagesList = memo(function MessagesList({
               <TurnNarrationRun
                 label={item.label}
                 forceOpen={item.messages.some((message) => message.id === focusedId)}
-                flat={simpleUi}
+                flat={simpleUi || boss}
               >
                 {item.messages.map((message) => (
                   <div key={message.id} className="contents" data-mid={message.id}>
@@ -780,7 +867,7 @@ const MessagesList = memo(function MessagesList({
           );
         }
         if (item.kind === "run") {
-          if (!showToolCalls) return null;
+          if (!showToolCalls || boss) return null;
           return (
             <div key={item.id} className="contents">
               {newDay && <DaySeparator at={first.at} />}
@@ -810,7 +897,9 @@ const MessagesList = memo(function MessagesList({
               // Cards are bot-authored and persisted, so one that will not
               // draw must fall back to its text on every open, not take the
               // whole page down every time this chat is selected.
-              const card = m.card?.requestId && m.card.questionRequest ? (
+              const card = m.card?.relay ? (
+                <RelayCard botId={bot.id} threadId={bot.threadId} message={m} />
+              ) : m.card?.requestId && m.card.questionRequest ? (
                 <QuestionCard threadId={bot.threadId} bot={bot} message={m} />
               ) : m.card?.requestId && m.card.tool ? (
                 <ApprovalCard bot={bot} message={m} />
@@ -865,12 +954,13 @@ const MessagesList = memo(function MessagesList({
                   />
                 );
               }
+              if (boss) return <BossActivity message={m} />;
               if (!showToolCalls && !m.comm && !m.threadRef) return null;
               return <ActivityChip message={m} place={place} />;
             }
             case "digest":
               // the summary of the turn's tool chips: shown under the same setting
-              return showToolCalls ? <DigestChip message={m} /> : null;
+              return showToolCalls && !boss ? <DigestChip message={m} /> : null;
             case "compaction":
               return <CompactionChip message={m} />;
             case "screen":
@@ -890,6 +980,7 @@ const MessagesList = memo(function MessagesList({
                   onRegenerate={onRegenerate}
                   replyTarget={m.replyToId ? bot.messages.find((candidate) => candidate.id === m.replyToId) : undefined}
                   onReply={() => onReply(m)}
+                  agents={updateFrom.get(m.id)}
                 />
               );
           }
@@ -1039,6 +1130,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     [messages, transcriptWindow.start, transcriptWindow.end],
   );
 
+
   const lastBotTextId = useMemo(
     () => [...messages].reverse().find((m) => m.role === "bot" && m.kind === "text")?.id,
     [messages],
@@ -1138,10 +1230,24 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const previousScrollTop = useRef(0);
   const touchY = useRef(0);
 
+  // Where the reader left the end: rows from here on arrived unseen, and the
+  // jump pill counts them.
+  const messageCount = useRef(messages.length);
+  messageCount.current = messages.length;
+  const [unseenFrom, setUnseenFrom] = useState<number | null>(null);
   const setBottomFollow = useCallback((next: boolean) => {
+    if (!next && followRef.current) setUnseenFrom(messageCount.current);
+    if (next) setUnseenFrom(null);
     followRef.current = next;
     setFollow(next);
   }, []);
+  // Stop following the end, e.g. before jumping to an earlier card.
+  const releaseFollow = useCallback(() => setBottomFollow(false), [setBottomFollow]);
+  // Replies and cards that came in while the reader was scrolled up.
+  const unseenCount = useMemo(
+    () => unseenFrom === null ? 0 : messages.slice(unseenFrom).filter((m) => m.role === "bot" && (m.kind === "text" || m.kind === "options")).length,
+    [messages, unseenFrom],
+  );
   useBottomFollowResize(scrollRef, transcriptRef, followRef, transcriptKey);
 
   useEffect(() => setBottomFollow(true), [bot.id, setBottomFollow]);
@@ -1563,7 +1669,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           className="animate-pop-in absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-hairline/40 bg-raised px-3 py-1.5 text-[12.5px] text-ink shadow-lg hover:bg-raised-hover"
           style={{ bottom: composerDock.height }}
         >
-          <ArrowDown size={13} /> {t("chat.jumpToLatest")}
+          <ArrowDown size={13} /> {unseenCount > 0
+            ? `${unseenCount} ${unseenCount === 1 ? "nieuw bericht" : "nieuwe berichten"}`
+            : t("chat.jumpToLatest")}
         </button>
       )}
 
@@ -1594,6 +1702,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           />
         </div>
       )}
+      <SubThreadsBar bot={bot} messages={messages} onJump={releaseFollow} />
       <Composer
         key={bot.threadId}
         bot={profile}

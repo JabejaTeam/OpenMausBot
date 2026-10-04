@@ -13,6 +13,7 @@ import { normalizeCronSchedule } from "../../shared/routine-schedule.ts";
 import { peerName } from "../peer-roster.ts";
 import { renderPeerDeliveryReceipts, type PeerDeliveryOutcome, type PeerDeliveryReceipt } from "../peer-delivery.ts";
 import { catalogProfileFromEnv, SHARED_COMPUTER_TOOL_NAMES, WEEKDAYS } from "./agents-catalog.ts";
+import { parseRelayQuestionInput } from "../../shared/relay-question.ts";
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { boundedAgentResult } from "./agents-result.ts";
@@ -475,6 +476,18 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     });
     return {
       text: `Rendered the native options card in this Watcher thread (message ${String(result.messageId ?? "created")}). Wait for the person's click or custom response; the card itself authorizes no external action.`,
+    };
+  }
+  if (name === "relay_question") {
+    const parsed = parseRelayQuestionInput(args);
+    if (!parsed.ok) return { text: parsed.error, isError: true };
+    // the server parses the same raw arguments again; it never trusts ours
+    const result = await api("/api/internal/relay-question", {
+      method: "POST",
+      body: JSON.stringify(args),
+    });
+    return {
+      text: `The person now sees ${String(result.name ?? "the teammate")}'s question as a card in this conversation. Do not repeat it in your reply; carry on with the conversation. Their answer arrives later as a message here: pass it on to ${String(result.name ?? "that teammate")} then.`,
     };
   }
   // Second lock. With sharing off the tool is not in the catalog, so a front

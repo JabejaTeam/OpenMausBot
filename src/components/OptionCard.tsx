@@ -10,7 +10,7 @@ const LETTERS = ["A", "B", "C", "D", "E", "F"];
 
 /** First-run quiz, not a live provider ask (those carry requestId). */
 export function isOnboardingCard(message: Message): boolean {
-  return message.kind === "options" && !!message.card && !message.card.requestId;
+  return message.kind === "options" && !!message.card && !message.card.requestId && !message.card.relay;
 }
 
 /** Hide the quiz once they have talked past it — picked an option, typed in

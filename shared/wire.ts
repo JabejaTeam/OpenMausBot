@@ -27,6 +27,7 @@ import type { RuntimeEvent } from "./runtime-events.ts";
 import type { Notification } from "./notification.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
+import type { RelayRef } from "./relay-question.ts";
 
 /** Reasoning-effort levels, ascending. A union of everything any engine
  * accepts; each driver declares the subset its CLI will take. Lives here
@@ -514,6 +515,8 @@ export interface OptionCardData {
   commandAllowlist?: CommandAllowlistCandidate;
   /** Local actions never share remembered grants with cloud/tool approvals. */
   approvalScope?: "local-computer";
+  /** relay_question: a teammate's question a Chief passes on to the person. */
+  relay?: RelayRef;
   /** A durable chat-created routine proposal. */
   routineRequest?: RoutineRequestCardData;
   /** A durable profile-change proposal (propose_profile). */

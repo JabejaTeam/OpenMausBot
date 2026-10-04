@@ -1576,7 +1576,7 @@ export class Store {
   dismissOnboardingCard(threadId: string): Message | null {
     const t = this.thread(threadId);
     const card = t.messages.find(
-      (message) => message.kind === "options" && message.card && !message.card.requestId && !message.card.dismissed,
+      (message) => message.kind === "options" && message.card && !message.card.requestId && !message.card.relay && !message.card.dismissed,
     );
     if (!card?.card) return null;
     return this.patchMessage(threadId, card.id, { card: { ...card.card, dismissed: true } });

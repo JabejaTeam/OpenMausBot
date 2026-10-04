@@ -429,6 +429,7 @@ import { createScreenFrameSource, type ScreenCapture } from "./screen-frame-sour
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
 import { RoutineRequestService } from "./routine-requests.ts";
 import { createOptionsCard } from "./options-card.ts";
+import { isPersonalChief, parseRelayQuestionInput } from "../shared/relay-question.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
 import { ModelRequestService } from "./model-requests.ts";
@@ -1898,6 +1899,8 @@ function agentsIntegration(
       OMB_ROOM_TURN: roomCoordination ? "1" : "0",
       OMB_OWN_THREAD_CREATION: ownThreadCreation ? "1" : "0",
       OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
+      // A Chief can hand a teammate's question on to the person as a card.
+      OMB_RELAY_QUESTIONS: isPersonalChief(store.bot(botId)) ? "1" : "0",
       // The shared-computer tools are advertised only while the workspace
       // gate is on; the routes behind them refuse regardless.
       OMB_SHARED_COMPUTERS_ENABLED: sharedComputersEnabled(cfg) ? "1" : "0",
@@ -6769,6 +6772,7 @@ bus.subscribe((event: RuntimeEvent) => {
           // the bot is not working now — it is waiting on a person
           if (bot) store.setTaskActivity(bot.id, event.threadId, "waiting-on-you");
           else if (asker.busy) store.setActivity(asker.id, "waiting-on-you");
+          if (event.requestId) showWaitingOnPersonChip(event.threadId, event.requestId, asker, permission ? "approval" : "answer");
           const notificationBot = (routineRun && routineSourceOwner(routineRun)?.bot) || asker;
           notify(buildNotification(
             permission ? "approval" : "question",
@@ -6782,6 +6786,7 @@ bus.subscribe((event: RuntimeEvent) => {
     }
     case "request.resolved": {
       if (event.requestId) pendingCommandRules.delete(`${event.threadId}:${event.requestId}`);
+      if (event.requestId) settleWaitingOnPersonChips(event.threadId, event.requestId);
       // answered (by whoever): the turn is working again, unless it settled
       const waiting = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
       if (bot && store.taskByThread(bot.id, event.threadId)?.activity === "waiting-on-you") {
@@ -6835,6 +6840,7 @@ bus.subscribe((event: RuntimeEvent) => {
       }
       break;
     case "turn.completed": {
+      settleWaitingOnPersonChips(event.threadId);
       // A peer-started turn settles as coordination, not as news. What keeps
       // that classification from outliving its turn is the rewrite at
       // dispatch, not this line — releasing it here too is hygiene, so a
@@ -7147,6 +7153,77 @@ const delegationWatch = new Map<string, {
   /** when the delegated turn was dispatched — elapsed time for status checks */
   startedAtMs?: number;
 }>();
+
+/** The conversation waiting on work that runs in this thread: the
+ * delegate_bot source, else the main conversation of the bot that opened
+ * it (a Chief's pair thread with this teammate). */
+function delegatorOf(threadId: string, askerId: string): { threadId: string; botId?: string } | undefined {
+  const watch = delegationWatch.get(threadId);
+  if (watch?.sourceThreadId) return { threadId: watch.sourceThreadId, botId: watch.sourceBotId };
+  const opener = store.taskByThread(askerId, threadId)?.openedBy;
+  const source = opener ? store.bot(opener.botId) : undefined;
+  return source ? { threadId: source.threadId, botId: source.id } : undefined;
+}
+
+// A delegated teammate's card used to live only in its own thread, so the
+// person talking to the Chief never saw that work was waiting on them. A
+// Chief's conversation gets the card itself (a relay) until it settles.
+const waitingOnPersonChips = new Map<string, { threadId: string; messageId: string }>();
+
+/** The teammate's own card for this request, where the person answers it. */
+function askCard(threadId: string, requestId: string) {
+  const id = askMessageByRequest.get(`${threadId}:${requestId}`);
+  return id ? store.messagesFor(threadId).find((message) => message.id === id)?.card : undefined;
+}
+
+function showWaitingOnPersonChip(threadId: string, requestId: string, asker: BotRecord, kind: "approval" | "answer") {
+  const delegator = delegatorOf(threadId, asker.id);
+  if (!delegator || delegator.threadId === threadId) return;
+  // A Chief's conversation gets the question itself as a card the person can
+  // answer right there (relay); other delegators keep the pointer chip.
+  const source = delegator.botId ? store.bot(delegator.botId) : undefined;
+  const card = askCard(threadId, requestId);
+  if (isPersonalChief(source) && card) {
+    const permission = kind === "approval";
+    const relayCard = store.appendMessage(delegator.threadId, {
+      role: "bot",
+      kind: "options",
+      from: { botId: source.id, name: source.name, color: source.color },
+      card: {
+        title: `${asker.name} vraagt`,
+        subtitle: permission ? `${asker.name} wil ${card.tool ?? "een actie"} uitvoeren: ${card.subtitle}` : card.subtitle || card.title,
+        options: permission ? ["Toestaan", "Weigeren"] : card.options,
+        relay: {
+          botId: asker.id,
+          name: asker.name,
+          threadId,
+          threadTitle: store.taskByThread(asker.id, threadId)?.title,
+          requestId,
+          ...(permission ? { permission: true } : {}),
+        },
+      },
+    });
+    waitingOnPersonChips.set(`${threadId}:${requestId}`, { threadId: delegator.threadId, messageId: relayCard.id });
+  }
+}
+
+/** Settle the chip for one answered card, or every chip for this thread once
+ * its turn ends (a card nobody answered can no longer be answered). */
+function settleWaitingOnPersonChips(threadId: string, requestId?: string) {
+  for (const [key, chip] of waitingOnPersonChips) {
+    if (requestId ? key !== `${threadId}:${requestId}` : !key.startsWith(`${threadId}:`)) continue;
+    // A card can outlive its run; the relay stays open while it does.
+    const child = askCard(threadId, key.slice(threadId.length + 1));
+    if (!requestId && child && !child.answered && !child.dismissed && !child.expired) continue;
+    waitingOnPersonChips.delete(key);
+    const existing = store.messagesFor(chip.threadId).find((message) => message.id === chip.messageId);
+    if (existing?.card && !existing.card.answered && !existing.card.dismissed) {
+      store.patchMessage(chip.threadId, chip.messageId, {
+        card: { ...existing.card, answered: child?.answeredText ?? child?.answered ?? "niet meer open" },
+      });
+    }
+  }
+}
 
 // Peer wake: when a delegated reply lands, resume the source bot so it can
 // fold the result in and answer the user instead of sitting idle. Mirrors
@@ -14501,6 +14578,40 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return result.ok
           ? json(res, 201, { messageId: result.messageId })
           : json(res, result.status, { error: result.error });
+      }
+      if (method === "POST" && path === "/api/internal/relay-question") {
+        if (!isPersonalChief(internalSender)) return json(res, 403, { error: "relay_question is for the person's own Chief of Staff." });
+        const parsed = parseRelayQuestionInput(await readInternalBody());
+        requireActiveInternalCapability();
+        if (!parsed.ok) return json(res, 400, { error: parsed.error });
+        const resolved = resolveTeammate(store.bots, internalSender, parsed.value.bot);
+        if ("error" in resolved) return json(res, 404, { error: `no such bot: ${resolved.error}` });
+        const asker = store.bot(resolved.id);
+        if (!asker || asker.id === internalSender.id) return json(res, 400, { error: "relay a teammate's question, not your own" });
+        // The thread the question came from: the one named, else the newest
+        // thread this conversation opened on that teammate.
+        const sourceThread = internalCapability.threadId;
+        const task = parsed.value.threadId
+          ? store.taskByThread(asker.id, parsed.value.threadId)
+          : store.tasks(asker.id)
+            .filter((candidate) => candidate.openedBy?.botId === internalSender.id)
+            .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
+        const message = store.appendMessage(sourceThread, {
+          role: "bot",
+          kind: "options",
+          from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color },
+          card: {
+            title: `${asker.name} vraagt`,
+            subtitle: parsed.value.question,
+            options: parsed.value.options,
+            relay: {
+              botId: asker.id,
+              name: asker.name,
+              ...(task ? { threadId: task.threadId, threadTitle: task.title } : {}),
+            },
+          },
+        });
+        return json(res, 201, { messageId: message.id, name: asker.name });
       }
       // Notes written from a room fewer people can see than this bot would
       // carry that room's words to everyone who can see the bot.

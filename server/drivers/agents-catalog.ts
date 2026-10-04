@@ -12,6 +12,7 @@
 // then update the goldens there.
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
 import { OPTIONS_CARD_LIMITS, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
+import { RELAY_QUESTION_LIMITS } from "../../shared/relay-question.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 
 /** Which tools a turn is shown. The harness decides each of these when it
@@ -29,6 +30,8 @@ export interface CatalogProfile {
   sharedComputers: boolean;
   /** A voice is actually configured for this bot (tts voiceReady). */
   voiceNotes: boolean;
+  /** A Chief: may hand a teammate's question on to the person as a card. */
+  relayQuestions?: boolean;
   /** Written into start_thread's schema in a coordinating turn. */
   botId: string;
 }
@@ -44,6 +47,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     skillAuthoring: env.OMB_SKILL_AUTHORING_ENABLED === "1",
     sharedComputers: env.OMB_SHARED_COMPUTERS_ENABLED === "1",
     voiceNotes: env.OMB_VOICE_NOTES === "1",
+    relayQuestions: env.OMB_RELAY_QUESTIONS === "1",
     botId: env.OMB_BOT_ID ?? "",
   };
 }
@@ -213,6 +217,27 @@ const toolDefinitions = (externalRuntime: boolean) => [
         },
       },
       required: ["title", "subtitle", "options"],
+    },
+  },
+  {
+    name: "relay_question",
+    description:
+      "When a teammate you assigned work to needs the person's answer or decision, hand that question on as a card in this conversation instead of repeating it in your reply. It returns at once; the person answers whenever they like, and keeps talking to you meanwhile. Their answer arrives later as an ordinary message in this conversation: pass it on to the same teammate (coordinate_bots or delegate_bot, same thread). One card per question; do not also ask it in text.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        bot_id: { type: "string", description: "The teammate who asks (id or unique name)." },
+        question: { type: "string", minLength: 1, maxLength: RELAY_QUESTION_LIMITS.question, description: "The question, in the person's language, complete enough to answer without opening the teammate's thread." },
+        options: {
+          type: "array",
+          maxItems: RELAY_QUESTION_LIMITS.maxOptions,
+          items: { type: "string", minLength: 1, maxLength: RELAY_QUESTION_LIMITS.option },
+          description: "Optional short answers the person can pick with one click.",
+        },
+        thread_id: { type: "string", description: "Optional: the teammate's thread the question came from, when you know it." },
+      },
+      required: ["bot_id", "question"],
     },
   },
   {
@@ -837,6 +862,7 @@ export const SHARED_COMPUTER_TOOL_NAMES = new Set(["list_shared_computers", "sha
 // tool whose every call would end in a setup error. The route behind it
 // refuses regardless; this keeps the catalog honest about what can work.
 const VOICE_TOOL_NAMES = new Set(["send_voice_note"]);
+const RELAY_TOOL_NAMES = new Set(["relay_question"]);
 // One teamwork path in room turns; keep all unrelated integrations available.
 // Ordinary direct chats use this same bounded coordinator. Goal-owned turns
 // retain their independent loop and cannot start a second coordinator.
@@ -848,9 +874,9 @@ const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
 /** The tools one turn is shown, exactly as tools/list serializes them. */
 export function availableTools(profile: CatalogProfile) {
   const TOOLS = toolDefinitions(profile.externalRuntime);
-  const BOT_SCOPED_TOOLS = profile.botId === WATCHER_OPTIONS_CARD_BOT_ID
-    ? TOOLS
-    : TOOLS.filter((tool) => !WATCHER_TOOL_NAMES.has(tool.name));
+  const BOT_SCOPED_TOOLS = TOOLS.filter((tool) =>
+    (profile.botId === WATCHER_OPTIONS_CARD_BOT_ID || !WATCHER_TOOL_NAMES.has(tool.name)) &&
+    (profile.relayQuestions === true || !RELAY_TOOL_NAMES.has(tool.name)));
   const AUTHORING_TOOLS = profile.skillAuthoring
     ? BOT_SCOPED_TOOLS
     : BOT_SCOPED_TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));

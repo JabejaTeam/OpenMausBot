@@ -26,6 +26,7 @@ import type { ModelRequestCardData } from "../../shared/model-request";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { RoutineRunCardData } from "../../shared/routine-run";
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
+import type { RelayRef } from "../../shared/relay-question";
 import {
   reviewedSkillSha256,
   skillRequestBehavior,
@@ -102,6 +103,8 @@ export interface OptionCardData {
   /** Exact provider command eligible for a durable, folder-scoped allow. */
   commandAllowlist?: { command: string; cwd: string; providerInstanceId: string };
   approvalScope?: "local-computer";
+  /** relay_question: a teammate's question a Chief passes on to the person. */
+  relay?: RelayRef;
   /** Persisted proposal used by the server when the user confirms it. */
   routineRequest?: RoutineRequestCardData;
   /** Staged learned-skill change; applied only after the user confirms this card. */
@@ -335,6 +338,9 @@ export interface ThreadOpener {
   botId: string;
   name: string;
   delegationId?: string;
+  kind?: "pair" | "work";
+  /** The opener's own conversation this thread was opened from. */
+  threadId?: string;
   at: number;
 }
 
@@ -1107,6 +1113,9 @@ export type Action =
   // to the room's thread
   | { type: "answerCard"; botId: string; messageId: string; answer: string; threadId?: string; groupId?: string }
   | { type: "dismissCard"; botId: string; messageId: string; threadId?: string; groupId?: string }
+  // a relayed teammate question (card.relay): answered or put aside here;
+  // the answer itself reaches the Chief as an ordinary send
+  | { type: "settleRelay"; botId: string; messageId: string; threadId?: string; answered?: string; dismissed?: boolean }
   // permission cards answer by THREAD, so a request raised inside a room
   // can be answered the same way as one in a 1:1 chat
   | {
@@ -1190,7 +1199,7 @@ function reconcileModelVariantSessions(state: AppState): AppState {
 
 export function pinBotThreadAction(action: Action, bots: Bot[]): Action {
   if (!("botId" in action) || ("threadId" in action && action.threadId) ||
-      !["send", "interrupt", "editMessage", "switchBranch", "answerCard", "dismissCard", "cancelQueued", "steerQueued"].includes(action.type)) return action;
+      !["send", "interrupt", "editMessage", "switchBranch", "answerCard", "dismissCard", "settleRelay", "cancelQueued", "steerQueued"].includes(action.type)) return action;
   const botId = action.botId;
   const threadId = bots.find((bot) => bot.id === botId)?.threadId;
   return { ...action, threadId } as Action;
@@ -1339,7 +1348,7 @@ function patchGroupCard(state: AppState, groupId: string, messageId: string, pat
 /** First-run quiz still sitting on this bot's thread. */
 function openOnboardingCard(bot: Bot): Message | undefined {
   return bot.messages.find(
-    (message) => message.kind === "options" && message.card && !message.card.requestId && !message.card.dismissed,
+    (message) => message.kind === "options" && message.card && !message.card.requestId && !message.card.relay && !message.card.dismissed,
   );
 }
 
@@ -1599,6 +1608,11 @@ export function reducer(state: AppState, action: Action): AppState {
     case "dismissCard":
       if (action.groupId) return patchGroupCard(state, action.groupId, action.messageId, { dismissed: true });
       return patchCard(state, action.botId, action.messageId, { dismissed: true });
+    case "settleRelay":
+      return patchCard(state, action.botId, action.messageId, {
+        ...(action.answered !== undefined ? { answered: action.answered } : {}),
+        ...(action.dismissed !== undefined ? { dismissed: action.dismissed } : {}),
+      });
     case "decideRequest":
       return state; // the server's request.resolved patch settles the card
     case "botAdded":
@@ -3199,6 +3213,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               });
             })
             .catch(showError);
+          break;
+        }
+        case "settleRelay": {
+          api(`/api/bots/${action.botId}/cards/${action.messageId}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              threadId: action.threadId,
+              ...(action.answered !== undefined ? { answered: action.answered } : {}),
+              ...(action.dismissed !== undefined ? { dismissed: action.dismissed } : {}),
+            }),
+          }).catch(showError);
           break;
         }
         case "dismissCard": {
