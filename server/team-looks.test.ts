@@ -17,6 +17,14 @@ it("keeps a team's colour and logo, and clears them with null", () => {
   expect(readTeamLooks()["section:Jabeja"]).toBeUndefined();
 });
 
+it("keeps the name's text colour on its own, cleared with null", () => {
+  writeTeamLook("section:Beautea", { textColor: "#ffffff" });
+  expect(readTeamLooks()["section:Beautea"]).toMatchObject({ textColor: "#ffffff" });
+  expect(writeTeamLook("section:Beautea", { textColor: "white" }).ok).toBe(false);
+  writeTeamLook("section:Beautea", { textColor: null });
+  expect(readTeamLooks()["section:Beautea"]).toBeUndefined();
+});
+
 it("refuses anything but a hex colour and a raster logo", () => {
   expect(writeTeamLook("section:Jabeja", { color: "red" }).ok).toBe(false);
   expect(writeTeamLook("section:Jabeja", { logo: "data:image/svg+xml;base64,PHN2Zz4=" }).ok).toBe(false);

@@ -87,6 +87,9 @@ export function OfficeView() {
   const [sceneReady, setSceneReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
+  // a team's name shows only while you point at its office (or at the name)
+  const [hoveredRoom, setHoveredRoom] = useState<string | null>(null);
+  const [labelHovered, setLabelHovered] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   // open as asked; the scene slides the panel in after it mounts, out before it unmounts
   const [shown, setShown] = useState(false);
@@ -275,6 +278,7 @@ export function OfficeView() {
         if (disposed) return;
         scene = new OfficeScene(host, readTheme(), {
           onHover: setHovered,
+          onHoverRoom: setHoveredRoom,
           onPick: (botId) => openRef.current(botId),
           onPickDesk: (deskId) => scene?.focusDesk(deskId),
         });
@@ -360,7 +364,14 @@ export function OfficeView() {
                 else labelRefs.current.delete(desk.id);
               }}
               style={{ visibility: "hidden" }}
-              className={cn("group/label pointer-events-auto absolute left-0 top-0", lookFor === desk.id && "z-40")}
+              onPointerEnter={() => setLabelHovered(desk.id)}
+              onPointerLeave={() => setLabelHovered((current) => (current === desk.id ? null : current))}
+              className={cn(
+                "group/label absolute left-0 top-0 transition-opacity duration-200",
+                // touch has no hover: there the names always show
+                [hoveredRoom, labelHovered, lookFor].includes(desk.id) ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0 touch:pointer-events-auto touch:opacity-100",
+                lookFor === desk.id && "z-40",
+              )}
             >
               <div className="flex items-center gap-0.5 rounded-full bg-panel/75 py-0.5 pl-3 pr-0.5 shadow-md shadow-black/20 backdrop-blur-md">
                 <button type="button" onClick={() => sceneRef.current?.focusDesk(desk.id)} className="whitespace-nowrap py-0.5 text-[12.5px] font-semibold text-ink">

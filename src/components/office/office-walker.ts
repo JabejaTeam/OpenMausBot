@@ -89,6 +89,14 @@ export class Walker {
 
   /** Come home now (work arrived, or the bot was opened): turn round. */
   recall(now: number): void {
+    if (this.phase === "rising") {
+      // still getting up: sit straight back down from where it is
+      const risen = Math.min(1, (now - this.phaseStart) / SIT_MS);
+      this.phase = "sitting";
+      this.phaseStart = now - (1 - risen) * SIT_MS;
+      this.play("sitting", (this.actions.sitting?.getClip().duration ?? 0.4) * 1000 / SIT_MS);
+      return;
+    }
     if (this.phase === "out" || this.phase === "linger") {
       this.phase = "back";
       this.phaseStart = now;

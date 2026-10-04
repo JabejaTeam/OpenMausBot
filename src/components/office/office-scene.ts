@@ -162,6 +162,8 @@ export class OfficeScene {
   private desks: OfficeDesk[] = [];
   private hoverLabel: HTMLElement | null = null;
   private hovered: string | null = null;
+  /** the office under the pointer (its floor, or a bot of that team) */
+  private hoveredRoom: string | null = null;
   private selected: string | null = null;
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
@@ -194,7 +196,7 @@ export class OfficeScene {
   constructor(
     private host: HTMLElement,
     theme: OfficeTheme,
-    private events: { onHover: (botId: string | null) => void; onPick: (botId: string) => void; onPickDesk: (deskId: string) => void },
+    private events: { onHover: (botId: string | null) => void; onHoverRoom: (deskId: string | null) => void; onPick: (botId: string) => void; onPickDesk: (deskId: string) => void },
   ) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -473,6 +475,13 @@ export class OfficeScene {
     this.linksSeen = true;
   }
 
+  /** In a handoff right now (either end): a bot talking stays at its desk,
+   * and one out walking turns and walks back. */
+  private talking(botId: string): boolean {
+    const now = Date.now();
+    return this.links.some((link) => (link.from === botId || link.to === botId) && (link.active || now - link.at < RECENT_HANDOFF_MS));
+  }
+
   private syncArcs(flashNew: boolean): void {
     const wanted = new Map(this.links.map((link) => [link.id, link]));
     for (const [id, arc] of this.arcs) {
@@ -488,14 +497,11 @@ export class OfficeScene {
         known.link = link;
         continue;
       }
-      const from = this.seats.get(link.from)?.marker.position;
-      const to = this.seats.get(link.to)?.marker.position;
-      if (!from || !to) continue;
-      const start = from.clone().setY(HEAD_Y + 0.05);
-      const end = to.clone().setY(HEAD_Y + 0.05);
-      const middle = start.clone().lerp(end, 0.5);
-      middle.y += Math.max(1.6, start.distanceTo(end) * 0.45);
-      const curve = new THREE.QuadraticBezierCurve3(start, middle, end);
+      const start = new THREE.Vector3();
+      const end = new THREE.Vector3();
+      if (!this.arcEnd(link.from, start) || !this.arcEnd(link.to, end)) continue;
+      const curve = new THREE.QuadraticBezierCurve3(start, new THREE.Vector3(), end);
+      this.bend(curve);
       const tubeMaterial = new THREE.MeshBasicMaterial({ color: this.accent, transparent: true, opacity: 0, depthWrite: false });
       const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 64, 0.026, 8, false), tubeMaterial);
       const beads = [0, 1, 2].map(() => {
@@ -510,6 +516,22 @@ export class OfficeScene {
     }
   }
 
+  /** Where an arc meets a bot: just over its head, wherever it is — at its
+   * desk or out walking (the marker rides along with a walking bot). */
+  private arcEnd(botId: string, target: THREE.Vector3): boolean {
+    const seat = this.seats.get(botId);
+    if (!seat) return false;
+    target.copy(seat.marker.position).y += HEAD_Y + 0.05 - seat.markerHome.y;
+    return true;
+  }
+
+  private bend(curve: THREE.QuadraticBezierCurve3): void {
+    curve.v1.copy(curve.v0).lerp(curve.v2, 0.5).y += Math.max(1.6, curve.v0.distanceTo(curve.v2) * 0.45);
+  }
+
+  private arcFrom = new THREE.Vector3();
+  private arcTo = new THREE.Vector3();
+
   private dropArc(arc: { tube: THREE.Mesh; tubeMaterial: THREE.MeshBasicMaterial; beads: THREE.Mesh[]; comet: THREE.Mesh }): void {
     this.world.remove(arc.tube, ...arc.beads, arc.comet);
     arc.tube.geometry.dispose();
@@ -521,6 +543,16 @@ export class OfficeScene {
     const lit = linksOf(this.links, this.hovered ?? this.selected);
     for (const arc of this.arcs.values()) {
       const { link } = arc;
+      // the arc stays between the two bots: one walking back to its desk
+      // drags its end along
+      if (this.arcEnd(link.from, this.arcFrom) && this.arcEnd(link.to, this.arcTo)
+        && (this.arcFrom.distanceToSquared(arc.curve.v0) > 1e-4 || this.arcTo.distanceToSquared(arc.curve.v2) > 1e-4)) {
+        arc.curve.v0.copy(this.arcFrom);
+        arc.curve.v2.copy(this.arcTo);
+        this.bend(arc.curve);
+        arc.tube.geometry.dispose();
+        arc.tube.geometry = new THREE.TubeGeometry(arc.curve, 64, 0.026, 8, false);
+      }
       // a finished quick handoff fades out over what is left of its moment
       const fade = link.active ? 1 : Math.max(0, 1 - (now - link.at) / RECENT_HANDOFF_MS);
       const strength = lit.size ? (lit.has(link.id) ? 1 : 0.35) : 0.75;
@@ -599,7 +631,7 @@ export class OfficeScene {
     const walker = seat.walker;
     if (!walker || !this.layout) return;
     const now = performance.now();
-    const stay = !look || !mayWander({ chief: Boolean(look.chief), working: look.working, waiting: look.waiting }) || seat.botId === this.selected || reducedMotion();
+    const stay = !look || !mayWander({ chief: Boolean(look.chief), working: look.working, waiting: look.waiting }) || seat.botId === this.selected || this.talking(seat.botId) || reducedMotion();
     if (stay) walker.recall(now);
     else if (!walker.away) {
       const clock = Date.now();
@@ -761,6 +793,11 @@ export class OfficeScene {
       this.hovered = botId;
       this.events.onHover(botId);
     }
+    const roomId: string | null = hit?.userData.deskId ?? (botId ? this.seats.get(botId)?.homeId ?? null : null);
+    if (roomId !== this.hoveredRoom) {
+      this.hoveredRoom = roomId;
+      this.events.onHoverRoom(roomId);
+    }
   };
 
   private onPointerDown = (event: PointerEvent) => {
@@ -779,6 +816,10 @@ export class OfficeScene {
   };
 
   private onPointerLeave = () => {
+    if (this.hoveredRoom !== null) {
+      this.hoveredRoom = null;
+      this.events.onHoverRoom(null);
+    }
     if (this.hovered === null) return;
     this.hovered = null;
     this.events.onHover(null);

@@ -5,6 +5,8 @@
 export interface TeamLook {
   color?: string;
   logo?: string;
+  /** the name on the wall when there is no logo; a logo brings its own colours */
+  textColor?: string;
   updatedAt?: number;
 }
 
@@ -28,7 +30,31 @@ export function isDarkWall(color: string): boolean {
   return luminance < 0.55;
 }
 
+/** The colours offered for a name on the wall: neutrals, then the accents. */
+export const TEAM_TEXT_SWATCHES = ["#ffffff", "#f5f5f7", "#d1d1d6", "#8e8e93", "#3a3a3c", "#1d1d1f", ...TEAM_WALL_SWATCHES.slice(DEFAULT_WALL_COLORS.length, -1)];
+
+/** What hangs on a team's back wall: its logo, or else its name, written in
+ * its own text colour or one that reads on the wall. */
+export type WallSign = { kind: "logo"; source: string } | { kind: "name"; text: string; color: string };
+export function wallSignFor(label: string, look: TeamLook | undefined, wallColor: string): WallSign {
+  if (look?.logo) return { kind: "logo", source: look.logo };
+  return { kind: "name", text: label, color: look?.textColor ?? (isDarkWall(wallColor) ? "#ffffff" : "#1d1d1f") };
+}
+
 /** One key per look, so the scene only redraws walls when a look changed. */
 export function looksKey(looks: Record<string, TeamLook>): string {
-  return Object.entries(looks).map(([id, look]) => `${id}:${look.color ?? ""}:${look.updatedAt ?? 0}`).sort().join("|");
+  return Object.entries(looks).map(([id, look]) => `${id}:${look.color ?? ""}:${look.textColor ?? ""}:${look.updatedAt ?? 0}`).sort().join("|");
+}
+
+/** How big a logo hangs on the back wall (metres): big — up to 72% of the
+ * wall (7 m at most, the corner shelf and plant stay clear) and 2.2 m tall
+ * (of 2.7), so it reads from across the building
+ * like a real office sign. A wide wordmark fills the width, a square mark
+ * the height. A name on the wall is lettering: at most NAME_MAX_HEIGHT. */
+export const LOGO_MAX_HEIGHT = 2.2;
+export const NAME_MAX_HEIGHT = 1.2;
+export function logoSize(aspect: number, wallWidth: number, maxHeight = LOGO_MAX_HEIGHT): { width: number; height: number } {
+  const safeAspect = Math.max(0.2, aspect);
+  const width = Math.min(wallWidth * 0.72, 7, maxHeight * safeAspect);
+  return { width, height: width / safeAspect };
 }

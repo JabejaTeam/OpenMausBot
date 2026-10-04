@@ -8,7 +8,7 @@ import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment
 import { DOOR_WIDTH, type OfficeLayout, type OfficeRoom } from "@/lib/office-layout";
 import type { Daylight } from "@/lib/office-daylight";
 import { roomDecor } from "@/lib/office-furniture";
-import { wallColorFor, type TeamLook } from "@/lib/office-team-looks";
+import { logoSize, NAME_MAX_HEIGHT, wallColorFor, wallSignFor, type TeamLook, type WallSign } from "@/lib/office-team-looks";
 import type { FurnitureKit } from "./office-furniture-kit";
 
 export const WALL_HEIGHT = 2.7;
@@ -33,7 +33,7 @@ export class OfficeBuilding {
   private walls: Wall[] = [];
   private lamps: { light: THREE.PointLight; shade: THREE.MeshStandardMaterial }[] = [];
   /** per office: its walls' material, its back wall and its logo */
-  private offices = new Map<string, { room: OfficeRoom; material: THREE.MeshStandardMaterial; backWall: THREE.Mesh; logo: THREE.Mesh | null; logoSource?: string }>();
+  private offices = new Map<string, { room: OfficeRoom; material: THREE.MeshStandardMaterial; backWall: THREE.Mesh; logo: THREE.Mesh | null; signKey?: string }>();
   private geometries: THREE.BufferGeometry[] = [];
   private environment: THREE.Texture;
   /** room floors, clickable: userData.deskId flies to that team */
@@ -94,7 +94,8 @@ export class OfficeBuilding {
     this.outerWall(maxX, maxZ, minX, maxZ, new THREE.Vector2(0, 1));
 
     layout.rooms.forEach((room, index) => {
-      this.room(room, new THREE.MeshStandardMaterial({ color: wallColorFor(room.id, index, looks), roughness: 0.92 }), looks[room.id]?.logo);
+      const wallColor = wallColorFor(room.id, index, looks);
+      this.room(room, new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.92 }), wallSignFor(room.label, looks[room.id], wallColor));
       // furnished once the models are in (lib/office-furniture says where)
       const desk = layout.desks[index];
       if (kit && desk) for (const item of roomDecor(room, desk)) {
@@ -131,7 +132,7 @@ export class OfficeBuilding {
     return mesh;
   }
 
-  private room(room: OfficeRoom, wallMaterial: THREE.MeshStandardMaterial, logo?: string): void {
+  private room(room: OfficeRoom, wallMaterial: THREE.MeshStandardMaterial, sign: WallSign): void {
     const left = room.x - room.width / 2;
     const right = room.x + room.width / 2;
     const back = room.z - room.depth / 2;
@@ -147,7 +148,7 @@ export class OfficeBuilding {
 
     const backWall = this.wall(left, back, right, back, WALL_HEIGHT, wallMaterial, new THREE.Vector2(0, -1));
     this.offices.set(room.id, { room, material: wallMaterial, backWall, logo: null });
-    this.setLogo(room.id, logo);
+    this.setSign(room.id, sign);
     this.wall(left, front, left, back, WALL_HEIGHT, wallMaterial, new THREE.Vector2(-1, 0));
     this.wall(right, back, right, front, WALL_HEIGHT, wallMaterial, new THREE.Vector2(1, 0));
 
@@ -188,16 +189,19 @@ export class OfficeBuilding {
     layout.rooms.forEach((room, index) => {
       const office = this.offices.get(room.id);
       if (!office) return;
-      office.material.color.set(wallColorFor(room.id, index, looks));
-      this.setLogo(room.id, looks[room.id]?.logo);
+      const wallColor = wallColorFor(room.id, index, looks);
+      office.material.color.set(wallColor);
+      this.setSign(room.id, wallSignFor(room.label, looks[room.id], wallColor));
     });
   }
 
-  /** The team's logo on the inside of its back wall, centred, at eye height. */
-  private setLogo(roomId: string, source: string | undefined): void {
+  /** The team's logo — or else its name — high on the inside of its back
+   * wall, centred. */
+  private setSign(roomId: string, sign: WallSign): void {
     const office = this.offices.get(roomId);
-    if (!office || office.logoSource === source) return;
-    office.logoSource = source;
+    const key = JSON.stringify(sign);
+    if (!office || office.signKey === key) return;
+    office.signKey = key;
     if (office.logo) {
       this.group.remove(office.logo);
       office.logo.geometry.dispose();
@@ -206,20 +210,38 @@ export class OfficeBuilding {
       material.dispose();
       office.logo = null;
     }
-    if (!source) return;
-    new THREE.TextureLoader().load(source, (texture) => {
-      if (this.offices.get(roomId) !== office || office.logoSource !== source) return texture.dispose();
+    const hang = (texture: THREE.Texture, aspect: number, maxHeight?: number) => {
+      if (this.offices.get(roomId) !== office || office.signKey !== key) return texture.dispose();
       texture.colorSpace = THREE.SRGBColorSpace;
       texture.anisotropy = 4;
-      const image = texture.image as { width: number; height: number };
-      const aspect = image.width / Math.max(1, image.height);
-      const width = Math.min(1.8, office.room.width * 0.4, 1.1 * aspect);
-      const height = width / aspect;
+      const { width, height } = logoSize(aspect, office.room.width, maxHeight);
       const logo = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshStandardMaterial({ map: texture, transparent: true, roughness: 0.6 }));
-      logo.position.set(office.room.x, 1.65, office.room.z - office.room.depth / 2 + WALL_THICKNESS / 2 + 0.006);
+      // high on the wall, its top 15 cm under the ceiling line
+      logo.position.set(office.room.x, WALL_HEIGHT - 0.15 - height / 2, office.room.z - office.room.depth / 2 + WALL_THICKNESS / 2 + 0.006);
       office.logo = logo;
       this.group.add(logo);
-    });
+    };
+    if (sign.kind === "logo") {
+      new THREE.TextureLoader().load(sign.source, (texture) => {
+        const image = texture.image as { width: number; height: number };
+        hang(texture, image.width / Math.max(1, image.height));
+      });
+      return;
+    }
+    // the name as lettering on the wall: one line, bold, tightly cropped
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const font = '700 160px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif';
+    context.font = font;
+    canvas.width = Math.min(4096, Math.ceil(context.measureText(sign.text).width) + 16);
+    canvas.height = 170;
+    context.font = font;
+    context.fillStyle = sign.color;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(sign.text, canvas.width / 2, canvas.height / 2 + 6, canvas.width - 16);
+    hang(new THREE.CanvasTexture(canvas), canvas.width / canvas.height, NAME_MAX_HEIGHT);
   }
 
   /** An outside wall: solid below and above, windows between. */

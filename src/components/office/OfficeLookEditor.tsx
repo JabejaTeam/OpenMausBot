@@ -1,4 +1,5 @@
-// Office view (fork): a team's look — wall colour and logo — edited from its
+// Office view (fork): a team's look — wall colour, and a logo or else its
+// name on the wall in a text colour — edited from its
 // name over the office door. Saved on the server for the whole workspace
 // (server/team-looks.ts); only an admin may change it.
 import { useEffect, useRef, useState } from "react";
@@ -6,7 +7,9 @@ import { Check, ImagePlus, Trash2 } from "lucide-react";
 import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { TEAM_WALL_SWATCHES, type TeamLook } from "@/lib/office-team-looks";
+import { TEAM_TEXT_SWATCHES, TEAM_WALL_SWATCHES, type TeamLook } from "@/lib/office-team-looks";
+
+type LookPatch = { color?: string | null; logo?: string | null; textColor?: string | null };
 
 /** Every team's look, read once and kept current after each save. */
 export function useTeamLooks() {
@@ -14,7 +17,7 @@ export function useTeamLooks() {
   useEffect(() => {
     api<{ teams: Record<string, TeamLook> }>("/api/team-looks").then((r) => setLooks(r?.teams ?? {})).catch(() => {});
   }, []);
-  const save = async (teamId: string, patch: { color?: string | null; logo?: string | null }) => {
+  const save = async (teamId: string, patch: LookPatch) => {
     const r = await api<{ teams: Record<string, TeamLook> }>(`/api/team-looks/${encodeURIComponent(teamId)}`, { method: "PUT", body: JSON.stringify(patch) });
     if (r?.teams) setLooks(r.teams);
   };
@@ -52,7 +55,7 @@ export function OfficeLookEditor({
   teamId: string;
   label: string;
   look: TeamLook | undefined;
-  onSave: (teamId: string, patch: { color?: string | null; logo?: string | null }) => Promise<void>;
+  onSave: (teamId: string, patch: LookPatch) => Promise<void>;
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +74,7 @@ export function OfficeLookEditor({
     };
   }, [onClose]);
 
-  const run = async (patch: { color?: string | null; logo?: string | null }) => {
+  const run = async (patch: LookPatch) => {
     setBusy(true);
     setError(null);
     try {
@@ -92,35 +95,7 @@ export function OfficeLookEditor({
     >
       <div className="px-1 pb-2 text-[13px] font-semibold text-ink">{label}</div>
       <div className="px-1 pb-1.5 text-[12px] text-ink-secondary">{t("office.look.wall")}</div>
-      <div className="grid grid-cols-8 gap-1.5 px-1">
-        {TEAM_WALL_SWATCHES.map((color) => {
-          const chosen = look?.color === color;
-          return (
-            <button
-              key={color}
-              type="button"
-              disabled={busy}
-              onClick={() => run({ color: chosen ? null : color })}
-              aria-label={color}
-              aria-pressed={chosen}
-              style={{ background: color }}
-              className={cn("flex size-7 items-center justify-center rounded-full ring-1 ring-black/10 transition-transform hover:scale-110", chosen && "ring-2 ring-accent")}
-            >
-              {chosen && <Check size={13} className="text-black/60 mix-blend-luminosity" />}
-            </button>
-          );
-        })}
-        <label title={t("office.look.custom")} className="relative flex size-7 cursor-pointer items-center justify-center overflow-hidden rounded-full ring-1 ring-black/10" style={{ background: "conic-gradient(#f43f5e,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#f43f5e)" }}>
-          <input
-            type="color"
-            value={look?.color ?? "#d9dde3"}
-            disabled={busy}
-            onChange={(event) => run({ color: event.target.value })}
-            className="absolute inset-0 cursor-pointer opacity-0"
-            aria-label={t("office.look.custom")}
-          />
-        </label>
-      </div>
+      <Swatches colors={TEAM_WALL_SWATCHES} value={look?.color} fallback="#d9dde3" busy={busy} onPick={(color) => run({ color })} />
       <div className="mt-3 px-1 pb-1.5 text-[12px] text-ink-secondary">{t("office.look.logo")}</div>
       <div className="flex items-center gap-2 px-1">
         {look?.logo && <img src={look.logo} alt="" className="size-10 rounded-lg bg-white object-contain p-1 ring-1 ring-black/10" />}
@@ -162,7 +137,49 @@ export function OfficeLookEditor({
           }}
         />
       </div>
+      {/* no logo: the name is on the wall, in a colour you pick; a logo has its own */}
+      {!look?.logo && (
+        <>
+          <div className="mt-3 px-1 pb-1.5 text-[12px] text-ink-secondary">{t("office.look.text")}</div>
+          <Swatches colors={TEAM_TEXT_SWATCHES} value={look?.textColor} fallback="#1d1d1f" busy={busy} onPick={(textColor) => run({ textColor })} />
+        </>
+      )}
       {error && <div className="mt-2 px-1 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
+/** A row of colours; the chosen one again clears it (back to the default). */
+function Swatches({ colors, value, fallback, busy, onPick }: { colors: string[]; value: string | undefined; fallback: string; busy: boolean; onPick: (color: string | null) => void }) {
+  return (
+    <div className="grid grid-cols-8 gap-1.5 px-1">
+      {colors.map((color) => {
+        const chosen = value === color;
+        return (
+          <button
+            key={color}
+            type="button"
+            disabled={busy}
+            onClick={() => onPick(chosen ? null : color)}
+            aria-label={color}
+            aria-pressed={chosen}
+            style={{ background: color }}
+            className={cn("flex size-7 items-center justify-center rounded-full ring-1 ring-black/10 transition-transform hover:scale-110", chosen && "ring-2 ring-accent")}
+          >
+            {chosen && <Check size={13} className="text-black/60 mix-blend-luminosity" />}
+          </button>
+        );
+      })}
+      <label title={t("office.look.custom")} className="relative flex size-7 cursor-pointer items-center justify-center overflow-hidden rounded-full ring-1 ring-black/10" style={{ background: "conic-gradient(#f43f5e,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#f43f5e)" }}>
+        <input
+          type="color"
+          value={value ?? fallback}
+          disabled={busy}
+          onChange={(event) => onPick(event.target.value)}
+          className="absolute inset-0 cursor-pointer opacity-0"
+          aria-label={t("office.look.custom")}
+        />
+      </label>
     </div>
   );
 }
