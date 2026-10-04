@@ -58,7 +58,9 @@ export function isRemoteMcpServer(server: McpServerSpec): server is RemoteMcpSpe
   return "url" in server;
 }
 
-export const MAX_MCP_SERVERS = 20;
+// Fork: 32 i.p.v. 20 — één workspace met een geheugenserver per klant zat
+// op 20 en kon geen testdesktop-MCP meer krijgen.
+export const MAX_MCP_SERVERS = 32;
 const MAX_ARGS = 64;
 const MAX_ENV = 64;
 const MAX_HEADERS = 32;

@@ -58,7 +58,7 @@ export function writeKindInstructions(scope: KindInstructionScope, text: string,
   return scopes[scope] ?? null;
 }
 
-const KIND_LABEL: Record<BotKind, string> = { code: "code agents", pm: "client project managers" };
+const KIND_LABEL: Record<BotKind, string> = { code: "code agents", pm: "client project managers", test: "test agents (they test roadmap test cards on a test environment)" };
 
 /** The workspace rules for one bot, as system-prompt blocks. They come from
  * the admin, so they win over conflicting working rules the bot got anywhere
