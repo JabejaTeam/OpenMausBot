@@ -55,6 +55,19 @@ optional `label` (otherwise “@Clive · parallel work”), and that thread clos
 itself once its result has been reported. `request_key` is only a within-turn
 idempotency token; it never selects a conversation.
 
+A correction is not a second assignment. While a teammate still works on an
+assignment from the same conversation, a new `coordinate_bots` call to it
+must say which it is: `amends` (that assignment's `request_key` or
+`requestId`) or `independent: true`; without either it is refused and
+nothing is sent. `amends` reaches the corrected assignment's own thread:
+folded into its brief if it has not started, steered into its running turn
+when the engine can take it (one result, with the correction applied),
+otherwise queued there as a follow-up whose result returns separately — also
+after the assignment finished. `interrupt` (only with `amends`) stops the
+running work first. A finished work thread with a correction still queued
+stays open until that follow-up reports. `server/coordination-amends.e2e.test.ts`
+covers steering, the refusal, a follow-up after completion and interrupt.
+
 The chat shows an avatar and “Sent to Eli · Delivery”; clicking opens the
 receiving conversation. Same-room receipts have no unnecessary navigation.
 Receipts remain visible when tool calls are hidden. Files are not copied between

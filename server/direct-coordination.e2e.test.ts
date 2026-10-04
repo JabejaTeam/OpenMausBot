@@ -454,7 +454,7 @@ it("gives a second simultaneous assignment its own labelled thread, which closes
   f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Benchmark finished" }] };
   f.plan[f.chief.id] = { steps: [
     { arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } },
-    { arguments: { bot_ids: [f.lead.id], request_key: "bench", message: "Benchmark the exporter on the large fixture", label: "Benchmark" } },
+    { arguments: { bot_ids: [f.lead.id], request_key: "bench", message: "Benchmark the exporter on the large fixture", label: "Benchmark", independent: true } },
   ], reply: "Both assignments are out", resumeReply: "Both came back" };
   await f.start();
   expect((await f.wait()).status).toBe("settled");

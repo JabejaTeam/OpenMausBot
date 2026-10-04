@@ -824,3 +824,45 @@ describe("shared room request display", () => {
     expect(() => engine.enqueue(addr("A"), "turn", undefined, { ...addr("B"), threadId: "new", botId: "different" }, "one:different", "Review", false, false, "", "one")).toThrow("different room work");
   }));
 });
+
+describe("corrections to an assignment (amends)", () => {
+  const chief = { botId: "chief", threadId: "chief-chat" };
+  const clerk = { botId: "clerk", threadId: "clerk-pair" };
+  it("finds the assignment a correction names by request_key or request id, only from the conversation that sent it", () => fixture(engine => {
+    const sent = engine.enqueue(chief, "turn", undefined, clerk, "q3:clerk", "Book Q3").node;
+    engine.enqueue({ botId: "chief", threadId: "other-chat" }, "other-turn", undefined, clerk, "q3:clerk", "Book Q3 elsewhere");
+    expect(engine.amendable("chief-chat", "clerk", "q3")?.id).toBe(sent.id);
+    expect(engine.amendable("chief-chat", "clerk", sent.id)?.id).toBe(sent.id);
+    expect(engine.amendable("chief-chat", "someone-else", "q3")).toBeUndefined();
+    expect(engine.amendable("chief-chat", "clerk", "unknown")).toBeUndefined();
+    // A later turn of the same conversation still reaches it.
+    engine.sourceSettled("turn", true);
+    expect(engine.amendable("chief-chat", "clerk", "q3")?.id).toBe(sent.id);
+    expect(engine.outstandingTo("chief-chat", "clerk").map(n => n.id)).toEqual([sent.id]);
+    expect(engine.outstandingTo("other-chat", "clerk")).toHaveLength(1);
+  }));
+  it("folds a correction into work that has not started, so the teammate reads one brief", () => fixture(async (engine, hooks) => {
+    hooks.busy = () => true;
+    const sent = engine.enqueue(chief, "turn", undefined, clerk, "q3:clerk", "Book Q3").node;
+    expect(engine.mergeTarget(sent)?.id).toBe(sent.id);
+    engine.addCorrection(sent, "eur:clerk", "Chief", "Book USD in EUR", true);
+    expect(sent.text).toContain("Book Q3");
+    expect(sent.text).toContain("Book USD in EUR");
+    expect(engine.amendable("chief-chat", "clerk", "eur")?.id).toBe(sent.id);
+    hooks.busy = () => false;
+    engine.tick(); await flush();
+    expect((hooks.run as any).mock.calls[0][0].text).toContain("Book USD in EUR");
+    expect(engine.mergeTarget(sent)).toBeUndefined();
+  }));
+  it("queues a correction to finished work as a follow-up in the same thread, past the completed-work guard", () => fixture(async (engine, hooks) => {
+    const sent = engine.enqueue(chief, "turn", undefined, clerk, "q3:clerk", "Book Q3").node;
+    engine.tick(); await flush();
+    expect(sent.status).toBe("completed");
+    expect(() => engine.enqueue(chief, "turn", undefined, clerk, "more:clerk", "Also Q2")).toThrow("already completed");
+    const follow = engine.enqueue(chief, "turn", undefined, { ...clerk, threadId: sent.threadId }, "eur:clerk", "Book USD in EUR",
+      false, false, "", undefined, sent.id).node;
+    expect(follow).toMatchObject({ amends: sent.id, threadId: "clerk-pair", status: "queued" });
+    expect(engine.mergeTarget(sent)?.id).toBe(follow.id);
+    expect(new RoomHandoffs(engine["file"], hooks).nodes.get(follow.id)?.amends).toBe(sent.id);
+  }));
+});

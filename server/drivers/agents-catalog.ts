@@ -222,7 +222,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "relay_question",
     description:
-      "When a teammate you assigned work to needs the person's answer or decision, hand that question on as a card in this conversation instead of repeating it in your reply. It returns at once; the person answers whenever they like, and keeps talking to you meanwhile. Their answer arrives later as an ordinary message in this conversation: pass it on to the same teammate (coordinate_bots or delegate_bot, same thread). One card per question; do not also ask it in text.",
+      "When a teammate you assigned work to needs the person's answer or decision, hand that question on as a card in this conversation instead of repeating it in your reply. It returns at once; the person answers whenever they like, and keeps talking to you meanwhile. Their answer arrives later as an ordinary message in this conversation: pass it on to the same teammate with coordinate_bots and amends set to that assignment's request_key, so it reaches the same thread. One card per question; do not also ask it in text.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -273,13 +273,16 @@ const toolDefinitions = (externalRuntime: boolean) => [
   },
   {
     name: "coordinate_bots",
-    description: "Ask existing OpenMausBot teammates for advice or assign concrete work. From normal chat every assignment you send a teammate continues your one standing conversation with that teammate, so they keep the context of what you asked before; from a room it defaults to this room. Use group_id from list_room_targets for a specific room. Give 1-4 bot_ids — teammate ids as list_bots or your roster prints them; a unique teammate name also resolves: they receive only your brief and use their own model, tools and permissions. Busy bots queue. They can consult their specialists; all results return here and resume you automatically. Include exact file paths, constraints and what must be verified. After sending all assignments, END your turn; do not poll or wait. On return, resolve tradeoffs, verify the requested outcome and request concrete corrections if necessary before giving one final answer. Do not send acknowledgements as new work.",
+    description: "Ask existing OpenMausBot teammates for advice or assign concrete work. From normal chat every assignment you send a teammate continues your one standing conversation with that teammate, so they keep the context of what you asked before; from a room it defaults to this room. Use group_id from list_room_targets for a specific room. Give 1-4 bot_ids — teammate ids as list_bots or your roster prints them; a unique teammate name also resolves: they receive only your brief and use their own model, tools and permissions. Busy bots queue. They can consult their specialists; all results return here and resume you automatically. Include exact file paths, constraints and what must be verified. After sending all assignments, END your turn; do not poll or wait. On return, resolve tradeoffs, verify the requested outcome and request concrete corrections if necessary before giving one final answer. Do not send acknowledgements as new work. A correction or addition to an assignment you already sent (changed mind, extra detail, an answer) is not new work: set amends to its request_key so it reaches that same run or thread.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       group_id: { type: "string", description: "Optional destination room. Omit for this room, or your standing conversation with each teammate when chatting directly." },
       bot_ids: { type: "array", items: { type: "string", description: "A teammate's id exactly as list_bots or your roster prints it ([id: …]). A teammate's unique display name also resolves; a name shared by two reachable teammates is refused." }, minItems: 1, maxItems: 4, uniqueItems: true },
       message: { type: "string", minLength: 1, maxLength: 4000, description: "Self-contained question or task for these teammates. Send separate requests when responsibilities differ." },
       request_key: { type: "string", description: "A short unique assignment key. Reuse for an identical retry." },
       rework: { type: "boolean", description: "True only for concrete additional work from someone who already completed a request." },
+      amends: { type: "string", description: "request_key or requestId of the earlier assignment from this conversation that this message corrects or extends." },
+      interrupt: { type: "boolean", description: "With amends: stop that run first, when continuing would do harm." },
+      independent: { type: "boolean", description: "A separate job while this teammate still works on another assignment from this conversation." },
       label: { type: "string", description: "Optional short name (one line, at most 60 characters) for this job. Used only when the teammate is still working on your previous assignment and this one therefore runs in its own thread beside your standing conversation." },
     }, required: ["bot_ids", "message", "request_key"] },
   },

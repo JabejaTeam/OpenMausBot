@@ -134,8 +134,8 @@ const botState = async (botId: string) => (await bots()).find((bot) => bot.id ==
 const taskOf = async (botId: string, threadId: string) => (await botState(botId))?.tasks.find((task: any) => task.threadId === threadId);
 const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).body.messages as any[];
 const handoffs = (): any[] => JSON.parse(readFileSync(join(home, ".openmausbot", "room-handoffs.json"), "utf8"));
-const coordinated = async (headers: Record<string, string>, botId: string, message: string, requestKey: string) => {
-  const response = await api("POST", "/api/internal/coordinate-bots", { botIds: [botId], message, requestKey }, headers);
+const coordinated = async (headers: Record<string, string>, botId: string, message: string, requestKey: string, independent = false) => {
+  const response = await api("POST", "/api/internal/coordinate-bots", { botIds: [botId], message, requestKey, independent }, headers);
   expect(response.status, JSON.stringify(response.body)).toBe(200);
   expect(response.body.accepted).toHaveLength(1);
   return handoffs().find(node => node.id === response.body.accepted[0].requestId);
@@ -369,7 +369,8 @@ describe("coordinate_bots on a teammate", () => {
       const token = await heldTurn(pm, "Hand the pull requests to QA.");
       const opened: any[] = [];
       for (let index = 1; index <= 3; index++) {
-        opened.push(await coordinated(token, qa.id, `Test pull request ${index}.`, `pr-${index}`));
+        // Separate pull requests are separate jobs while the first is outstanding.
+        opened.push(await coordinated(token, qa.id, `Test pull request ${index}.`, `pr-${index}`, index > 1));
       }
       const before = await botState(qa.id);
       expect(before.threadId).toBe(qa.threadId);

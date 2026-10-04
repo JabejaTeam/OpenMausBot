@@ -14,6 +14,11 @@ const nodeSchema = z.object({
   lastProgressAt: z.number().optional(),
   approvalGranted: z.boolean().default(false),
   kind: z.enum(["work", "assignment"]).default("work"),
+  /** A follow-up that corrects or extends this earlier node (its id). */
+  amends: z.string().optional(),
+  /** request_keys of corrections folded into this node's run or brief
+   * instead of becoming nodes of their own; a correction names them too. */
+  corrections: z.array(z.string()).optional(),
 });
 export type RoomHandoff = z.infer<typeof nodeSchema>;
 export type RoomAddress = Pick<RoomHandoff, "groupId" | "threadId" | "botId">;
@@ -212,7 +217,7 @@ export class RoomHandoffs {
 
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined,
     target: RoomAddress, key: string, text: string, approvalGranted = false,
-    rework = false, sourceText = "", requestBatchKey?: string): { node: RoomHandoff; duplicate: boolean } {
+    rework = false, sourceText = "", requestBatchKey?: string, amends?: string): { node: RoomHandoff; duplicate: boolean } {
     if (this.loadError) throw new Error(this.loadError);
     let parent = parentId ? this.nodes.get(parentId) : this.nodes.get(generation);
     if (parentId && (!parent || parent.status !== "running")) throw new Error("The originating room task is no longer running");
@@ -237,7 +242,8 @@ export class RoomHandoffs {
       if (batch.some(n => n.text !== text || n.threadId !== target.threadId)) throw new Error("request_key was already used for different room work");
       if (batch.some(n => n.startedAt !== undefined)) throw new Error("This shared room request has already started; use a new request_key for additional recipients");
     }
-    if (!rework && this.children(parent.id).some(n => n.kind === kind &&
+    // A correction names the finished work it corrects, so it is no acknowledgement.
+    if (!rework && !amends && this.children(parent.id).some(n => n.kind === kind &&
       n.groupId === target.groupId && n.botId === target.botId && n.status === "completed")) {
       throw new Error("This agent already completed your assignment. Do not send acknowledgements or approvals as new work. Finish with your decision; results return automatically. Only use rework=true for concrete additional work.");
     }
@@ -269,13 +275,52 @@ export class RoomHandoffs {
     }
     const node: RoomHandoff = { ...target, id: randomUUID(), rootId: parent.rootId, parentId: parent.id,
       key, text, createdAt: this.now(), status: "queued", result: "", reported: false, executions: 0, approvalGranted,
-      kind, ...(target.groupId && requestBatchKey ? { requestBatchKey } : {}) };
+      kind, ...(target.groupId && requestBatchKey ? { requestBatchKey } : {}), ...(amends ? { amends } : {}) };
     const problem = this.hooks.validate(node, parent);
     if (problem) throw new Error(problem);
     if (fresh) this.nodes.set(parent.id, parent);
     this.nodes.set(node.id, node);
     try { this.publish(node, parent); } catch (e) { this.nodes.delete(node.id); if (fresh) this.nodes.delete(parent.id); throw e; }
     return { node, duplicate: false };
+  }
+
+  /** Direct assignments one conversation sent to one teammate, newest
+   * first, across all of that conversation's turns. */
+  private sentTo(sourceThreadId: string, botId: string): RoomHandoff[] {
+    return [...this.nodes.values()].filter(node => {
+      if (node.groupId || node.botId !== botId || !node.parentId) return false;
+      const parent = this.nodes.get(node.parentId);
+      return Boolean(parent && !parent.groupId && parent.threadId === sourceThreadId);
+    }).sort((a, b) => b.createdAt - a.createdAt);
+  }
+  /** What this conversation still waits on from that teammate. */
+  outstandingTo(sourceThreadId: string, botId: string): RoomHandoff[] {
+    return this.sentTo(sourceThreadId, botId).filter(node => !terminal(node));
+  }
+  /** The assignment a correction names: its request id, the request_key it
+   * was sent with, or the key of a correction already folded into it. */
+  amendable(sourceThreadId: string, botId: string, ref: string): RoomHandoff | undefined {
+    const key = `${ref}:${botId}`;
+    return this.sentTo(sourceThreadId, botId).find(node => node.id === ref || node.key === key || node.corrections?.includes(key));
+  }
+  /** Follow-ups queued to correct `node`, oldest first. */
+  followUps(node: RoomHandoff): RoomHandoff[] {
+    return [...this.nodes.values()].filter(n => n.amends === node.id).sort((a, b) => a.createdAt - b.createdAt);
+  }
+  /** Where a new correction to `node` can still be folded into a brief
+   * nobody has read yet: the node itself before it starts, else a queued
+   * follow-up that corrects it. */
+  mergeTarget(node: RoomHandoff): RoomHandoff | undefined {
+    const unread = (n: RoomHandoff) => n.status === "queued" && n.executions === 0 && n.startedAt === undefined;
+    if (unread(node)) return node;
+    return this.followUps(node).filter(unread).at(-1);
+  }
+  /** Records a correction delivered into `node`: appended to its brief when
+   * it has not started (`merge`), or already steered into its running turn. */
+  addCorrection(node: RoomHandoff, key: string, senderName: string, text: string, merge: boolean) {
+    if (merge) node.text = `${node.text}\n\nCorrection from ${senderName}, sent before you started (where it conflicts with the brief above, this wins):\n${text}`;
+    node.corrections = [...node.corrections ?? [], key];
+    this.publish(node);
   }
 
   /** A room brief is displayed once; each recipient keeps its own execution and result. */
