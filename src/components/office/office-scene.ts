@@ -164,6 +164,9 @@ export class OfficeScene {
   private hovered: string | null = null;
   /** the office under the pointer (its floor, or a bot of that team) */
   private hoveredRoom: string | null = null;
+  /** pointing at the empty chair of a bot that is out walking */
+  private hoveredChair = false;
+  private hoveredAway = false;
   private selected: string | null = null;
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
@@ -196,7 +199,7 @@ export class OfficeScene {
   constructor(
     private host: HTMLElement,
     theme: OfficeTheme,
-    private events: { onHover: (botId: string | null) => void; onHoverRoom: (deskId: string | null) => void; onPick: (botId: string) => void; onPickDesk: (deskId: string) => void },
+    private events: { onHover: (botId: string | null, away: boolean) => void; onHoverRoom: (deskId: string | null) => void; onPick: (botId: string) => void; onPickDesk: (deskId: string) => void },
   ) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -388,6 +391,8 @@ export class OfficeScene {
         const hit = new THREE.Mesh(hitGeo, this.materials.hit);
         hit.position.set(0, 0.95, 0);
         hit.userData.botId = chairBack.userData.botId = chairSeat.userData.botId = placed.botId;
+        // the chair stays pointable while its bot is out walking: who sits here
+        chairSeat.userData.seat = chairBack.userData.seat = true;
 
         // monitor on the desk, screen toward the bot
         const monitorZ = 0.9;
@@ -427,6 +432,9 @@ export class OfficeScene {
           const keyboard = this.kit.place({ model: "computerKeyboard", x: 0, z: 0.68, y: DESK_HEIGHT + 0.025 });
           const mouse = this.kit.place({ model: "computerMouse", x: 0.32, z: 0.7, y: DESK_HEIGHT + 0.025 });
           root.add(chair, ...[keyboard, mouse].filter((item): item is THREE.Object3D => Boolean(item)));
+          // the simple chair stays as the real one's (unseen) hit area
+          chairSeat.visible = chairBack.visible = false;
+          root.add(chairSeat, chairBack);
         } else {
           root.add(chairSeat, chairBack, chairPost);
         }
@@ -789,9 +797,12 @@ export class OfficeScene {
     const hit = this.pick(event);
     const botId: string | null = hit?.userData.botId ?? null;
     this.renderer.domElement.style.cursor = hit ? "pointer" : "grab";
-    if (botId !== this.hovered) {
+    const away = Boolean(botId && this.seats.get(botId)?.walker?.away);
+    this.hoveredChair = away && Boolean(hit?.userData.seat);
+    if (botId !== this.hovered || away !== this.hoveredAway) {
       this.hovered = botId;
-      this.events.onHover(botId);
+      this.hoveredAway = away;
+      this.events.onHover(botId, away);
     }
     const roomId: string | null = hit?.userData.deskId ?? (botId ? this.seats.get(botId)?.homeId ?? null : null);
     if (roomId !== this.hoveredRoom) {
@@ -822,7 +833,8 @@ export class OfficeScene {
     }
     if (this.hovered === null) return;
     this.hovered = null;
-    this.events.onHover(null);
+    this.hoveredAway = this.hoveredChair = false;
+    this.events.onHover(null, false);
   };
 
   private project = new THREE.Vector3();
@@ -961,7 +973,9 @@ export class OfficeScene {
     }
     if (this.hoverLabel) {
       const seat = this.hovered ? this.seats.get(this.hovered) : null;
-      if (seat) this.place(this.hoverLabel, seat.marker.position.x, HEAD_Y + MARKER_GAP + 0.25, seat.marker.position.z);
+      // over the empty chair you point at, else over the bot wherever it is
+      const at = this.hoveredChair ? seat?.markerHome : seat?.marker.position;
+      if (seat && at) this.place(this.hoverLabel, at.x, HEAD_Y + MARKER_GAP + 0.25, at.z);
       else this.hoverLabel.style.visibility = "hidden";
     }
   };

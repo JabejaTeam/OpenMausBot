@@ -87,6 +87,8 @@ export function OfficeView() {
   const [sceneReady, setSceneReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
+  // the hovered bot is away from its desk (out walking)
+  const [hoveredAway, setHoveredAway] = useState(false);
   // a team's name shows only while you point at its office (or at the name)
   const [hoveredRoom, setHoveredRoom] = useState<string | null>(null);
   const [labelHovered, setLabelHovered] = useState<string | null>(null);
@@ -277,7 +279,10 @@ export function OfficeView() {
       .then(({ OfficeScene }) => {
         if (disposed) return;
         scene = new OfficeScene(host, readTheme(), {
-          onHover: setHovered,
+          onHover: (botId, away) => {
+            setHovered(botId);
+            setHoveredAway(away);
+          },
           onHoverRoom: setHoveredRoom,
           onPick: (botId) => openRef.current(botId),
           onPickDesk: (deskId) => scene?.focusDesk(deskId),
@@ -402,6 +407,7 @@ export function OfficeView() {
                 <BotAvatar bot={hoveredBot} state={stateForBot(hoveredBot)} size={22} motion="none" motionKey={0} animated={false} />
                 <span className="text-[13.5px] font-semibold text-ink">{hoveredBot.name}</span>
                 {teamOf.get(hoveredBot.id) && <span className="text-[12.5px] text-ink-secondary">{teamOf.get(hoveredBot.id)}</span>}
+                {hoveredAway && <span className="text-[12.5px] text-ink-secondary">{t("office.away")}</span>}
                 {botStatus(hoveredBot) !== "idle" && (
                   <span className="flex items-center gap-1.5 text-[12.5px] text-ink-secondary">
                     <StatusSymbol status={botStatus(hoveredBot) as "waiting" | "working" | "unread"} size={12} />

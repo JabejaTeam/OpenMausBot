@@ -398,6 +398,7 @@
   "office.status.working": "Working",
   "office.status.unread": "Unread",
   "office.status.idle": "Idle",
+  "office.away": "Away from desk",
   "simpleUi.dragTeam": "Drag to reorder teams",
   "simpleUi.connectApps": "Connect apps",
   "simpleUi.search": "Search",
