@@ -2,8 +2,9 @@
 # Jabeja fork only: build this commit on THE BEAST and roll it out to the live
 # OpenMausBot (docker container "omb"). Refuses a dirty tree, so what runs is
 # always a commit: its hash is written next to the release as DEPLOYED_COMMIT.
-# A restart kills running turns and they are never replayed, so it waits until
-# no bot is busy and no handoff is open (up to 20 minutes) before restarting.
+# A restart kills running turns; they are picked up again afterwards (each
+# re-checks what already happened), but it still waits until no bot is busy
+# and no handoff is open (up to 20 minutes) so nothing needs picking up.
 # Keeps a dated backup and prints the one command that rolls back.
 #   fork/deploy-beast.sh            wait for idle, then roll out
 #   fork/deploy-beast.sh --force    roll out now, interrupting running work

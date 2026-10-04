@@ -229,11 +229,12 @@ it("applies requested Full Access workflows through MCP without duplicate approv
       fullMessages: await messages(chief.activeTaskId), askMessages: await messages(ask.threadId), inverseMessages: await messages(inverse.activeTaskId) });
 
     // A restart while the Chief awaits a teammate must not promote its
-    // earlier "assigned" terminal to a final. Completed requests survive.
+    // earlier "assigned" terminal to a final: the teammate's cut-off turn is
+    // picked up again, and its result resumes the Chief. Completed requests survive.
     const interrupted = (await api("POST", `/api/bots/${chief.id}/tasks`, { title: "Restart while awaiting teammate" }, 201)).task;
     const gate = join(dataDir, "restart-peer.gate");
     plans[chief.id].turns.push({ steps: [step("coordinate_bots", { bot_ids: [peer.id], request_key: "restart-proof", message: "Wait at the isolated fixture gate." })],
-      reply: "Assigned the restart check", resumeReply: "THIS_MUST_NOT_REPLAY_AFTER_RESTART" });
+      reply: "Assigned the restart check" }, { reply: "RESUMED_WITH_THE_PICKED_UP_RESULT" });
     plans[peer.id].turns.push({ gateFile: gate, reply: "The gated check finished" });
     writeFileSync(planPath, JSON.stringify(plans));
     const pendingInput = { threadId: interrupted.threadId, text: "Coordinate the gated restart check.", sendId: randomUUID(), expectedActiveLeafId: null, expectedApprovalMode: "full" };
@@ -248,12 +249,16 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     const beforeRestart = providerTurns().length;
     await restart();
     const recovered = await api("GET", pendingRoute);
-    expect(recovered).toMatchObject({ phase: "untracked", activeTurnId: null, executionId: null });
+    expect(recovered.phase).not.toBe("settled");
     expect(recovered.messages.some((message: any) => message.turnTerminal && message.text === "Assigned the restart check" && message.turnSucceeded)).toBe(true);
     expect((await api("GET", guardedRoutes.get(inverse.activeTaskId)!)).phase).toBe("settled");
-    await new Promise(resolve => setTimeout(resolve, 250));
-    expect(providerTurns()).toHaveLength(beforeRestart);
-    evidence.push({ restartWhileAwaiting: { phase: recovered.phase, noProviderReplay: true, completedRequestStillSettled: true } });
+    writeFileSync(gate, "open");
+    await expect.poll(async () => (await messages(interrupted.threadId)).some(message => message.text === "RESUMED_WITH_THE_PICKED_UP_RESULT"), { timeout: 30_000 }).toBe(true);
+    // The killed run may still log its own (unflagged) record on the way out.
+    const after = providerTurns().slice(beforeRestart);
+    expect(after.filter(turn => turn.botId === peer.id && JSON.stringify(turn.prompt).includes("interrupted by a server restart"))).toHaveLength(1);
+    expect(after.filter(turn => turn.botId === chief.id).map(turn => turn.resumed)).toEqual([true]);
+    evidence.push({ restartWhileAwaiting: { phase: recovered.phase, pickedUp: true, completedRequestStillSettled: true } });
     expect(readFileSync(logPath, "utf8")).not.toMatch(/ReferenceError|change listener threw|Unexpected extra fixture turn/);
   } finally {
     await waitForExit(restarted, { signal: "SIGTERM" });

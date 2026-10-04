@@ -11,7 +11,10 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
   `stillWorkingRefusal`, then `roomHandoffs.enqueue`.
 - The handoff tree, queue and lifetimes: `server/room-handoffs.ts`
   (`enqueue`, `tick`, `amendable`, `mergeTarget`, `addCorrection`).
-  Persisted in `<data>/room-handoffs.json`.
+  Persisted in `<data>/room-handoffs.json`. After a restart `restore` puts
+  cut-off work back in line (`interrupted` → `INTERRUPTED_BY_RESTART` note), max `restarts`.
+- Plain conversation turns cut off by a restart: `server/turn-recovery.ts`
+  (`<data>/running-turns.json`), picked up in `server/index.ts` (`INTERRUPTED_TURN_PROMPT`).
 - Running a handoff turn and reporting back: `const roomHandoffs = new RoomHandoffs(` in
   `server/index.ts` (`run`, `report`, `busy`); turn text: `coordinationTurnText`,
   `outstandingAssignmentsPrompt`.

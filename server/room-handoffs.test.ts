@@ -74,7 +74,7 @@ describe("addressed room request tree", () => {
     parent.status = "running";
     expect(() => engine.enqueue(parent, "unused", parent.id, { botId: "too-deep", threadId: "too-deep" }, "next", "do work")).toThrow("depth limit");
   }));
-  it("cancels only the selected direct tree and records interruption without replay on restart", () => fixture((engine, hooks, file) => {
+  it("cancels only the selected direct tree and keeps unstarted work queued across a restart", () => fixture(async (engine, hooks, file) => {
     const one = { botId: "clive", threadId: "one" };
     const two = { botId: "clive", threadId: "two" };
     engine.enqueue(one, "first", undefined, { botId: "lead", threadId: "lead-one" }, "work", "build");
@@ -83,10 +83,10 @@ describe("addressed room request tree", () => {
     expect(engine.activeDirect("one")).toBe(false);
     expect(engine.activeDirect("two")).toBe(true);
     expect(other.status).toBe("queued");
-    const restarted = new RoomHandoffs(file, hooks); restarted.tick();
-    expect(restarted.nodes.get(other.id)?.status).toBe("failed");
-    expect(restarted.nodes.get(other.id)?.result).toContain("restart");
-    expect(hooks.run).not.toHaveBeenCalled();
+    const restarted = new RoomHandoffs(file, hooks); restarted.tick(); await flush();
+    expect(restarted.nodes.get(other.id)?.status).toBe("completed");
+    expect(restarted.nodes.get(other.id)?.restarts).toBe(0);
+    expect(hooks.run).toHaveBeenCalledTimes(1);
   }));
   it("publishes only changed groups, including their final idle and cancelled states", () => fixture(async (engine, hooks) => {
     const updates: Array<{ id: string; active: boolean }[]> = [];
@@ -266,11 +266,42 @@ describe("addressed room request tree", () => {
     expect((hooks.report as ReturnType<typeof vi.fn>).mock.calls.map(call => call[0].id)).toContain(running.id);
     expect(runs.map(run => run.id)).toEqual([running.id]);
   }));
-  it("records interruption on restart without replaying side effects and fails closed on corrupt storage", () => fixture((engine, hooks, file) => {
+  it("picks interrupted work up again after a restart, flagged, and fails it past the restart limit", () => fixture(async (engine, hooks, file) => {
+    const source = { botId: "chief", threadId: "chief-chat" };
+    const { node } = engine.enqueue(source, "turn", undefined, { botId: "books", threadId: "books-chat" }, "book", "Book Q3");
+    (hooks.run as ReturnType<typeof vi.fn>).mockImplementation(() => new Promise(() => {}));
+    engine.tick();
+    expect(node.status).toBe("running");
+    for (let restart = 1; restart <= 2; restart++) {
+      const flags: Array<boolean | undefined> = [];
+      (hooks.run as ReturnType<typeof vi.fn>).mockImplementation((n: { interrupted?: boolean }) => { flags.push(n.interrupted); return new Promise(() => {}); });
+      const restarted = new RoomHandoffs(file, hooks);
+      // The source conversation died with the server; it waits for the result instead.
+      expect(restarted.nodes.get("turn")?.status).toBe("waiting");
+      expect(restarted.nodes.get(node.id)).toMatchObject({ status: "queued", restarts: restart, interrupted: true });
+      restarted.tick();
+      expect(flags).toEqual([true]);
+      expect(restarted.nodes.get(node.id)).toMatchObject({ status: "running", restarts: restart });
+      expect(restarted.nodes.get(node.id)?.interrupted).toBeUndefined();
+    }
+    const third = new RoomHandoffs(file, hooks);
+    expect(third.nodes.get(node.id)?.status).toBe("failed");
+    expect(third.nodes.get(node.id)?.result).toContain("not replayed again");
+  }));
+  it("resumes a parent cut off during its synthesis, and fails closed on corrupt storage", () => fixture(async (engine, hooks, file) => {
     const { node } = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
-    const restarted = new RoomHandoffs(file, hooks); restarted.tick();
-    expect(restarted.nodes.get(node.id)?.result).toContain("restart"); expect(hooks.run).not.toHaveBeenCalled();
-    expect(JSON.parse(readFileSync(file, "utf8")).every((n: { status: string }) => n.status === "failed")).toBe(true);
+    engine.sourceSettled("turn", true);
+    engine.tick(); await flush(); engine.tick();
+    (hooks.run as ReturnType<typeof vi.fn>).mockImplementation(() => new Promise(() => {}));
+    engine.tick();
+    expect(engine.nodes.get("turn")?.status).toBe("running");
+    const resumed: boolean[] = [];
+    (hooks.run as ReturnType<typeof vi.fn>).mockImplementation(async (_n: unknown, wasResumed: boolean) => { resumed.push(wasResumed); return { ok: true, text: "final" }; });
+    const restarted = new RoomHandoffs(file, hooks);
+    expect(restarted.nodes.get("turn")?.status).toBe("resume");
+    expect(restarted.nodes.get(node.id)?.status).toBe("completed");
+    restarted.tick(); await flush();
+    expect(resumed).toEqual([true]);
     writeFileSync(file, "{corrupt");
     expect(() => new RoomHandoffs(file, hooks).enqueue(addr("A"), "new", undefined, addr("B"), "work", "build")).toThrow("storage");
   }));

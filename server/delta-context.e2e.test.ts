@@ -488,11 +488,15 @@ const resultAcrossRestart = async (f: any, stripRecord: boolean) => {
   await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.thread });
   await f.wait();
+  // The restart picks the cut-off assignment up again; this time it finishes.
+  f.plan[f.lead.id] = { reply: "EXPORT_DONE_AFTER_RESTART" };
+  f.save();
   await f.restart((bots: any[]) => {
     if (!stripRecord) return;
     for (const task of bots.find((b: any) => b.id === f.chief.id).tasks) { delete task.handedMessages; delete task.handedWatermarks; }
   });
   await expect.poll(async () => (await f.messages()).some((m: any) => m.roomRequest?.phase === "result"), { timeout: 20_000 }).toBe(true);
+  expect(JSON.stringify(f.turns(f.lead.id).at(-1)?.prompt)).toContain("interrupted by a server restart");
   f.plan[f.chief.id] = { reply: "Engineering was interrupted" };
   await f.send("What happened to the Engineering work?");
   await f.wait();
@@ -501,21 +505,39 @@ const resultAcrossRestart = async (f: any, stripRecord: boolean) => {
 
 it("replays once for a stored conversation without a handoff record when a result arrives after restart", () => fixture(async (f) => {
   const turn = await resultAcrossRestart(f, true);
-  expect(count(f.prompt(turn), "Interrupted by server restart")).toBe(1);
+  expect(count(f.prompt(turn), "EXPORT_DONE_AFTER_RESTART")).toBe(1);
   expect(f.prompt(turn)).toContain("ORCHID_7Q");
   expect(f.launches().at(-1).resume).toBeNull();
   f.plan[f.chief.id] = { reply: "ok" };
   await f.send("Thanks.");
   await f.wait();
-  expect(count(f.prompt(f.turns().at(-1)), "Interrupted by server restart")).toBe(0);
+  expect(count(f.prompt(f.turns().at(-1)), "EXPORT_DONE_AFTER_RESTART")).toBe(0);
   expect(f.launches().at(-1).resume).not.toBeNull();
 }), 90_000);
 
 it("keeps resuming a stored conversation with a handoff record when a result arrives after restart", () => fixture(async (f) => {
   const turn = await resultAcrossRestart(f, false);
-  expect(count(f.prompt(turn), "Interrupted by server restart")).toBe(1);
+  expect(count(f.prompt(turn), "EXPORT_DONE_AFTER_RESTART")).toBe(1);
   expect(f.prompt(turn)).not.toContain("ORCHID_7Q");
   expect(f.launches().at(-1).resume).not.toBeNull();
+}), 90_000);
+
+it("picks a person's turn that a restart cut off up again, once", () => fixture(async (f) => {
+  await warmUp(f);
+  f.plan[f.chief.id] = { reply: "never finishes", gateFile: f.gate("never") };
+  await f.send("Draft the Q3 summary.");
+  await expect.poll(async () => (await f.api("/api/bots")).bots.find((b: any) => b.id === f.chief.id)
+    .tasks.find((t: any) => t.threadId === f.thread).busy, { timeout: 15_000 }).toBe(true);
+  f.plan[f.chief.id] = { reply: "Q3_SUMMARY_DONE" };
+  f.save();
+  const before = f.turns().length;
+  await f.restart(() => {});
+  await expect.poll(() => f.turns().length, { timeout: 20_000 }).toBe(before + 1);
+  await f.wait();
+  expect(f.prompt(f.turns().at(-1))).toContain("interrupted by a server restart");
+  const messages = await f.messages();
+  expect(messages.filter((m: any) => m.tool?.name === "Picked up again after a server restart")).toHaveLength(1);
+  expect(messages.some((m: any) => String(m.text ?? "").includes("Q3_SUMMARY_DONE"))).toBe(true);
 }), 90_000);
 
 // ── Session replacement: the record describes one native session ──

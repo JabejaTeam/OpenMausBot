@@ -19,6 +19,7 @@ import { autoCompactWindow } from "./drivers/claude.ts";
 import { SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { RoomHandoffs, type RoomHandoff } from "./room-handoffs.ts";
+import { TurnRecovery } from "./turn-recovery.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput, requestSourceForCard } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -4105,7 +4106,15 @@ function coordinationPersonKey(node: RoomHandoff): string | undefined {
   return isUnattended(root.botId, root.threadId) ? undefined : threadPersonKey(root.threadId);
 }
 
+/** Leads the turn text of work a server restart cut off. */
+const INTERRUPTED_BY_RESTART = "[Your earlier run of this was interrupted by a server restart before it finished; this is the same work, picked up again. First check what already happened — this conversation, files, git, and outside systems such as invoices, emails or bookings — and never repeat an action that already took effect. Then continue where it stopped.]";
+
 function coordinationTurnText(node: RoomHandoff, resumed: boolean): string {
+  const text = coordinationBrief(node, resumed);
+  return node.interrupted ? `${INTERRUPTED_BY_RESTART}\n${text}` : text;
+}
+
+function coordinationBrief(node: RoomHandoff, resumed: boolean): string {
   if (!resumed && node.amends) {
     const earlier = roomHandoffs.nodes.get(node.amends);
     const state = earlier?.status === "cancelled" ? "stopped so this correction could be applied"
@@ -10806,6 +10815,28 @@ const roomHandoffTimer = setInterval(() => {
   try { roomHandoffs.tick(); } catch (error) { console.error("room handoffs:", error); }
 }, 250);
 roomHandoffTimer.unref();
+
+// A conversation turn the last restart cut off is picked up again. Work a
+// teammate was handed comes back through roomHandoffs (it owns that thread
+// while unsettled), and routine runs keep their own restart handling.
+const INTERRUPTED_TURN_PROMPT = "[This conversation's last turn was interrupted by a server restart before it finished. First check what already happened — this conversation, files, git, and outside systems such as invoices, emails or bookings — and never repeat an action that already took effect. Then finish the last request above.]";
+const turnRecovery = new TurnRecovery(join(DATA_DIR, "running-turns.json"));
+store.onChange(change => {
+  if (change.type !== "bot") return;
+  turnRecovery.sync(store.bots.flatMap(bot => (bot.tasks ?? [])
+    .filter(task => task.activity === "working").map(task => ({ botId: bot.id, threadId: task.threadId }))));
+});
+setTimeout(() => {
+  for (const turn of turnRecovery.interrupted) {
+    const bot = store.bot(turn.botId);
+    if (!bot || !store.taskByThread(bot.id, turn.threadId) || roomHandoffs.activeDirect(turn.threadId) ||
+      routines?.runForThread(turn.threadId) || threadBusy(bot.id, turn.threadId)) continue;
+    turnRecovery.recovering(turn);
+    store.appendMessage(turn.threadId, { role: "bot", kind: "activity", tool: { name: "Picked up again after a server restart", ok: true } });
+    void startTurn(bot.id, INTERRUPTED_TURN_PROMPT, { threadId: turn.threadId, cardContinuation: true })
+      .catch(error => console.error(`turn recovery ${bot.name}:`, error));
+  }
+}, 5_000).unref();
 // The room-context window IS the drain's coalescing cap: a burst longer
 // than the window would append transcript lines the responder never reads,
 // so both bounds come from one constant (admission.ts).

@@ -19,10 +19,16 @@ const nodeSchema = z.object({
   /** request_keys of corrections folded into this node's run or brief
    * instead of becoming nodes of their own; a correction names them too. */
   corrections: z.array(z.string()).optional(),
+  /** Server restarts that cut off this node's turn; past the limit it fails. */
+  restarts: z.number().int().nonnegative().default(0),
+  /** Its last turn was cut off by a restart; the next run says so. */
+  interrupted: z.boolean().optional(),
+  /** When a restart put this interrupted node back in line: its queue runway. */
+  restoredAt: z.number().optional(),
 });
 export type RoomHandoff = z.infer<typeof nodeSchema>;
 export type RoomAddress = Pick<RoomHandoff, "groupId" | "threadId" | "botId">;
-export const ROOM_HANDOFF_LIMITS = { depth: 4, requests: 24, executions: 48, lifetimeMs: 30 * 60_000, minRunwayMs: 10 * 60_000, queueMs: 60 * 60_000, hardCapMs: 4 * 60 * 60_000 };
+export const ROOM_HANDOFF_LIMITS = { restarts: 2, depth: 4, requests: 24, executions: 48, lifetimeMs: 30 * 60_000, minRunwayMs: 10 * 60_000, queueMs: 60 * 60_000, hardCapMs: 4 * 60 * 60_000 };
 /** Renders elapsed milliseconds as whole minutes, or seconds under one minute. */
 const duration = (ms: number) => ms >= 60_000 ? `${Math.floor(ms / 60_000)}m` : `${Math.floor(ms / 1000)}s`;
 const terminal = (n: RoomHandoff) => ["completed", "failed", "cancelled"].includes(n.status);
@@ -38,7 +44,9 @@ export interface RoomHandoffHooks {
 
 /** A bounded tree of addressed room turns. Waiting for children never holds a
  * room/provider queue; reporting is data, and only the named parent is resumed.
- * Interrupted processes are never replayed after restart (tools may have effects).
+ * A restart picks interrupted work up again in the same thread, flagged so the
+ * turn checks what already took effect before acting (tools may have effects);
+ * past `restarts` interruptions it fails instead.
  */
 export class RoomHandoffs {
   readonly nodes = new Map<string, RoomHandoff>();
@@ -60,14 +68,30 @@ export class RoomHandoffs {
       const ids = new Map(saved.map(n => [n.id, n]));
       if (ids.size !== saved.length || saved.some(n => !ids.has(n.rootId) || ids.get(n.rootId)?.parentId ||
         (n.parentId && (!ids.has(n.parentId) || ids.get(n.parentId)?.rootId !== n.rootId)))) throw new Error("Invalid room handoff tree");
-      for (const n of saved) {
-        if (!terminal(n)) { n.status = "failed"; n.result = "Interrupted by server restart; not replayed."; }
-        this.nodes.set(n.id, n);
-      }
+      for (const n of saved) this.nodes.set(n.id, n);
+      for (const n of saved) this.restore(n);
       this.save();
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") this.loadError = "Room handoff storage is unreadable; repair it before sending new work.";
     }
+  }
+
+  /** Puts a node back in line after a restart. Nothing runs at boot, so
+   * queued, waiting and resume nodes are untouched; a turn that was running
+   * (or the source conversation that sent the work) was cut off. */
+  private restore(n: RoomHandoff) {
+    if (n.status !== "running" && n.status !== "source") return;
+    if (n.restarts >= this.limits.restarts) {
+      n.status = "failed"; n.result = `Interrupted by server restart ${n.restarts + 1} times; not replayed again.`;
+      return;
+    }
+    n.restarts += 1; n.interrupted = true; n.restoredAt = this.now();
+    const children = this.children(n.id);
+    if (children.some(c => !terminal(c))) n.status = "waiting";
+    else if (children.length) n.status = "resume";
+    else n.status = "queued";
+    if (n.status === "waiting" && !n.result) n.result = "The originating turn was interrupted by a server restart before its teammates returned.";
+    this.stampProgress(this.root(n));
   }
 
   private save() { writeFileAtomic(this.file, JSON.stringify([...this.nodes.values()]), { mode: 0o600 }); }
@@ -89,8 +113,8 @@ export class RoomHandoffs {
 
   /** The tree lifetime clock pauses while any node in the tree is actively
    * executing: the budget bounds coordination sprawl, not the runtime of
-   * dispatched work. Accounting is in-memory; a restart fails every
-   * interrupted node anyway, so no pause span survives one. */
+   * dispatched work. Accounting is in-memory and lost on restart; a
+   * restored node's runway counts from `restoredAt` instead. */
   private trackExecutionPauses(): void {
     const now = this.now();
     const executing = new Set<string>();
@@ -143,7 +167,7 @@ export class RoomHandoffs {
    * wall-clock hard cap clamps every extension: a tree that never stops
    * executing still dies, so runway extensions cannot compound forever. */
   private deadline(n: RoomHandoff): number {
-    const anchor = n.status === "running" ? n.startedAt ?? n.createdAt : n.createdAt;
+    const anchor = n.status === "running" ? n.startedAt ?? n.createdAt : n.restoredAt ?? n.createdAt;
     const root = this.root(n);
     const ceiling = n.status === "queued" && n.executions === 0
       ? anchor + this.limits.queueMs
@@ -161,7 +185,7 @@ export class RoomHandoffs {
   /** An ancestor past its ceiling is not failed while a descendant is still
    * running inside its own runway; cancelling would cascade into that work. */
   private protectsRunner(n: RoomHandoff): boolean {
-    return this.children(n.id).some(c => !terminal(c) && ((c.status === "running" && this.now() <= this.deadline(c)) || this.protectsRunner(c)));
+    return this.children(n.id).some(c => !terminal(c) && (((c.status === "running" || c.restoredAt !== undefined) && this.now() <= this.deadline(c)) || this.protectsRunner(c)));
   }
   /** A parent still owes the follow-up execution that decides on its
    * children's results; the ceiling defers to that execution's own runway.
@@ -225,7 +249,7 @@ export class RoomHandoffs {
       throw new Error("The handoff belongs to a different room speaker");
     }
     const fresh = !parent;
-    parent ??= { ...source, id: generation, rootId: generation, key: "root", text: sourceText.slice(0, 12_000), createdAt: this.now(), status: "source", result: "", reported: true, executions: 0, approvalGranted: false, kind: "work" };
+    parent ??= { ...source, id: generation, rootId: generation, key: "root", text: sourceText.slice(0, 12_000), createdAt: this.now(), status: "source", result: "", reported: true, executions: 0, restarts: 0, approvalGranted: false, kind: "work" };
     const kind = target.groupId && target.groupId === source.groupId ? "assignment" : "work";
     const path = this.path(parent);
     if (path.some(n => n.botId === target.botId && (!n.groupId || !target.groupId || n.groupId === target.groupId))) {
@@ -274,7 +298,7 @@ export class RoomHandoffs {
       if (this.nodes.size >= 1000) throw new Error("Too many active room requests");
     }
     const node: RoomHandoff = { ...target, id: randomUUID(), rootId: parent.rootId, parentId: parent.id,
-      key, text, createdAt: this.now(), status: "queued", result: "", reported: false, executions: 0, approvalGranted,
+      key, text, createdAt: this.now(), status: "queued", result: "", reported: false, executions: 0, restarts: 0, approvalGranted,
       kind, ...(target.groupId && requestBatchKey ? { requestBatchKey } : {}), ...(amends ? { amends } : {}) };
     const problem = this.hooks.validate(node, parent);
     if (problem) throw new Error(problem);
@@ -430,8 +454,9 @@ export class RoomHandoffs {
       if (parent && (parent.status === "source" || parent.status === "running") &&
         (parent.threadId === n.threadId || (n.groupId && n.groupId === parent.groupId))) continue;
       // A stopped source stops waiting; only work that never started is
-      // dropped with it. A teammate mid-turn keeps its process and reports.
-      if (parent && terminal(parent) && n.status === "queued") { this.cancelTree(n, "Originating request has ended"); continue; }
+      // dropped with it. A teammate mid-turn keeps its process and reports,
+      // and one a restart cut off is picked up again just the same.
+      if (parent && terminal(parent) && n.status === "queued" && n.restoredAt === undefined) { this.cancelTree(n, "Originating request has ended"); continue; }
       if (this.hooks.busy(n)) continue;
       const root = this.root(n);
       const executionCost = 1;
@@ -448,7 +473,10 @@ export class RoomHandoffs {
       this.publish(n, root);
       const controller = new AbortController();
       this.controllers.set(n.id, controller);
-      void this.hooks.run(n, resumed, controller.signal).then(result => {
+      const running = this.hooks.run(n, resumed, controller.signal);
+      // The run read the interruption note when it built its turn text.
+      if (n.interrupted) { delete n.interrupted; this.save(); }
+      void running.then(result => {
         if (terminal(n)) return;
         n.result = result.text.slice(0, 12_000);
         if (this.children(n.id).length > childCount) n.status = "waiting";
