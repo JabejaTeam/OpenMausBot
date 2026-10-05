@@ -20,31 +20,41 @@ commit=$(git rev-parse --short HEAD)
 stamp=$(date +%Y%m%d-%H%M%S)
 
 rsync -a --delete --filter=':- .gitignore' --exclude .git --exclude node_modules ./ "$HOST:$DIR/"
-ssh "$HOST" "set -e; cd \$HOME/$DIR && docker build -q -t omb-fork-test -f fork/test.Dockerfile fork >/dev/null
+# The rollout runs on the beast itself (nohup), so a dropped SSH connection
+# from this machine never stops it halfway; this side only follows its log.
+log=omb-fork/deploy-$stamp.log
+ssh "$HOST" "cat > \$HOME/omb-fork/deploy-$stamp.sh" <<REMOTE
+set -e; cd \$HOME/$DIR && docker build -q -t omb-fork-test -f fork/test.Dockerfile fork >/dev/null
   docker run --rm --user \$(id -u):\$(id -g) -e HOME=/tmp/home -e COREPACK_HOME=/store/corepack -e npm_config_store_dir=/store/pnpm \
     -v \$HOME/$DIR:/repo -v \$HOME/omb-fork/pnpm-store:/store -w /repo omb-fork-test \
     bash -c 'pnpm install --frozen-lockfile --reporter=silent && pnpm build:server >/dev/null && pnpm exec vite build >/dev/null && node scripts/build-npm-package.mjs'
   echo $commit > release/npm/DEPLOYED_COMMIT
   busy() {
-    docker exec omb curl -s 'http://127.0.0.1:8799/api/bots?messages=0' | python3 -c 'import json,sys; print(\", \".join(b[\"name\"] for b in json.load(sys.stdin)[\"bots\"] if b.get(\"busy\") or b.get(\"waitingForTeammates\")))'
-    python3 -c 'import json; print(\"open handoffs\" if any(n[\"status\"] not in (\"completed\",\"failed\",\"cancelled\") for n in json.load(open(\"/home/jabeja/omb-data/home/.openmausbot/room-handoffs.json\"))) else \"\")'
+    docker exec omb curl -s 'http://127.0.0.1:8799/api/bots?messages=0' | python3 -c 'import json,sys; print(", ".join(b["name"] for b in json.load(sys.stdin)["bots"] if b.get("busy") or b.get("waitingForTeammates")))'
+    python3 -c 'import json; print("open handoffs" if any(n["status"] not in ("completed","failed","cancelled") for n in json.load(open("/home/jabeja/omb-data/home/.openmausbot/room-handoffs.json"))) else "")'
   }
   if [ $force = 0 ]; then
     for i in \$(seq 1 240); do
       now=\$(busy | tr '\n' ' ' | xargs)
-      [ -z \"\$now\" ] && break
-      [ \$((i % 12)) = 1 ] && echo \"waiting for idle: \$now\"
+      [ -z "\$now" ] && break
+      [ \$((i % 12)) = 1 ] && echo "waiting for idle: \$now"
       sleep 5
     done
-    [ -z \"\$now\" ] || { echo \"still busy after 20 minutes (\$now); nothing restarted. Use --force to interrupt.\" >&2; exit 1; }
+    [ -z "\$now" ] || { echo "still busy after 20 minutes (\$now); nothing restarted. Use --force to interrupt." >&2; exit 1; }
   fi
   rsync -a \$HOME/$LIVE/ \$HOME/$LIVE.bak-$stamp/
   rsync -a --delete --exclude node --exclude 'node-v*' release/npm/ \$HOME/$LIVE/
   docker exec omb supervisorctl -c /etc/omb-supervisord.conf restart omb-server >/dev/null
   for i in \$(seq 1 30); do
-    [ \"\$(docker exec omb curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8799/api/bots?messages=0)\" = 200 ] && break
+    [ "\$(docker exec omb curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8799/api/bots?messages=0)" = 200 ] && break
     sleep 1
   done
-  [ \"\$(docker exec omb curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8799/api/bots?messages=0)\" = 200 ] || { echo 'not healthy after 30s' >&2; exit 1; }"
+  [ "\$(docker exec omb curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8799/api/bots?messages=0)" = 200 ] || { echo 'not healthy after 30s' >&2; exit 1; }
+echo DEPLOY_OK
+REMOTE
+ssh "$HOST" "nohup bash \$HOME/omb-fork/deploy-$stamp.sh > \$HOME/$log 2>&1 &"
+until [ "$(ssh -o ConnectTimeout=10 "$HOST" "pgrep -f deploy-$stamp.sh >/dev/null && echo running || echo done" 2>/dev/null)" = done ]; do sleep 10; done
+ssh "$HOST" "cat \$HOME/$log"
+ssh "$HOST" "grep -q DEPLOY_OK \$HOME/$log" || { echo "rollout failed; see ~/$log on $HOST" >&2; exit 1; }
 echo "live: $commit (backup ~/$LIVE.bak-$stamp)"
 echo "rollback: ssh $HOST 'rsync -a --delete ~/$LIVE.bak-$stamp/ ~/$LIVE/ && docker exec omb supervisorctl -c /etc/omb-supervisord.conf restart omb-server'"
