@@ -19,12 +19,21 @@ export interface McpPeople {
 export interface StoredStdioMcpServer extends StdioMcpSpec, McpPeople {
   enabled: boolean;
 }
+/** An app registered in advance with the server's authorization server,
+ * for servers that do not let apps register themselves. The secret is a
+ * credential like a header value: kept in config.json, never listed. */
+export interface McpOAuthClientConfig {
+  clientId: string;
+  clientSecret?: string;
+  scopes?: string[];
+}
 export interface StoredRemoteMcpServer extends RemoteMcpSpec, McpPeople {
   enabled: boolean;
   /** A memory service's recall address: before each turn of a bot that has
    * this server, the harness asks it for facts that fit the message, with
    * the same headers (see mcpRecallSources in config.ts). */
   recall?: string;
+  oauth?: McpOAuthClientConfig;
 }
 export type StoredMcpServer = StoredStdioMcpServer | StoredRemoteMcpServer;
 
@@ -49,6 +58,8 @@ export interface RemoteMcpServerListing extends McpPeopleListing {
   headerKeys: string[];
   recall?: string;
   enabled: boolean;
+  /** present when a pre-registered sign-in app is set */
+  oauth?: { clientId: string; scopes: string[]; clientSecretConfigured: boolean };
 }
 export type McpServerListing = StdioMcpServerListing | RemoteMcpServerListing;
 
@@ -139,11 +150,25 @@ const stdioMutationSchema = stdioEntrySchema.extend({
   people: peopleMutationSchema.optional(),
 });
 
+/** RFC 6749 §A: a client id is visible ASCII; a scope is one token without
+ * spaces, quotes or backslashes. */
+const CLIENT_ID = /^[\x20-\x7e]+$/;
+const SCOPE = /^[\x21\x23-\x5b\x5d-\x7e]+$/;
+const CLIENT_SECRET_MAX = 4_096;
+
+const oauthClientSchema = z.object({
+  clientId: z.string().trim().min(1, "Enter the client ID of the app registered with this server's sign-in provider.").max(512)
+    .regex(CLIENT_ID, "A client ID is printable text on one line."),
+  clientSecret: z.string().min(1).max(CLIENT_SECRET_MAX).regex(CLIENT_ID, "A client secret is printable text on one line.").optional(),
+  scopes: z.array(z.string().max(256).regex(SCOPE, "Scopes are single words, like offline_access or api://my-app/mcp.read.")).max(32).optional(),
+}).strict();
+
 const remoteEntrySchema = z.object({
   /** Streamable HTTP unless the entry says the older SSE transport. */
   type: z.enum(["http", "sse"]).optional(),
   url: z.string().trim().min(1).max(2_048),
   headers: z.record(z.string(), secretValue).optional(),
+  oauth: oauthClientSchema.optional(),
   enabled: z.boolean().optional(),
   people: peopleSchema.optional(),
   peopleOnly: z.boolean().optional(),
@@ -154,6 +179,9 @@ const remoteEntrySchema = z.object({
 const remoteMutationSchema = remoteEntrySchema.extend({
   headers: z.record(z.string(), keptSecret).optional(),
   people: peopleMutationSchema.optional(),
+  oauth: oauthClientSchema.extend({
+    clientSecret: z.union([z.string().min(1).max(CLIENT_SECRET_MAX).regex(CLIENT_ID, "A client secret is printable text on one line."), z.literal(true)]).optional(),
+  }).optional(),
 });
 
 const EMAIL = /^[^\s@]+@[^\s@]+$/;
@@ -193,6 +221,29 @@ function peopleFields(
   const self = flags.selfService ?? (mutation ? existing?.selfService : undefined);
   if (only && self) return { ok: false, error: "A people-only server cannot be self-service." };
   return { ok: true, fields: { ...(people ? { people } : {}), ...(only ? { peopleOnly: true } : {}), ...(self ? { selfService: true } : {}) } };
+}
+
+/** The sign-in app for a mutation: a `true` secret keeps the saved one, but
+ * only for the same client ID — a secret never moves to another app. */
+function resolveOAuthClient(
+  incoming: z.infer<typeof remoteMutationSchema>["oauth"],
+  saved: McpOAuthClientConfig | undefined,
+): { ok: true; value: McpOAuthClientConfig | undefined } | { ok: false; error: string } {
+  if (!incoming) return { ok: true, value: undefined };
+  let clientSecret: string | undefined;
+  if (incoming.clientSecret === true) {
+    if (!saved?.clientSecret || saved.clientId !== incoming.clientId) {
+      return { ok: false, error: "No client secret is saved for this client ID. Enter it again, or leave it out for an app without one." };
+    }
+    clientSecret = saved.clientSecret;
+  } else {
+    clientSecret = incoming.clientSecret;
+  }
+  const scopes = [...new Set(incoming.scopes ?? [])];
+  return {
+    ok: true,
+    value: { clientId: incoming.clientId, ...(clientSecret ? { clientSecret } : {}), ...(scopes.length ? { scopes } : {}) },
+  };
 }
 
 /** Which shape an entry means to be. `url` decides, as it does for every
@@ -289,12 +340,15 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
   if (!people.ok) return people;
   const flags = peopleFields(people.people, parsed.data, mutation, existing);
   if (!flags.ok) return flags;
+  const oauth = resolveOAuthClient(parsed.data.oauth, existing && isRemoteMcpServer(existing) ? existing.oauth : undefined);
+  if (!oauth.ok) return oauth;
   return {
     ok: true,
     server: {
       type: parsed.data.type ?? "http",
       url: parsed.data.url,
       headers: headers.values,
+      ...(oauth.value ? { oauth: oauth.value } : {}),
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
       ...(recall ? { recall } : {}),
       ...flags.fields,
@@ -347,6 +401,9 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
         enabled: server.enabled,
         ...(server.recall ? { recall: server.recall } : {}),
         ...people,
+        ...(server.oauth ? {
+          oauth: { clientId: server.oauth.clientId, scopes: server.oauth.scopes ?? [], clientSecretConfigured: Boolean(server.oauth.clientSecret) },
+        } : {}),
       }];
     }
     return [{

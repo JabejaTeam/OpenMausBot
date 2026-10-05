@@ -331,8 +331,8 @@ export interface VerificationServer {
 
 /** The environment of a verification server child: a temporary home in
  * `dataDir`, the fake engine's knobs from `parentEnv`, node on PATH, and
- * nothing else from the parent shell. A test that restarts its own fixture
- * server on the same data uses this too. */
+ * nothing else from the parent shell or this machine's installed CLIs. A
+ * test that restarts its own fixture server on the same data uses this too. */
 export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, dataDir: string, port: number): NodeJS.ProcessEnv {
   const childEnv: NodeJS.ProcessEnv = {};
   const platformKeys = new Set(["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ"]);
@@ -366,6 +366,11 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     // fake CLI's `#!/usr/bin/env node` shebang. Windows resolves that same
     // fixture through spawnCli without a shell.
     PATH: dirname(process.execPath),
+    // ...and keep engine discovery to that PATH and this home. Without it the
+    // server also scans /opt/homebrew/bin, /usr/local/bin and the login
+    // shell's PATH, so a developer's own `codex` (or any engine CLI) becomes
+    // an "available" engine that CI never has (#2035).
+    OMB_TEST_SEALED_PATH: "1",
   });
   // The fake engine's own knobs (mode, replies, tool calls) are the one thing
   // a caller may script into the child: FAKE_CLAUDE_* crosses, nothing else.
@@ -376,10 +381,23 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   // A test's key for relaying an organization library into the fixture
   // (POST /api/testing/org-library); the route does not exist without it.
   if (parentEnv.OMB_TEST_ORG_LIBRARY_KEY) childEnv.OMB_TEST_ORG_LIBRARY_KEY = parentEnv.OMB_TEST_ORG_LIBRARY_KEY;
+  // Live calls against server/testing/fake-openai-live.ts only: a loopback
+  // URL, and a key that only ever reaches that fake.
+  const liveUrl = parentEnv.OMB_OPENAI_LIVE_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(liveUrl)) {
+    childEnv.OMB_OPENAI_LIVE_URL = liveUrl;
+    if (parentEnv.OMB_OPENAI_LIVE_KEY) childEnv.OMB_OPENAI_LIVE_KEY = parentEnv.OMB_OPENAI_LIVE_KEY;
+  }
   // Voice-note e2e fault injection: arms the one-shot audio-append failure
   // prelude inside the fixture server (see fail-audio-append-once.mjs).
   if (parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE) {
     childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE = parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE;
+  }
+  // Desktop mode: the server runs as the desktop app runs it, and the owner
+  // capability the app would hand it is this one (see desktop-parent.mjs).
+  if (parentEnv.OMB_TEST_DESKTOP_OWNER_TOKEN) {
+    childEnv.OMB_TEST_DESKTOP_OWNER_TOKEN = parentEnv.OMB_TEST_DESKTOP_OWNER_TOKEN;
+    childEnv.OMB_DESKTOP_PARENT = "1";
   }
   return childEnv;
 }
@@ -461,6 +479,9 @@ export async function launchVerificationServer(
   const serverArgs = ["--experimental-strip-types"];
   if (childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE === "1") {
     serverArgs.push("--import", pathToFileURL(join(ROOT, "server", "testing", "fail-audio-append-once.mjs")).href);
+  }
+  if (childEnv.OMB_TEST_DESKTOP_OWNER_TOKEN) {
+    serverArgs.push("--import", pathToFileURL(join(ROOT, "server", "testing", "desktop-parent.mjs")).href);
   }
   serverArgs.push(join(ROOT, "server", "index.ts"));
   const child = spawn(process.execPath, serverArgs, {

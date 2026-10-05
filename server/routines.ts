@@ -289,7 +289,8 @@ export interface RoutineManagerOptions {
   emit?: (payload: Record<string, unknown>) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
   goalState?: (groupId: string, coordinatorBotId: string) => "ready" | "busy" | "missing";
-  createTask: (botId: string, title: string, activate?: boolean) => { threadId: string } | null;
+  /** A task for one run of `routineId` (it may name who the run is for). */
+  createTask: (botId: string, title: string, activate?: boolean, routineId?: string) => { threadId: string } | null;
   /** When set, run this bot's routine in that existing conversation instead of
    * a new hidden task. Room goals never use it. */
   joinConversation?: (run: RoutineRun) => string | null;
@@ -1620,14 +1621,17 @@ export class RoutineManager {
         // A webhook is an incoming message, so make its task the bot's live
         // chat immediately. Scheduled work stays in its own task unless the
         // workspace has asked for runs to join the conversation they report to.
+        const startedAt = this.now();
+        const suffix = ` · ${new Date(startedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+        const title = `${run.routineName.slice(0, 80 - suffix.length).trimEnd()}${suffix}`;
         const joined = run.target === "room-goal" ? null : this.options.joinConversation?.(run) || null;
         const task = joined
           ? { threadId: joined }
           : run.target === "room-goal"
           ? run.groupId
-            ? this.options.createGoalTask?.(run.groupId, run.routineName) ?? null
+            ? this.options.createGoalTask?.(run.groupId, title) ?? null
             : null
-          : this.options.createTask(run.botId, run.routineName, run.triggerSource === "webhook");
+          : this.options.createTask(run.botId, title, run.triggerSource === "webhook", run.routineId);
         if (!task) {
           this.failRun(run, run.target === "room-goal"
             ? "Could not create a room task for this goal"
@@ -1635,7 +1639,7 @@ export class RoutineManager {
           continue;
         }
         run.threadId = task.threadId;
-        run.startedAt = this.now();
+        run.startedAt = startedAt;
         run.status = "running";
         this.save();
         this.emitRun(run);
@@ -1719,7 +1723,14 @@ export class RoutineManager {
       if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
       if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
       if (!event.ok) {
-        this.failRun(run, event.stopReason ?? run.error ?? "The bot did not complete this run");
+        const genericStopReason = event.stopReason === "error" || event.stopReason === "tool_error";
+        this.failRun(
+          run,
+          (genericStopReason ? run.error : undefined) ??
+            event.stopReason ??
+            run.error ??
+            "The bot did not complete this run",
+        );
         queueMicrotask(() => void this.tick());
         return cloneRun(run);
       }

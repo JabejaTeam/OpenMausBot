@@ -1,4 +1,5 @@
 import { Component, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import {
   AlertTriangle,
   ArrowDown,
@@ -8,9 +9,13 @@ import {
   Bug,
   Copy,
   Crown,
+  Download,
+  Gauge,
+  ListChecks,
   MessageSquareReply,
   Reply,
   Monitor,
+  MoreHorizontal,
   Pencil,
   Pin,
   PinOff,
@@ -26,7 +31,6 @@ import { useSpeech } from "@/lib/tts/useSpeech";
 import { useCaptionChrome, useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { contextChip, contextDetail, contextShare, costCaption, formatUsd, hasFiniteCost, lastTurnDetail, usageChip, usageDetail } from "@/lib/usage";
 import {
-  openThread,
   api,
   currentTaskBot,
   useStore,
@@ -34,12 +38,16 @@ import {
   formatTime,
   messageVersions,
   openNotificationTarget,
+  openThread,
   visibleMessages,
   type Bot,
   type InstanceInfo,
   type Message,
+  type AppState,
 } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
+import { CHATGPT_USAGE_URL } from "./ChatGptPlanStatus";
+import { openExternalLink } from "@/lib/app-links";
 import { ClaudeUpdatePrompt } from "./ClaudeUpdatePrompt";
 import { MacCuaRecoveryActions } from "./MacCuaRecoveryActions";
 import { macCuaPermissionMessage, missingMacCuaPermissions } from "@/lib/mac-cua-permissions";
@@ -59,6 +67,7 @@ import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { ThreadChip } from "./ThreadChip";
 import { VerifyCard } from "./VerifyCard";
 import { askText, runSteps, runSummary, showRun, skillPrompt, skillStaged } from "@/lib/verify-steps";
+import { useShowRunCard } from "@/lib/run-card-preferences";
 import { ToolActivity } from "./ToolActivity";
 import { ThreadRefText } from "./ThreadRefs";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
@@ -78,24 +87,36 @@ import { AttachmentGallery, collectMessageFiles, splitMessageAttachments } from 
 import { ScreenFrame } from "./ScreenFrame";
 import { CompactionChip, DigestChip } from "./DigestChip";
 import { RenameTitle } from "./RenameTitle";
-import { BotActivityPicker, TaskPicker } from "./TaskPicker";
+import { BotActivityPicker } from "./TaskPicker";
 import { ModelPicker } from "./ModelPicker";
-import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
+import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
+import { ShortcutHint } from "./ShortcutHint";
+import {
+  copyTranscriptToClipboard,
+  downloadMarkdownTranscript,
+  formatTranscriptMarkdown,
+  slugifyTranscriptFilename,
+} from "@/lib/export-transcript";
+import { CitationSelectionToolbar, SentCitations } from "./CitationUI";
 
 import { SpeakButton } from "./SpeakButton";
-import { CallButton, CallOverlay } from "./CallView";
+import { CallOverlay } from "./CallView";
+import { LiveCallBar } from "./LiveCallBar";
+import { LiveCallChip } from "./LiveCallPill";
 import { effectivePlace, toolPlace, type EffectivePlace } from "@/lib/place";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { useFocusMessage } from "@/lib/focus-message";
-import { groupTranscript, isRecoveryActivity } from "@/lib/activity-runs";
+import { groupTranscript, isStatusActivity } from "@/lib/activity-runs";
+import { StatusActivityRow } from "@/components/StatusActivityRow";
 import { ActivityRun } from "./ActivityRun";
 import { TurnNarrationRun } from "./TurnNarrationRun";
 import { webhookMessageView } from "@/lib/webhook-message";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow, useBottomFollowResize } from "@/lib/bottom-follow";
 import { useComposerDockPad } from "@/lib/composer-dock";
+import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import {
   TRANSCRIPT_WINDOW_SIZE,
   expandWindowStart,
@@ -103,7 +124,10 @@ import {
   resolveTranscriptWindow,
   tailWindowStart,
 } from "@/lib/transcript-window";
-import { appendComposerDraft, useReplyDraft } from "@/lib/drafts";
+import { appendComposerDraft, appendDraftAttachments, useReplyDraft } from "@/lib/drafts";
+import { citationPreviewText, splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
+import { highlightCitationSource } from "@/lib/citations-dom";
+import { useCanWriteIn } from "@/lib/cloud-guest";
 import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
@@ -197,7 +221,11 @@ export function ErrorRow({
         {macCuaReason && <details className="mt-2 text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("computer.mac.permission.driverDetail")}</summary><p className="mt-1 break-words">{message}</p></details>}
         {macCuaReason &&
           <MacCuaRecoveryActions reason={message} />}
-        {claudeUpdateInstance ? (
+        {message.includes("subscription_sharing_usage_limit_exceeded") ? (
+          <a href={CHATGPT_USAGE_URL} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-app" onClick={(event) => {
+            if (window.ogb?.openExternal) { event.preventDefault(); void openExternalLink(CHATGPT_USAGE_URL); }
+          }}>{t("engineSetup.chatgpt.manageUsage")}</a>
+        ) : claudeUpdateInstance ? (
           <ClaudeUpdatePrompt instance={claudeUpdateInstance} onRetry={onRetry} />
         ) : isProviderSafetyBlock(message) ? (
           <p className="mt-2 text-[12.5px] leading-relaxed text-ink-secondary">
@@ -347,6 +375,7 @@ function Bubble({
   const senderName = otherSenderName(message);
   const mentionPeers = useMemo(() => state.bots.filter((peer) => peer.id !== bot.id), [state.bots, bot.id]);
   const [expanded, setExpanded] = useState(false);
+  const focusedSearch = state.focusMessage?.threadId === bot.threadId && state.focusMessage.messageId === message.id && Boolean(state.focusMessage.matchText);
   const [viewRaw, setViewRaw] = useState(false);
   const speech = useSpeech();
   const speaking = speech.messageId === message.id && speech.status !== "idle";
@@ -362,14 +391,18 @@ function Bubble({
     [message.attachments],
   );
   const webhookView = user ? webhookMessageView(text) : null;
-  const attachments = user && !webhookView ? splitTranscriptAttachments(text) : null;
+  const cited = user && !webhookView ? splitTranscriptCitations(text) : null;
+  const attachments = user && !webhookView ? splitTranscriptAttachments(cited?.display ?? text) : null;
   const visibleText = webhookView?.task ?? attachments?.display ?? text;
-  const hasAttachments = Boolean(attachments && (attachments.images.length || attachments.files.length));
+  const hasAttachments = Boolean(cited?.citations.length || (attachments && (attachments.images.length || attachments.files.length)));
   // A message that is only attachments is just the files: no bubble around them.
   const attachmentsOnly = !webhookView && !replyTarget && !visibleText.trim() &&
     (user ? hasAttachments : generatedPaths.length + linkedFiles.length > 0);
   const collapsible =
     user && !webhookView && !expanded && (visibleText.length > USER_COLLAPSE_CHARS || visibleText.split("\n").length > USER_COLLAPSE_LINES);
+  useEffect(() => {
+    if (focusedSearch && collapsible) setExpanded(true);
+  }, [focusedSearch, collapsible, state.focusMessage?.nonce]);
 
   if (user && editing && !webhookView && !hasAttachments) {
     return (
@@ -435,6 +468,7 @@ function Bubble({
           </MessageActions>
         )}
         <div
+          data-chat-bubble
           className={cn(
             "w-fit max-w-[min(42rem,78%)] rounded-2xl text-[15px] leading-snug",
             emerging && "turn-answer",
@@ -480,14 +514,31 @@ function Bubble({
               {visibleText && (
                 <div
                   className={cn("chat-text", collapsible && "max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}
+                  data-citation-source={message.id}
+                  data-citation-owner-type="bot"
+                  data-citation-owner={bot.id}
+                  data-citation-thread={bot.threadId}
                 >
                   <ThreadRefText text={visibleText} peers={mentionPeers} />
                 </div>
               )}
+              {cited && <SentCitations
+                citations={cited.citations}
+                onNavigate={async (citation: CitationAttachment) => {
+                  if (citation.source.ownerType !== "bot" || !visibleMessages(bot).some((candidate) => candidate.id === citation.source.messageId)) return false;
+                  dispatch({ type: "focusMessage", threadId: bot.threadId, messageId: citation.source.messageId });
+                  return highlightCitationSource(citation);
+                }}
+              />}
               {message.steered && (
                 <div className="mt-1 text-[11px] text-ink-tertiary" title={t("chat.sentMidTurnHint")}>
                   {t("chat.sentMidTurn")}
                 </div>
+              )}
+              {message.via === "call" && (
+                <span className="mt-1 text-[11px] text-ink-tertiary" title={t("chat.viaCall")}>
+                  {t("chat.viaCall")}
+                </span>
               )}
               {collapsible && (
                 <button onClick={() => setExpanded(true)} className="mt-1 text-[12.5px] text-ink-secondary hover:text-ink">
@@ -511,9 +562,9 @@ function Bubble({
               )}
               <AttachmentGallery images={generatedPaths} files={linkedFiles} message={{ threadId: bot.threadId, messageId: message.id }} className={text ? undefined : "mb-0"} eager={eagerAttachments} />
               {viewRaw && text ? (
-                <RawMarkdownView text={text} />
+                <div data-citation-source={message.id} data-citation-owner-type="bot" data-citation-owner={bot.id} data-citation-thread={bot.threadId}><RawMarkdownView text={text} /></div>
               ) : text ? (
-                <ChatMarkdown text={text} mentionPeers={mentionPeers} message={{ threadId: bot.threadId, messageId: message.id }} />
+                <div data-citation-source={message.id} data-citation-owner-type="bot" data-citation-owner={bot.id} data-citation-thread={bot.threadId}><ChatMarkdown text={text} mentionPeers={mentionPeers} message={{ threadId: bot.threadId, messageId: message.id }} /></div>
               ) : null}
             </MessageBoundary>
           )}
@@ -936,14 +987,7 @@ const MessagesList = memo(function MessagesList({
               );
             }
             case "activity": {
-              if (isRecoveryActivity(m)) {
-                return (
-                  <div role="status" className="flex w-fit max-w-full items-start gap-2 rounded-xl border border-hairline/40 bg-panel px-3 py-2 text-[13px] text-ink-secondary">
-                    <RefreshCw size={13} aria-hidden="true" className="mt-0.5 shrink-0" />
-                    <span className="min-w-0 break-words">{m.tool?.name.slice(9).trim()}</span>
-                  </div>
-                );
-              }
+              if (isStatusActivity(m)) return <StatusActivityRow message={m} />;
               // a failed turn is an error, not a tool run — render it as one.
               // bot⇄bot comm chips and opened-thread chips stay because they
               // link to another conversation.
@@ -1022,7 +1066,7 @@ function PinnedBanner({
   const pinnedPeer = peerLine(pinned);
   const sender =
     pinned.role === "user" ? (pinnedPeer?.name ?? otherSenderName(pinned) ?? t("chat.you")) : (pinned.from?.name ?? bot.name);
-  const text = (pinnedPeer?.body ?? pinned.text ?? "").replace(/\s+/g, " ").trim();
+  const text = citationPreviewText(pinnedPeer?.body ?? pinned.text ?? "").replace(/\s+/g, " ").trim();
   if (!text) return null;
   return (
     <div className="w-full px-5">
@@ -1054,6 +1098,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const simpleUi = useSimpleUi();
   const remoteClient = window.ogb?.remoteClient?.active === true;
+  // Simple mode reaches other threads from the sidebar; the header picker is Advanced only.
   // Windows has no native caption buttons (renderer-drawn, see
   // WindowCaptionButtons); this header is the window drag region, and the
   // icon row shifts below the 26px-tall corner the buttons occupy.
@@ -1062,6 +1107,8 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
+  // A guest on an OMB Cloud home writes only in conversations it opened.
+  const canWrite = useCanWriteIn(bot.threadId);
 
   const stream = useStreaming();
   const streaming = stream.streaming[bot.threadId];
@@ -1104,6 +1151,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   // and stays away across a switch to another thread and back.
   const [runDismissed, setRunDismissed] = useState<ReadonlyMap<string, string>>(() => new Map());
   const lastRunStep = recordedRun.at(-1);
+  const showRunCard = useShowRunCard();
 
   // Windowed transcript: only a tail of the thread mounts (screenshots make
   // full threads DOM-heavy). The boundary is anchored per bot+task; a
@@ -1159,8 +1207,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   );
   const lastUserMessageHasAttachments = useMemo(() => {
     if (!lastUserMessage?.text) return false;
-    const attached = splitTranscriptAttachments(lastUserMessage.text);
-    return attached.images.length > 0 || attached.files.length > 0;
+    const cited = splitTranscriptCitations(lastUserMessage.text);
+    const attached = splitTranscriptAttachments(cited.display);
+    return cited.citations.length > 0 || attached.images.length > 0 || attached.files.length > 0;
   }, [lastUserMessage]);
 
   // Mascot while the turn works. Streaming stays invisible — when the reply
@@ -1374,8 +1423,15 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   return (
     <ChatHomeTeam.Provider value={bot.section?.trim() || undefined}>
     <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
-      {/* Call mode covers the thread while the bot is on the line */}
+      {/* A take-turns call covers the thread while the bot is on the line */}
       <CallOverlay bot={bot} />
+      {/* The transcript scrolls on under the header (and the banners that
+          hang from it), which is liquid glass tinted with the chat's own
+          background, and under the composer, which already floats. */}
+      <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
+      {/* Above anything raised inside the transcript (the room set-up card
+          is z-20 so its menus clear the composer), below the CallOverlay (z-30). */}
+      <GlassBar edge="top" className="z-[25]">
       {/* Header */}
       {simpleUi ? <SimpleChatHeader bot={bot} dragStyle={headerDragStyle} noDragStyle={headerNoDragStyle} /> : <div
         style={headerDragStyle}
@@ -1444,23 +1500,6 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           // buttons clear the 26px overlay while the rest of the layout stays.
           style={controlsShiftStyle}
         >
-          <button
-            onClick={() => setFindOpen((open) => !open)}
-            aria-label={t("chat.find")}
-            aria-pressed={findOpen}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
-            title={t("chat.findShortcut")}
-          >
-            <Search size={18} />
-          </button>
-          <ExportTranscriptMenu
-            title={bot.name}
-            messages={messages}
-            botName={bot.name}
-          />
           {(bot.busy || bot.waitingForTeammates) && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id, threadId: bot.threadId })}
@@ -1474,10 +1513,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               <span className="@max-4xl/chathead:hidden">{t("chat.stop")}</span>
             </button>
           )}
-          <TaskPicker bot={bot} />
-          <UsageChip bot={bot} />
           {!remoteClient && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} />}
-          <CallButton bot={bot} />
+          {/* below md the sidebar (and its Live call pill) is hidden */}
+          <LiveCallChip currentBotId={bot.id} onOpen={(botId, threadId) => openThread(dispatch, { botId, threadId }, state)} />
           <button
             data-tour="computer"
             onClick={() => dispatch({ type: "toggleComputer" })}
@@ -1489,18 +1527,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           >
             <Monitor size={18} />
           </button>
-          {!remoteClient && <button
-            onClick={() => dispatch({ type: "toggleInspector" })}
-            aria-label={t("chat.inspector")}
-            aria-pressed={state.inspectorOpen}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              state.inspectorOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
-            title={t("chat.inspectorHint")}
-          >
-            <Bug size={18} />
-          </button>}
+          {/* Keep threads reachable even when the sidebar is collapsed.
+              Less frequent actions share one menu. */}
+          <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} messages={messages} findOpen={findOpen} onFind={() => setFindOpen((open) => !open)} />
         </div>
         </div>
       </div>}
@@ -1543,12 +1572,13 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       />
 
 
+      </GlassBar>
+
       {/* Messages + composer share one pane so bubbles scroll into the pill
           instead of dying on a rectangular clip above a black dock. */}
-      <div className="relative min-h-0 flex-1">
       <div
         ref={scrollRef}
-        className="h-full overflow-x-hidden overflow-y-auto overscroll-y-contain px-5 [overflow-anchor:none]"
+        className="glass-scroller h-full overflow-x-hidden overflow-y-auto overscroll-y-contain px-5 [overflow-anchor:none]"
         onPointerDown={(e) => {
           // grabbing the scrollbar is a scroll gesture too — the lane lives
           // past the content box (clientWidth excludes it)
@@ -1581,7 +1611,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       >
         <div
           ref={transcriptRef}
-          className="flex w-full flex-col gap-3"
+          className="glass-scroller-content flex w-full flex-col gap-3"
           style={{ paddingBottom: composerDock.pad }}
           role="log"
           // off: a polite log re-reads every tick and chip while the bot
@@ -1692,7 +1722,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           here. In the dock so its height is measured with the composer's:
           the transcript pad, the jump pill and bottom-follow all move with
           it. */}
-      {!simpleUi && lastRunStep && showRun(recordedRun) && runDismissed.get(transcriptKey) !== lastRunStep.id && (
+      {!simpleUi && lastRunStep && showRun(recordedRun) && showRunCard && runDismissed.get(transcriptKey) !== lastRunStep.id && (
         <div className="flex justify-end px-5 pb-2">
           <VerifyCard
             key={transcriptKey}
@@ -1708,6 +1738,13 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         </div>
       )}
       <SubThreadsBar bot={bot} messages={messages} onJump={releaseFollow} />
+      {/* A Live call on this chat: its controls and captions sit above the
+          composer so the transcript stays in view. In the dock, so the
+          transcript pad grows with it. */}
+      <LiveCallBar bot={bot} />
+      {canWrite === false ? (
+        <NewConversationInstead onNew={() => dispatch({ type: "newTask", botId: bot.id })} />
+      ) : (
       <Composer
         key={bot.threadId}
         bot={profile}
@@ -1719,22 +1756,43 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           ? () => setEditingId(lastUserMessage.id)
           : undefined}
       />
+      )}
+      {canWrite !== false && (
+      <CitationSelectionToolbar
+        key={`${bot.id}:${bot.threadId}`}
+        viewportRef={scrollRef}
+        onAdd={(citation) => appendDraftAttachments(`bot:${citation.source.ownerId}:${citation.source.threadId}`, [citation])}
+      />
+      )}
       </div>
-      </div>
+      </GlassScrollFrame>
 
     </main>
     </ChatHomeTeam.Provider>
   );
 }
 
-/** What the open task has spent — quiet until the first turn settles.
- * Click opens the bot's settings, where the Usage card has the breakdown. */
-function UsageChip({ bot }: { bot: Bot }) {
-  const { state, dispatch } = useStore();
+/** In place of the composer, for a guest on an OMB Cloud home in a
+ * conversation it did not open: it can only start its own. One click, no
+ * dialog. */
+export function NewConversationInstead({ onNew }: { onNew: () => void }) {
+  return (
+    <div className="pointer-events-auto mx-5 mb-4 flex items-center justify-between gap-3 rounded-2xl border border-hairline/60 bg-raised px-4 py-3" data-testid="cloud-guest-composer">
+      <p className="text-[13px] text-ink-secondary">{t("chat.cloudGuest.notYours")}</p>
+      <button type="button" onClick={onNew} className="shrink-0 rounded-full bg-accent px-3 py-1 text-[13px] font-medium text-white">
+        {t("chat.cloudGuest.newConversation")}
+      </button>
+    </div>
+  );
+}
+
+/** The thread's usage, folded to one figure for the header menu — cost when
+ * the engine reports one, else new tokens — with the full breakdown as the
+ * tooltip. Null while the thread has no usage yet. */
+function usageSummary(bot: Bot, instances: AppState["instances"]): { short: string; detail: string; tone?: "danger" | "warning" } | null {
   const usage = bot.tasks?.find((t) => t.threadId === bot.threadId)?.usage;
-  const text = usage ? usageChip(usage) : "";
-  if (!usage || !text) return null;
-  const billing = state.instances.find((i) => i.instanceId === bot.modelSelection.instanceId)?.snapshot.billing;
+  if (!usage || !usageChip(usage)) return null;
+  const billing = instances.find((i) => i.instanceId === bot.modelSelection.instanceId)?.snapshot.billing;
   const share = contextShare(usage);
   const detail = [
     usage.turns === 1 ? t("chat.usage.turnsOne") : t("chat.usage.turnsMany", { count: usage.turns }),
@@ -1750,18 +1808,102 @@ function UsageChip({ bot }: { bot: Bot }) {
     .filter(Boolean)
     .join("\n");
   // Keep the unit visible in the compact header too.
-  const short = text;
+  const short = usageChip(usage);
   const ctx = contextChip(usage);
+  return { short: ctx ? `${short} · ${ctx}` : short, detail, tone: share?.tone === "danger" ? "danger" : share?.tone === "warning" ? "warning" : undefined };
+}
+
+/** The header's "more" menu: find, export, usage and the inspector, behind
+ * one button that opens on hover. */
+function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
+  bot: Bot;
+  messages: readonly Message[];
+  findOpen: boolean;
+  onFind: () => void;
+}) {
+  const { state, dispatch } = useStore();
+  const remoteClient = window.ogb?.remoteClient?.active === true;
+  const usage = usageSummary(bot, state.instances);
+  // Simple mode keeps these in sight but locked, so people know where they
+  // live without being handed builder tools by default.
+  const advanced = useAdvancedMode();
+  const advancedOnly = advanced ? undefined : t("chat.advancedOnly");
+  const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
+  const hasMessages = messages.length > 0;
+  const transcript = () => formatTranscriptMarkdown({ title: bot.name, messages, botName: bot.name, isGroup: false });
+  const items: SidebarMenuItem[] = [
+    {
+      key: "find",
+      label: t("chat.find"),
+      icon: <Search size={16} />,
+      active: findOpen,
+      trailing: <ShortcutHint id="find-conversation" />,
+      onSelect: onFind,
+    },
+    {
+      key: "copy",
+      heading: t("chat.export.heading"),
+      separatorBefore: true,
+      label: t("chat.export.copy"),
+      icon: <Copy size={16} />,
+      disabled: !hasMessages,
+      keepOpen: true,
+      trailing: copyStatus && <span role="status" className="text-[11px] text-ink-secondary">{t(copyStatus === "copied" ? "chat.export.copied" : "chat.export.copyFailed")}</span>,
+      onSelect: () => { void copyTranscriptToClipboard(transcript()).then((ok) => setCopyStatus(ok ? "copied" : "failed")); },
+    },
+    {
+      key: "download",
+      label: t("chat.export.download"),
+      icon: <Download size={16} />,
+      disabled: !hasMessages,
+      onSelect: () => downloadMarkdownTranscript(slugifyTranscriptFilename(bot.name), transcript()),
+    },
+    ...(usage ? [{
+      key: "usage",
+      label: t("chat.usage.menu"),
+      icon: <Gauge size={16} />,
+      separatorBefore: true,
+      heading: advancedOnly,
+      disabled: !advanced,
+      trailing: <span title={usage.detail} data-testid="usage-chip" className={cn("tabular-nums text-[12px]", usage.tone === "danger" ? "text-danger" : usage.tone === "warning" ? "text-warning" : "text-ink-secondary")}>{usage.short}</span>,
+      onSelect: () => dispatch({ type: "toggleSettings", open: true, section: "usage" }),
+    } satisfies SidebarMenuItem] : []),
+    ...(remoteClient ? [] : [{
+      key: "activity",
+      label: "Activity",
+      icon: <ListChecks size={16} />,
+      active: state.activityOpen,
+      separatorBefore: !usage,
+      onSelect: () => dispatch({ type: "toggleActivity" }),
+    } satisfies SidebarMenuItem, {
+      key: "inspector",
+      label: t("chat.inspector"),
+      icon: <Bug size={16} />,
+      active: advanced && state.inspectorOpen,
+      separatorBefore: true,
+      heading: usage ? undefined : advancedOnly,
+      disabled: !advanced,
+      onSelect: () => dispatch({ type: "toggleInspector" }),
+    } satisfies SidebarMenuItem]),
+  ];
   return (
-    <button
-      onClick={() => dispatch({ type: "toggleSettings", open: true, section: "usage" })}
-      className="whitespace-nowrap rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[12px] tabular-nums text-ink-secondary hover:bg-raised hover:text-ink @max-4xl/chathead:px-2"
-      title={detail}
-      data-testid="usage-chip"
-    >
-      <span className="@max-4xl/chathead:hidden">{text}</span>
-      <span className="hidden @max-4xl/chathead:inline">{short}</span>
-      {ctx && <span className={cn("ml-1.5 @max-4xl/chathead:hidden", share?.tone === "danger" ? "text-danger" : share?.tone === "warning" ? "text-warning" : "")} data-testid="usage-context">{ctx}</span>}
-    </button>
+    <SidebarPopoverMenu
+      items={items}
+      ariaLabel={t("chat.more")}
+      openOnHover
+      placement="below"
+      renderTrigger={({ open }) => (
+        <span
+          data-testid="chat-more"
+          className={cn(
+            "flex rounded-md p-1.5 hover:bg-raised",
+            open || findOpen || state.inspectorOpen || state.activityOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+          )}
+          title={t("chat.more")}
+        >
+          <MoreHorizontal size={18} />
+        </span>
+      )}
+    />
   );
 }

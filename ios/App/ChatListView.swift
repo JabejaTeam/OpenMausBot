@@ -11,6 +11,7 @@ import CompanionCore
 
 struct ChatListView: View {
     @EnvironmentObject private var session: Session
+    @EnvironmentObject private var liveCall: LiveCallController
     @State private var query = ""
     @AppStorage(PrefKey.activityDetail) private var activityDetail = ActivityDetail.full.rawValue
     @AppStorage(PrefKey.rosterDensity) private var rosterDensity = RosterDensity.default.rawValue
@@ -45,6 +46,11 @@ struct ChatListView: View {
             VStack(spacing: 0) {
                 header
                 StatusBanner()
+                LiveCallBanner { target in
+                    if let bot = session.state.bot(target.botId)?.projected(forThread: target.threadId) {
+                        path.append(Chat.bot(bot))
+                    }
+                }
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -84,7 +90,7 @@ struct ChatListView: View {
                                     .padding(.top, 24)
                             }
 
-                            botRows(chats)
+                            botRows(chats, waiting: waitingChats)
                         }
                     }
                     .padding(.top, Self.listTopInset)
@@ -116,7 +122,7 @@ struct ChatListView: View {
             .overlay(alignment: .top) {
                 if CompanionLayout.supportsIslandPresentation {
                     NeedsYouIsland(
-                        update: session.state.updates.first { $0.kind == .needsYou }
+                        update: session.state.updates(detail: activity).first { $0.kind == .needsYou }
                     ) { chat in path.append(chat) }
                 }
             }
@@ -272,6 +278,9 @@ struct ChatListView: View {
 
     @ViewBuilder
     private var rosterSections: some View {
+        let allSummaries = session.state.chatSummaries(activity: activity)
+        let waiting = waitingChats
+        let attention = self.attention
         if !attention.isEmpty {
             sectionLabel(Text("Needs attention"))
                 .padding(.top, 2)
@@ -290,20 +299,20 @@ struct ChatListView: View {
 
         if let chief = session.state.unsectionedChief {
             VStack(alignment: .leading, spacing: 0) {
-                botRows(summaries(for: [chief]))
+                botRows(summaries(for: [chief], from: allSummaries), waiting: waiting)
             }
             // In compact, a one-line row right under the attention rows
             // would read as one more of them: set it apart like a section.
             .padding(.top, density == .compact && !attention.isEmpty ? sectionSpacing : 0)
         }
 
-        let pinned = summaries(for: session.state.pinnedBots)
+        let pinned = summaries(for: session.state.pinnedBots, from: allSummaries)
         if !pinned.isEmpty {
             sectionLabel(Text("Pinned"))
                 // a compact row above it leaves little air of its own
                 .padding(.top, density == .compact ? sectionSpacing : 2)
                 .padding(.bottom, 4)
-            botRows(pinned)
+            botRows(pinned, waiting: waiting)
         }
 
         switch density {
@@ -329,12 +338,12 @@ struct ChatListView: View {
             }
         }
 
-        let unsectioned = summaries(for: session.state.unsectionedBots)
+        let unsectioned = summaries(for: session.state.unsectionedBots, from: allSummaries)
         if !unsectioned.isEmpty {
             sectionLabel(Text("Bots"))
                 .padding(.top, sectionSpacing)
                 .padding(.bottom, 4)
-            botRows(unsectioned)
+            botRows(unsectioned, waiting: waiting)
         }
 
         ForEach(session.state.sidebarSections) { section in
@@ -345,7 +354,7 @@ struct ChatListView: View {
                         .padding(.top, 18)
                         .padding(.bottom, section.chiefs.isEmpty && !section.channels.isEmpty ? 10 : 4)
                     if !section.chiefs.isEmpty {
-                        botRows(summaries(for: section.chiefs))
+                        botRows(summaries(for: section.chiefs, from: allSummaries), waiting: waiting)
                     }
                     if !section.channels.isEmpty {
                         channelTiles(section.channels, showsCreate: false)
@@ -357,11 +366,11 @@ struct ChatListView: View {
                         .padding(.top, sectionSpacing)
                         .padding(.bottom, 4)
                     if !section.chiefs.isEmpty {
-                        botRows(summaries(for: section.chiefs))
+                        botRows(summaries(for: section.chiefs, from: allSummaries), waiting: waiting)
                     }
                     compactRoomRows(section.channels)
                 }
-                botRows(summaries(for: section.bots))
+                botRows(summaries(for: section.bots, from: allSummaries), waiting: waiting)
             }
         }
     }
@@ -435,6 +444,7 @@ struct ChatListView: View {
                         GroupTile(room: room)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("chat-row.\(room.id)")
                 }
                 if showsCreate {
                     Button {
@@ -452,18 +462,17 @@ struct ChatListView: View {
     }
 
     @ViewBuilder
-    private func botRows(_ rows: [ChatSummary]) -> some View {
+    private func botRows(_ rows: [ChatSummary], waiting: Set<String>) -> some View {
         switch density {
-        case .comfortable: comfortableRows(rows)
-        case .compact: compactRows(rows)
+        case .comfortable: comfortableRows(rows, waiting: waiting)
+        case .compact: compactRows(rows, waiting: waiting)
         }
     }
 
     /// One line per bot, its threads beneath it once opened. Search results
     /// can include groups, which get their own one-line row.
-    private func compactRows(_ rows: [ChatSummary]) -> some View {
-        let waiting = waitingChats
-        return ForEach(rows) { summary in
+    private func compactRows(_ rows: [ChatSummary], waiting: Set<String>) -> some View {
+        ForEach(rows) { summary in
             switch summary.chat {
             case let .bot(bot):
                 CompactBotEntry(
@@ -511,7 +520,7 @@ struct ChatListView: View {
     }
 
     @ViewBuilder
-    private func comfortableRows(_ rows: [ChatSummary]) -> some View {
+    private func comfortableRows(_ rows: [ChatSummary], waiting: Set<String>) -> some View {
         ForEach(Array(rows.enumerated()), id: \.element.id) { index, summary in
             VStack(spacing: 0) {
                 Button {
@@ -522,7 +531,7 @@ struct ChatListView: View {
                         preview: summary.preview,
                         at: summary.lastActivity,
                         state: MausState.forChat(summary.chat, in: session.state),
-                        waiting: waitingChats.contains(summary.chat.id),
+                        waiting: waiting.contains(summary.chat.id),
                         last: index == rows.count - 1
                     )
                 }
@@ -636,7 +645,7 @@ struct ChatListView: View {
     }
 
     private var updatesButton: some View {
-        UpdatesPill(updates: session.state.updates) {
+        UpdatesPill(updates: session.state.updates(detail: activity)) {
             Haptics.selection()
             showingUpdates = true
         }
@@ -659,6 +668,7 @@ struct ChatListView: View {
             showingWalkie = true
         }
         .accessibilityLabel("Walkie")
+        .disabled(liveCall.machine.isActive)
     }
 
     private var sectionButton: some View {
@@ -723,9 +733,9 @@ struct ChatListView: View {
         path.append(Chat.bot(bot))
     }
 
-    private func summaries(for bots: [Bot]) -> [ChatSummary] {
+    private func summaries(for bots: [Bot], from all: [ChatSummary]) -> [ChatSummary] {
         let ids = Set(bots.map(\.id))
-        return session.state.chatSummaries(activity: activity).filter { summary in
+        return all.filter { summary in
             if case let .bot(bot) = summary.chat { return ids.contains(bot.id) }
             return false
         }

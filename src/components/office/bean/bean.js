@@ -329,7 +329,8 @@ export function buildCap(fabric, accent) {
   const star = new THREE.Shape();
   for (let i = 0; i < 10; i++) {
     const r = i % 2 ? 0.075 : 0.17, a = (i / 10) * Math.PI * 2 + Math.PI / 2;
-    i ? star.lineTo(Math.cos(a) * r, Math.sin(a) * r) : star.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    if (i) star.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    else star.moveTo(Math.cos(a) * r, Math.sin(a) * r);
   }
   const starMesh = new THREE.Mesh(new THREE.ExtrudeGeometry(star, { depth: 0.02, bevelEnabled: false }), accent);
   const polar = 0.48, r = R + 0.05 * (1 - polar / front) ** 2 + 0.004;

@@ -641,7 +641,7 @@ function normalizedOperation(
   };
 }
 
-function asSchedule(schedule: RoutineRequestSchedule, now: number): RoutineSchedule {
+export function asSchedule(schedule: RoutineRequestSchedule, now: number): RoutineSchedule {
   if (schedule.type === "cron") return { ...schedule };
   if (schedule.type === "once") return { type: "once", at: schedule.at };
   if (schedule.type === "interval") {
@@ -848,7 +848,7 @@ function cardCopy(
   const nextRunAt = nextForOperation(operation, manager, now);
   const scheduleTimeZone = definition.schedule.type === "cron" ? definition.schedule.timeZone : timeZone;
   const when = operation.action === "run_now" ? "Now" : scheduleText(definition.schedule, timeZone);
-  const destination = definition.runOn === "cloud" ? "Boat-hosted agent" : "Bot’s current model and configured computer";
+  const destination = definition.runOn === "cloud" ? "Bot’s current model on its Boat cloud computer" : "Bot’s current model and configured computer";
   const current = operation.action === "create"
     ? null
     : manager.listRoutines().find((routine) => routine.id === operation.routineId) ?? null;

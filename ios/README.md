@@ -181,11 +181,13 @@ here by simply not having the methods:
 | Read bots, rooms and transcripts | Write API keys (`PUT /api/config`) |
 | Send messages, make a bot or a room | Manage pairing or revoke devices |
 | Share selected text, links, images and documents | Browse arbitrary files on the phone or Mac |
-| **Answer approvals and questions** | Drive the Local VM or this computer |
+| **Answer approvals and questions** | Drive this computer, or change the Local VM's lifecycle |
 | Interrupt a bot, mark chats read | Reach `/api/internal/*` |
 | File visible bots into one sidebar section | Use general bot or room `PATCH` routes |
 | Fetch screen images on demand | Load the packaged desktop UI |
 | Open an explicitly enabled cloud desktop | Provision, sleep or run shell commands on cloud computers |
+| See an explicitly enabled Local VM, idle or working, and take control of it | |
+| Start and end a Live call, change its voice, typed-reply reading and idle timeout | Read or change the OpenAI key |
 
 Marking a chat read and remembering an approval use purpose-built server
 verbs. Section creation likewise uses one strict atomic batch route. The
@@ -199,13 +201,40 @@ mean losing the ability to lock it out.
 Interactive cloud desktop access is additionally enabled per paired device and
 starts off. The phone asks the Mac to mint a fresh provider URL after an
 explicit warning, validates that it is HTTPS, opens it in an in-app Safari
-sheet, and never persists it. The Local VM's loopback-only noVNC listener and
-the host computer remain unreachable through the companion.
+sheet, and never persists it.
+
+The same per-device switch (**Allow computer view** in Settings → Remote access)
+lets the phone fetch a still of a bot's Local VM on demand, so the computer view
+shows it even while the bot is idle: every 30 seconds while the view is open,
+every 3 while the bot works and its streamed frames have gone quiet. It is a
+picture only.
+
+With the same switch on, **Take control** under that picture drives the VM from
+the phone in per-bot Local VM mode. Shared and pool modes show an instruction
+to select per-bot mode in Settings → Computers; a bot's lease cannot pause other
+bots sharing its desktop. Stills remain available in every mode. The phone takes
+the bot's computer under its own control lease — the harness then refuses that
+bot's computer actions — and asks for the VM's live desktop.
+The harness hands that out only to a loopback caller and only to the lease
+holding the computer; the sidecar relays it to this one device the way it
+already relays a VPS viewer, so the VM's noVNC port never leaves the Mac, and it
+re-checks the lease every few seconds and cuts the relay as soon as it no
+longer holds (released from the Mac, say). A small RFB client in
+`CompanionCore` speaks VNC over that WebSocket: a trackpad moves a pointer (tap
+to click, two fingers to right-click or scroll, hold to drag), and the system
+keyboard types. **Hand Back**, or sending the app to the background, closes the
+viewer and releases the lease. The lease is kept per bot, so if the app is
+killed while driving, taking control again resumes it and Hand Back releases it.
+The Local VM's lifecycle and the host computer remain unreachable through the
+companion.
 
 ## Design notes
 
-- **Zero third-party dependencies.** The raw-byte SSE reader, Keychain,
-  `NWBrowser`, and notifications are all first-party.
+- **One third-party dependency.** `stasel/WebRTC` (a prebuilt XCFramework of
+  Google's WebRTC, BSD) carries Live-call audio straight from the phone to
+  OpenAI; it is pinned in `project.yml`, app target only. The raw-byte SSE
+  reader, Keychain, `NWBrowser`, and notifications are all first-party, and
+  `CompanionCore` stays dependency-free so `swift test` runs on any Mac.
 - **QR scan confirms before connecting.** The QR carries a short-lived,
   high-entropy credential rather than relying on the visible six-digit code.
   The app validates the target, asks the user to confirm it, exchanges the
@@ -260,7 +289,8 @@ the host computer remain unreachable through the companion.
 The live connection is foreground-only. Notification frames produce native
 banners, sounds, time-sensitive approval alerts, and an app badge while connected;
 the resume cursor replays alerts missed during a short background pause. There is
-no APNs delivery after the app is terminated, no call mode or spoken replies,
+no APNs delivery after the app is terminated, no background Live calls (a call
+ends when the app leaves the screen), no spoken replies outside a call,
 and no cloud-resident bot service. Optional hosted HTTPS is an encrypted route
 back to the user's computer, not a second transcript store. Composer dictation is available.
 Task management, SQLite transcript search,

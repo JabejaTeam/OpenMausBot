@@ -7,10 +7,11 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
 - Tool text the models read (SSOT for how to use them): `server/drivers/agents-catalog.ts`
   (`coordinate_bots`, `relay_question`, …). Tool args → HTTP: `server/drivers/agents-call.ts`.
 - `POST /api/internal/coordinate-bots` in `server/index.ts`: picks the thread
-  (`store.resolvePairConversation`), `routeCorrection` for `amends`,
-  `stillWorkingRefusal`, then `roomHandoffs.enqueue`.
+  (`store.workThread`: one thread per conversation and teammate, upstream),
+  fork `steerCorrection` folds a follow-up into the assignment running there
+  (`roomHandoffs.runningFrom`), else `roomHandoffs.enqueue` queues it.
 - The handoff tree, queue and lifetimes: `server/room-handoffs.ts`
-  (`enqueue`, `tick`, `amendable`, `mergeTarget`, `addCorrection`).
+  (`enqueue`, `tick`, `runningFrom`, `addCorrection`).
   Persisted in `<data>/room-handoffs.json`. After a restart `restore` puts
   cut-off work back in line (`interrupted` → `INTERRUPTED_BY_RESTART` note), max `restarts`.
 - Plain conversation turns cut off by a restart: `server/turn-recovery.ts`
@@ -34,7 +35,7 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
 - E2e fixtures: `scripts/control-omb.ts` (`launchVerificationServer`), scripted
   engines `server/testing/fake-claude-cli.ts`, plans `server/testing/room-handoff-agent.ts`.
 - Tool catalog size is budgeted: `server/drivers/agents-catalog-wire.test.ts`
-  (`FORK_EXTRA_BYTES`, `FORK_ROOM_EXTRA_BYTES`; regenerate goldens with
+  (`FORK_EXTRA_BYTES`; regenerate goldens with
   `UPDATE_AGENTS_CATALOG_GOLDENS=1`).
 - `fork/deploy-beast.sh`: build the current commit on beast, back up, roll out, health check.
 

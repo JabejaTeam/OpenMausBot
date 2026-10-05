@@ -12,6 +12,9 @@ export interface OnboardingStatus {
   version: number;
   reelSeen: boolean;
   hintsSeen: string[];
+  /** OMB Cloud home only: when a bot's turn first finished there. The
+   * server writes it (server/cloud-home.ts firstCloudTurnPatch). */
+  firstTurnAt?: string;
 }
 
 /** Bump when the welcome flow changes enough that existing users should see
@@ -170,6 +173,14 @@ export function beatWidth(beat: BeatId): number {
     default:
       return 460;
   }
+}
+
+/** The footer's step dots. The reel beat draws its own scene dots (six,
+ * clickable) just above the footer, and two rows of dots with different
+ * counts read as one broken progress bar, so the reel keeps only its own;
+ * the footer still says "Step 2 of 5". */
+export function flowDotsShown(beat: BeatId): boolean {
+  return beat !== "reel";
 }
 
 // ── engines and organisation sign-in ───────────────────────────────────

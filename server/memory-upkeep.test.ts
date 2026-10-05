@@ -1,7 +1,7 @@
 // Memory upkeep: capture parsing and dedupe, the tidy plan (the share limit
 // on small notebooks and the identity regressions from #1363's review),
 // About me suggestions, and the upkeep loop against a scripted engine.
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -267,6 +267,25 @@ describe("the upkeep loop", () => {
     expect(aboutMeAdded).toEqual(["The person is vegetarian"]);
   });
 
+  it("captures onto a full MEMORY.md: every fact lands, the oldest entries move to the archive, both journaled", async () => {
+    const old = Array.from({ length: 200 }, (_, i) => `- 2026-08-01 · old fact ${i}`);
+    writeMemoryFile(BOT.id, `${old.join("\n")}\n`);
+    answers.push(JSON.stringify([
+      { text: "The staging host is kestrel", kind: "fact", confidence: 0.9 },
+      { text: "Deploys go out on Tuesdays", kind: "fact", confidence: 0.9 },
+    ]));
+    const report = await upkeep().capture({ botId: BOT.id, threadId: "t1", turns: [{ person: "staging is kestrel; we deploy Tuesdays", bot: "Noted." }] });
+    expect(report).toMatchObject({ added: 2 });
+    expect(report).not.toHaveProperty("note");
+    expect(memory()).toContain("· The staging host is kestrel\n");
+    expect(memory()).toContain("· Deploys go out on Tuesdays\n");
+    expect(memory().split("\n").filter(Boolean)).toHaveLength(200);
+    expect(readMemoryTopic(BOT.id, "archive.md")).toContain("- 2026-08-01 · old fact 0 · moved 2026-09-25\n- 2026-08-01 · old fact 1 · moved 2026-09-25\n");
+    await flushMemoryJournal(BOT.id);
+    // newest first: undoing the top row puts MEMORY.md back, and the archive keeps its copy
+    expect(readMemoryJournal(BOT.id, 5).filter((row) => row.via === "capture").map((row) => row.path)).toEqual(["MEMORY.md", "memory/archive.md"]);
+  });
+
   it("adds to About me a fact the notebook already holds, without appending it again", async () => {
     ensureWorkspace(BOT.id);
     writeMemoryFile(BOT.id, "- 2026-09-25 · The user's company is called Northwind Studio.\n");
@@ -436,6 +455,35 @@ describe("the upkeep loop", () => {
     organizeAnswer = '{"moves":[{"i":0,"topic":"project"}]}';
     expect((await service.tidy(BOT.id)).organized).toBe(1);
     expect(readMemoryTopic(BOT.id, "project.md")).toContain(`Project detail ${MAX_MOVES}`);
+  });
+
+  it("makes every tidy write inside the host's writing hook, so a Cloud home can tell it from someone else's", async () => {
+    ensureWorkspace(BOT.id);
+    writeMemoryFile(BOT.id, "- 2026-09-01 · Exams this weekend · until 2026-09-07\n- 2026-09-02 · Likes tea\n- 2026-09-03 · Likes tea\n");
+    writeMemoryTopic(BOT.id, "travel.md", "---\ntitle: travel\n---\n\n- 2026-09-01 · In Goa · until 2026-09-07\n- 2026-09-02 · Likes window seats\n");
+    const files = () => {
+      const dir = workspaceDir(BOT.id);
+      const out = new Map<string, string>([["MEMORY.md", readFileSync(join(dir, "MEMORY.md"), "utf8")]]);
+      for (const name of readdirSync(join(dir, "memory"))) if (name.endsWith(".md")) out.set(name, readFileSync(join(dir, "memory", name), "utf8"));
+      return out;
+    };
+    const changed = (before: Map<string, string>, after: Map<string, string>) =>
+      [...new Set([...before.keys(), ...after.keys()])].filter((name) => before.get(name) !== after.get(name));
+    const inside = new Set<string>();
+    const service = createMemoryUpkeep({
+      bots: () => [BOT], bot: (id) => (id === BOT.id ? BOT : undefined), engine: () => engine, busy: () => false,
+      addToAboutMe: () => 0, sourceLabel: () => 'chat "Plans"', quietMs: () => 60_000, tidyHour: () => 3, now: () => clock,
+      writing: (_botId, write) => {
+        const before = files();
+        try { return write(); } finally { for (const name of changed(before, files())) inside.add(name); }
+      },
+    });
+    const start = files();
+    const report = await service.tidy(BOT.id);
+    expect(report).toMatchObject({ expired: 2, duplicates: 1 });
+    const all = changed(start, files());
+    expect(all.sort()).toEqual(["MEMORY.md", "archive.md", "travel.md"]);
+    for (const name of all) expect(inside, name).toContain(name);
   });
 
   it("tidies topic files too: expired lines to the archive, duplicates merged", async () => {

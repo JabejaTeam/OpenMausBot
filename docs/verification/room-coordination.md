@@ -30,7 +30,7 @@ handoff loop inside those turns.
 The tools are `list_room_targets` and `coordinate_bots`. Discovery includes
 reachable bots as well as rooms. The latter addresses 1–4 existing bots in this
 room (default), or — in ordinary direct chat without a room — the sender's one
-standing conversation with each recipient. A Chief can reach additional teams only
+thread with each recipient for that conversation. A Chief can reach additional teams only
 after the owner grants that access in [team settings](team-access.md).
 A multi-recipient room request posts its brief once, addressed to all accepted
 recipients. Each recipient still has a separate execution and result. An
@@ -44,29 +44,26 @@ specialists; it never inherits the parent Chief's cross-team access or permissio
 Advice is not a verification
 receipt: the lead must ask the reviewer to run the requested checks.
 
-Outside a room there is exactly one conversation per pair of bots, titled after
-the sender (“@Clive”), reused by every later assignment from that sender so the
-recipient still has the earlier context, and never closed automatically. A
-recipient still carrying one thread per assignment from an older version has its
-most recently active one adopted as that conversation rather than gaining
-another row; nothing is deleted or closed. A second assignment that arrives
-while the first is still running gets its own thread beside it, named by the
-optional `label` (otherwise “@Clive · parallel work”), and that thread closes
-itself once its result has been reported. `request_key` is only a within-turn
-idempotency token; it never selects a conversation.
+Outside a room, a conversation has one thread with each recipient, titled
+“@Clive · work”. The first request opens it; every later request from that
+conversation — a follow-up, a change of plan, rework — goes into it, so the
+recipient has the earlier work in its own history. If the recipient is still
+working there, the request waits and runs next; the same work never runs twice
+in parallel. A different conversation of the sender gets its own thread.
+Successful reported work closes in the sidebar but remains readable, and
+reopens when the next request arrives; failed or withheld work remains
+visible. Each receipt names the thread the request went into. Within the
+sending turn and the turns that resume it, the same text to the same
+recipient and place is one request: a repeat while it is live is not sent
+again, and a repeat after it finished or failed runs again only with
+`rework=true`. Room requests continue to use their explicit destination
+thread.
 
-A correction is not a second assignment. While a teammate still works on an
-assignment from the same conversation, a new `coordinate_bots` call to it
-must say which it is: `amends` (that assignment's `request_key` or
-`requestId`) or `independent: true`; without either it is refused and
-nothing is sent. `amends` reaches the corrected assignment's own thread:
-folded into its brief if it has not started, steered into its running turn
-when the engine can take it (one result, with the correction applied),
-otherwise queued there as a follow-up whose result returns separately — also
-after the assignment finished. `interrupt` (only with `amends`) stops the
-running work first. A finished work thread with a correction still queued
-stays open until that follow-up reports. `server/coordination-amends.e2e.test.ts`
-covers steering, the refusal, a follow-up after completion and interrupt.
+Fork: a follow-up to the assignment that teammate is running right now for
+the same conversation does not wait behind it. It is steered into the
+running turn when the engine can take it (one result, with the follow-up
+applied); otherwise it queues there as above. `server/coordination-follow-up.e2e.test.ts`
+covers both.
 
 The chat shows an avatar and “Sent to Eli · Delivery”; clicking opens the
 receiving conversation. Same-room receipts have no unnecessary navigation.
@@ -151,8 +148,9 @@ approvals and validation. Multiple required approvals are presented together;
 no recipient starts until all are allowed. It does not claim model judgment or artifact correctness.
 The direct-chat suite exercises Clive → lead → specialist → lead → Clive with
 the real MCP proxy, no room, and no changes to unrelated conversations. It also
-checks one conversation per bot pair across separate user turns, its title,
-labelled concurrent work that closes itself, recipient model/permission
+checks that follow-ups from one conversation continue one recipient thread
+(queued behind running work, never in parallel), that another conversation
+gets its own thread, thread titles, work that closes itself and reopens, recipient model/permission
 defaults, idempotency without extra tasks, capacity-bound queues, dispatch to a
 spare recipient thread while unrelated work remains active, pinned parent
 selection, steering a live coordination (including an automation turn

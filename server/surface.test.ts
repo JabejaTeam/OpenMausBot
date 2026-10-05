@@ -4,9 +4,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CLOUD_PLACE_DRIVER_ERROR,
+  cloudPlaceDriverError,
   parseSurface,
+  placeFailureMessage,
+  placeUnavailable,
   resolveSurface,
-  surfaceForTool,
   surfaceOfComputerKind,
   surfacePrompt,
 } from "./surface.ts";
@@ -149,25 +152,43 @@ describe("surfacePrompt", () => {
     expect(text).toContain("select the requested available place");
     expect(text).toContain("changing places requires select_computer");
     expect(text).toContain("Never silently replace an explicitly requested VM with the host desktop");
-    expect(text).not.toContain("ask the user to change the conversation's computer selector");
-  });
-});
-
-describe("surfaceForTool", () => {
-  it("trusts the Claude driver's server namespace", () => {
-    expect(surfaceForTool("mcp__browser__browser_snapshot", { computer: "cloud", browser: true })).toBe("browser");
-    expect(surfaceForTool("mcp__computer__browser_snapshot", { computer: "cloud", browser: true })).toBe("cloud");
-    expect(surfaceForTool("mcp__computer__screenshot", { computer: "local", browser: false })).toBe("local");
-    // a namespaced call for something this turn never mounted is noise
-    expect(surfaceForTool("mcp__browser__browser_click", { computer: "cloud", browser: false })).toBeNull();
+    expect(text).not.toContain("ask the user to change where this conversation works");
   });
 
-  it("only trusts a bare name when one surface was mounted", () => {
-    expect(surfaceForTool("browser_snapshot", { computer: "cloud", browser: true })).toBeNull();
-    expect(surfaceForTool("screenshot", { computer: "vm", browser: false })).toBe("vm");
-    expect(surfaceForTool("browser_navigate", { computer: null, browser: true })).toBe("browser");
-    expect(surfaceForTool("Bash: ls", { computer: "vm", browser: false })).toBeNull();
-    expect(surfaceForTool("Read", { computer: null, browser: true })).toBeNull();
+  it("sends the person to the Computer panel, the place control both interface modes show", () => {
+    const text = surfacePrompt({ computer: "cloud", browser: false }, { pinned: "cloud" });
+    expect(text).toContain("explain the mismatch and ask the user to change where this conversation works in the Computer panel");
+    expect(text).toContain("changing places requires the user's choice in the Computer panel, not a different tool name");
+    // Simple mode has no composer chip, so no selector the person cannot see.
+    expect(text).not.toContain("computer selector");
+  });
+
+  // Every shape of the paragraph a turn can get: each mount, pinned or not,
+  // with and without select_computer.
+  const mounts: Array<{ computer: "cloud" | null; browser: boolean }> = [
+    { computer: "cloud", browser: false }, { computer: null, browser: true }, { computer: "cloud", browser: true }, { computer: null, browser: false },
+  ];
+  const shapes = mounts.flatMap((mounted) => ([{}, { canSelect: true }, { canSelect: true, pinned: "cloud" }] as Array<{ canSelect?: boolean; pinned?: "cloud" }>)
+    .map((opts) => ({ mounted, opts })));
+
+  it("tells a Cloud home's bots only about the places it has", () => {
+    for (const { mounted, opts } of shapes) {
+      const text = surfacePrompt(mounted, { ...opts, cloudHome: true });
+      expect(text, JSON.stringify({ mounted, opts })).not.toMatch(/Local VM|\bVM\b|host desktop|user's host|host window/);
+      if (mounted.computer || mounted.browser) {
+        expect(text).toContain("the cloud computer is remote, the built-in browser is a separate browser, and the user's own computer cannot be reached from here");
+        expect(text).toContain("never act on a different computer.");
+      }
+      if (opts.canSelect) expect(text).toContain("select an available cloud computer without asking");
+    }
+  });
+
+  it("leaves every other server's paragraph exactly as it was", () => {
+    for (const { mounted, opts } of shapes) {
+      expect(surfacePrompt(mounted, { ...opts, cloudHome: false })).toBe(surfacePrompt(mounted, opts));
+    }
+    expect(surfacePrompt({ computer: "cloud", browser: true }, { canSelect: true }))
+      .toContain("this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote");
   });
 });
 
@@ -193,4 +214,40 @@ describe("surface parsing", () => {
 it("does not instruct use of a selected browser when no surface is mounted", () => {
   expect(surfacePrompt({ computer: null, browser: false }, { canSelect: true })).not.toContain("For online research");
   expect(surfacePrompt({ computer: null, browser: true })).toContain("For online research");
+});
+
+describe("cloudPlaceDriverError", () => {
+  it("lets every engine with computer tools use either cloud backend, and the Computer engine only Boat", () => {
+    expect(cloudPlaceDriverError({ computerMcp: true }, "box")).toBeNull();
+    expect(cloudPlaceDriverError({ computerMcp: true }, "vps")).toBeNull();
+    expect(cloudPlaceDriverError({ remoteAgent: true }, "box")).toBeNull();
+    expect(cloudPlaceDriverError({ remoteAgent: true }, "vps")).toMatch(/can't use a self-hosted VPS/);
+  });
+
+  it("refuses an engine without computer tools with one message and the control that changes it", () => {
+    expect(CLOUD_PLACE_DRIVER_ERROR).toBe("This model can't use a computer. Choose another model, or set Works on to Auto.");
+    expect(cloudPlaceDriverError({}, "box")).toBe(CLOUD_PLACE_DRIVER_ERROR);
+    expect(cloudPlaceDriverError({ computerMcp: false }, "vps", "pin")).toBe("This model can't use a computer. Choose another model, or clear this conversation's place in the composer.");
+    expect(cloudPlaceDriverError({}, "box", "routine")).toMatch(/change where this routine runs\.$/);
+  });
+});
+
+describe("placeUnavailable", () => {
+  it("names the control that changes the failed place, by where the choice came from", () => {
+    expect(placeUnavailable("cloud", "pin", "the cloud computer could not be created or reached").message)
+      .toBe("the cloud computer could not be created or reached. Clear this conversation's place in the composer to continue.");
+    expect(placeUnavailable("cloud", "works-on", "boom.").message).toBe("boom. Set Works on to Auto in this bot's settings to continue.");
+    expect(placeUnavailable("vm", "routine", "boom").message).toBe("boom. Change where this routine runs.");
+    expect(placeUnavailable("cloud", "auto-pin", "boom").message).toContain("back on Auto");
+    expect(placeUnavailable("vm", "pin", "x")).toMatchObject({ name: "PlaceUnavailableError", place: "vm", source: "pin" });
+  });
+
+  it("shortens the cause, never the action, to fit the transcript row", () => {
+    const message = placeFailureMessage("x".repeat(400), "works-on");
+    expect(message.length).toBeLessThanOrEqual(160);
+    expect(message.endsWith("Set Works on to Auto in this bot's settings to continue.")).toBe(true);
+    expect(message).toContain("…");
+    // A room row has no such cut: the whole cause stays.
+    expect(placeUnavailable("vm", "works-on", "x".repeat(400), Infinity).message).toBe(`${"x".repeat(400)}. Set Works on to Auto in this bot's settings to continue.`);
+  });
 });

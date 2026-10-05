@@ -118,17 +118,6 @@ function roundedRect(w, h, r) {
   return s;
 }
 
-/** Bend a flat strip (x = arc length) around a vertical cylinder of radius r. */
-function wrap(geo, r) {
-  const p = geo.getAttribute("position");
-  for (let i = 0; i < p.count; i++) {
-    const u = p.getX(i), w = p.getZ(i), a = u / r;
-    p.setXYZ(i, (r + w) * Math.sin(a), p.getY(i), (r + w) * Math.cos(a));
-  }
-  geo.computeVertexNormals();
-  return geo;
-}
-
 function stripes(colors, n = 8) {
   const c = document.createElement("canvas"); c.width = c.height = 256;
   const g = c.getContext("2d");
@@ -150,7 +139,8 @@ function compact(root) {
   root.updateMatrixWorld(true);
   const toRoot = new THREE.Matrix4().copy(root.matrixWorld).invert(), buckets = new Map();
   const visit = (node) => {
-    for (const child of [...node.children]) {
+    // a copy: merged meshes leave node.children while it is walked
+    for (const child of node.children.slice()) {
       if (child.userData.moves) { compact(child); continue; }
       if (child.isMesh) {
         const geo = child.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(toRoot, child.matrixWorld));

@@ -349,9 +349,31 @@ function trustedAuthUrl(value: string | undefined, slug: string): string {
   return url.toString();
 }
 
+/** Composio's own hosts are always trusted. A backend the operator pointed
+ * the app at explicitly (OMB_COMPOSIO_API — a dev or test stub) may hand back
+ * a Session on its own origin, since the API itself was already trusted that
+ * far; any other host is refused. */
+export function trustedSessionMcpUrl(value: string): boolean {
+  let mcp: URL;
+  try {
+    mcp = new URL(value);
+  } catch {
+    return false;
+  }
+  if (mcp.protocol === "https:" && (mcp.hostname === "composio.dev" || mcp.hostname.endsWith(".composio.dev"))) return true;
+  if (mcp.protocol !== "https:" && !(mcp.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(mcp.hostname))) return false;
+  const override = process.env.OMB_COMPOSIO_API;
+  if (!override) return false;
+  try {
+    return new URL(override).origin === mcp.origin;
+  } catch {
+    return false;
+  }
+}
+
 function parseSessionResponse(session: SessionResponse): SessionResponse {
   const mcp = new URL(session.mcp.url);
-  if (mcp.protocol !== "https:" || (mcp.hostname !== "composio.dev" && !mcp.hostname.endsWith(".composio.dev"))) {
+  if (!trustedSessionMcpUrl(session.mcp.url)) {
     throw new Error("Composio returned an untrusted Session MCP URL");
   }
   return { ...session, mcp: { ...session.mcp, url: mcp.toString() } };
@@ -655,6 +677,7 @@ export async function relayMcp(
   cfg: AppConfig,
   payload: JsonValue,
   transportSessionId?: string,
+  beforeSend?: () => void,
   person?: string,
 ): Promise<{ status: number; bytes: Uint8Array; contentType: string; transportSessionId?: string }> {
   const apiKey = projectApiKey(cfg);
@@ -686,6 +709,9 @@ export async function relayMcp(
   if (forwardedTransportSessionId) {
     headers.set("mcp-session-id", forwardedTransportSessionId);
   }
+  // Session discovery can await network I/O. Turn authority and mutable
+  // permissions must be checked after it, immediately before dispatch.
+  beforeSend?.();
   const response = await fetch(url, {
     method: "POST",
     headers,
@@ -1152,12 +1178,12 @@ export async function executeTools(
       capabilities: {},
       clientInfo: { name: "openmausbot-harness", version: "1" },
     },
-  }, undefined, person);
+  }, undefined, undefined, person);
   if (initialize.status !== 200) {
     throw new Error(await responseErrorFromBytes(initialize.status, initialize.bytes));
   }
   const transportSessionId = initialize.transportSessionId;
-  await relayMcp(cfg, { jsonrpc: "2.0", method: "notifications/initialized" }, transportSessionId, person)
+  await relayMcp(cfg, { jsonrpc: "2.0", method: "notifications/initialized" }, transportSessionId, undefined, person)
     .catch(() => undefined);
   const call = await relayMcp(cfg, {
     jsonrpc: "2.0",
@@ -1167,7 +1193,7 @@ export async function executeTools(
       name: "COMPOSIO_MULTI_EXECUTE_TOOL",
       arguments: { tools: tools as unknown as JsonValue, sync_response_to_workbench: false },
     },
-  }, transportSessionId, person);
+  }, transportSessionId, undefined, person);
   if (call.status !== 200) throw new Error(await responseErrorFromBytes(call.status, call.bytes));
   const frame = parseMcpResponse(new TextDecoder().decode(call.bytes), "omb-harness-execute");
   const failure = frame && typeof frame.error === "object" && frame.error !== null

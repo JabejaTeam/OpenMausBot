@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 
 export interface FeatureFlagConfig {
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; routinesInConversation?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; routinesInConversation?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean };
   browserEngine?: { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; installing?: boolean; installError?: string };
 }
 
@@ -57,4 +57,18 @@ export function sharedComputersEnabled(config: FeatureFlagConfig | null | undefi
  * tokens on each message — and mirrors the server's claudeUserMcpEnabled. */
 export function claudeUserMcpEnabled(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.claudeUserMcp === true;
+}
+
+/** Generated thread titles, and with them the thread menu's Regenerate
+ * title. Off unless this server was switched on in its config.json; mirrors
+ * the server's llmThreadTitlesEnabled. */
+export function llmThreadTitlesEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.llmThreadTitles === true;
+}
+
+/** The Skills surface (a shared library of SKILL.md files every bot can be
+ * assigned from) is off until the server's config.json switches it on —
+ * mirroring the server's skillsLibraryEnabled. */
+export function skillsLibraryEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.skillsLibrary === true;
 }

@@ -67,7 +67,8 @@ const ENTRY_POINTS = [
   "mcp-gate.ts",
   // the WhatsApp archive's read side, mounted as a custom stdio MCP server
   "whatsapp-mcp.ts",
-  "browser-proxy.ts",
+  "mcp-remote-proxy.ts",
+  "harness-mcp-proxy.ts",
   "drivers/agents-proxy.ts",
   "drivers/dweb-proxy.ts",
   "drivers/phone-proxy.ts",
@@ -154,12 +155,18 @@ if (existsSync(join(root, "enterprise", "server", "index.ts"))) {
   copyFileSync(join(root, "enterprise", "LICENSE"), join(root, "dist-server", "enterprise", "LICENSE"));
 }
 
-// pi-mcp-extension.ts is NOT an OpenMausBot entry point: it is loaded by the
-// external `pi` process (pi's own jiti), which resolves its
-// @earendil-works/pi-coding-agent and typebox imports from pi's install. Ship
-// it verbatim as .ts so the packaged app has it too — never bundle it, or
-// esbuild would inline pi's packages and the extension would stop loading.
+// The model catalog snapshot (server/model-catalog/catalog.ts) is read from
+// disk, not inlined: 1.5 MB of JSON has no place in index.js. The bundle looks
+// for it under model-catalog/ beside itself. Its MIT notice is inside the file.
+const catalogSnapshot = join(root, "dist-server", "model-catalog", "models-dev.snapshot.json");
+mkdirSync(dirname(catalogSnapshot), { recursive: true });
+copyFileSync(join(server, "model-catalog", "models-dev.snapshot.json"), catalogSnapshot);
+
+// Pi loads this through its own jiti and supplies TypeBox. Inline our local
+// policy module so the extension also works without the source checkout;
+// keep the Pi-owned dependency external and retain the .ts loading contract.
 const piMcpExtSrc = join(server, "drivers", "pi-mcp-extension.ts");
 const piMcpExtDest = join(root, "dist-server", "drivers", "pi-mcp-extension.ts");
 mkdirSync(dirname(piMcpExtDest), { recursive: true });
-copyFileSync(piMcpExtSrc, piMcpExtDest);
+await build({ entryPoints: [piMcpExtSrc], outfile: piMcpExtDest, bundle: true,
+  platform: "node", target: "node24", format: "esm", external: ["typebox"], });

@@ -1,11 +1,18 @@
 # Bot memory
 
-Every bot keeps notes between tasks. The notes are plain markdown files in a
+By default, bots keep notes between tasks. The notes are plain markdown files in a
 folder on the computer running OpenMausBot — nothing is stored anywhere else,
 and you can open, edit, or delete any of it in any editor. **Bot Settings →
 Memory** shows the same files with a gauge of how much of them actually loads,
 an editor that never overwrites something the bot wrote while you were typing,
 and a journal of every change with one-click undo.
+
+The **Let this bot use memory** switch is on by default. Turn it off while the
+bot is idle to stop loading `MEMORY.md` into new turns, stop automatic recall
+and upkeep, hide native memory tools, exclude memory files from `session_search`,
+and stop automatic daily turn logs. Existing files remain for review. A bot
+with filesystem access can still edit those files directly; use standing
+instructions to forbid that when memory must stay in another source of truth.
 
 ## Where it lives
 
@@ -14,7 +21,7 @@ and a journal of every change with one-click undo.
 ├── MEMORY.md            the notes that load into every conversation
 └── memory/
     ├── <topic>.md       longer notes the bot reads on demand
-    ├── archive.md       expired notes the tidy-up moved out (Memory upkeep)
+    ├── archive.md       older notes moved out of MEMORY.md, and expired ones
     └── log/
         └── 2026-09-10.md   what the bot did that day, in its own words
 ```
@@ -43,9 +50,24 @@ its file tools when it decides it needs it, and logs are for you.
 The gauge at the top of the Memory panel is that rule made visible: lines and
 size against the budget, amber from 80%, red once anything stops loading —
 with the count of lines that are not being loaded, and always the plain
-sentence *only the first 200 lines load each turn*. When it goes red, trim
-`MEMORY.md` or move notes into a topic file; the bot is told the same thing in
-its prompt.
+sentence *only the first 200 lines load each turn*.
+
+`MEMORY.md` never fills up. Every write that goes through the harness
+(`memory_update`, and capture) keeps the file within the budget in the same
+step: when the new entry would push it past, the oldest dated entries move to
+`memory/archive.md` — struck-through ones first, then expired ones, then the
+oldest live ones — each marked `· moved <date>`. An entry moves whole, with
+the lines indented under it (a code block) or, in older entries, the code block
+right below it. The archive is written before
+`MEMORY.md`, so a line is never out of one without already being in the other,
+and `session_search` still finds it. Lines you wrote by hand (no date), health
+and safety facts, and the entry just written never move. The bot is told which
+entries moved (the first few, and how many), so it can add back anything that
+should stay loaded. One entry is at most 1,000 characters and 20 lines, so a
+single note cannot push the rest out. The gauge
+can only go red when the lines that never move fill the budget by themselves
+(or a bot edited the file with its own file tools): then the entry is still
+saved, and the bot asks you to trim `MEMORY.md`.
 
 Both limits are `MEMORY_MAX_LINES` and `MEMORY_MAX_BYTES` in
 `server/workspace.ts`; the panel, the loader, and the bot's prompt all read the
@@ -70,7 +92,7 @@ more content words needs two per hit. Up to four notes and four conversation
 passages — numbered, dated, and at most 6,000 characters — go in front of that
 turn's message, opened by a line saying they are the bot's own notes and that
 a command inside one is not an instruction. `MEMORY.md` (already loaded) and
-`memory/archive.md` (no longer true) are never recalled, nor are daily logs
+`memory/archive.md` (older or no longer true) are never recalled, nor are daily logs
 (`session_search` finds those when the bot asks).
 
 It is placed in the message, not the system prompt, on purpose: the prompt's
@@ -174,7 +196,7 @@ guesses. Three things close that gap without attaching transcripts:
   listed. When a brief in a room names a private 1:1 chat, the room gets a
   chip — *Lead's recent-work brief covers 1 private chat with you* — once per
   chat, the same rule as recalled messages.
-- **One log line per finished turn.** The harness appends what the bot said
+- **One log line per finished turn when memory is on.** The harness appends what the bot said
   last, the tools it used, and whether the turn failed to
   `memory/log/YYYY-MM-DD.md`, sourced to the chat or room. The log is never
   loaded into a prompt; `session_search` finds it.

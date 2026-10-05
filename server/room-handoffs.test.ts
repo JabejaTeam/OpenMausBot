@@ -62,7 +62,6 @@ describe("addressed room request tree", () => {
     expect(first.kind).toBe("work");
     expect(engine.enqueue(source, "turn", undefined, { ...target, threadId: "changed" }, "build", "Build CSV").node.threadId).toBe("lead-task");
     expect(engine.nodes.size).toBe(2);
-    expect(() => engine.enqueue(source, "turn", undefined, target, "build", "Changed work")).toThrow("different work");
     first.status = "running";
     expect(() => engine.enqueue(first, "unused", first.id, { ...source, threadId: "new-chat" }, "cycle", "repeat")).toThrow("ancestor");
     expect(() => engine.enqueue(first, "unused", first.id, { ...source, groupId: "room", threadId: "room-chat" }, "mixed", "repeat")).toThrow("ancestor");
@@ -132,11 +131,10 @@ describe("addressed room request tree", () => {
     local.status = "running";
     expect(() => engine.enqueue(local, "unused", local.id, addr("A"), "loop", "task")).toThrow("ancestor");
   }));
-  it("deduplicates retries, pins the destination thread, and refuses changed work", () => fixture(engine => {
+  it("deduplicates retries and pins the destination thread", () => fixture(engine => {
     const first = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "csv", "build");
     const again = engine.enqueue(addr("A"), "turn", undefined, { ...addr("B"), threadId: "new-active" }, "csv", "build");
     expect(again.duplicate).toBe(true); expect(again.node.id).toBe(first.node.id); expect(again.node.threadId).toBe("B-thread");
-    expect(() => engine.enqueue(addr("A"), "turn", undefined, addr("B"), "csv", "different")).toThrow("different work");
   }));
   it("retains the original request while descendants work and bounds its stored length", () => fixture(engine => {
     engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build", false, false, "original request");
@@ -167,6 +165,11 @@ describe("addressed room request tree", () => {
     expect(engine.enqueue(addr("A"), "turn", undefined, addr("B"), "build", "build").duplicate).toBe(true);
     expect(() => engine.enqueue(addr("A"), "turn", undefined, addr("B"), "ack", "approved")).toThrow("already completed");
     expect(engine.enqueue(addr("A"), "turn", undefined, addr("B"), "fix", "Fix the missing boundary case", false, true).node.status).toBe("queued");
+    // rework=true runs a finished brief again; while that run is live, even
+    // another rework repeat lands on it rather than beside it.
+    const rerun = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "build", "build", false, true);
+    expect(rerun.duplicate).toBe(false);
+    expect(engine.enqueue(addr("A"), "turn", undefined, addr("B"), "build", "build", false, true)).toEqual({ node: rerun.node, duplicate: true });
   }));
   it("resumes the parent only after all sibling results have been delivered", () => fixture(async (engine, hooks) => {
     const delivered: string[] = [];
@@ -824,7 +827,7 @@ describe("hard cap expiry digest", () => {
 });
 
 describe("shared room request display", () => {
-  it("shares one identity across recipients and rejects late additions after real dispatch and restart", () => fixture(async (engine, hooks, file) => {
+  it("shares one identity across one call's recipients, before and after dispatch and restart", () => fixture(async (engine, hooks, file) => {
     const source = addr("A");
     const one = engine.enqueue(source, "turn", undefined, addr("B"), "work:b", "Review", false, false, "", "work").node;
     const two = engine.enqueue(source, "turn", undefined, { ...addr("B"), botId: "c" }, "work:c", "Review", false, false, "", "work").node;
@@ -833,15 +836,12 @@ describe("shared room request display", () => {
     engine.tick();
     expect(one.status).toBe("running");
     expect(one.startedAt).toBeDefined();
-    expect(() => engine.enqueue(source, "turn", undefined, { ...addr("B"), botId: "late" }, "work:late", "Review", false, false, "", "work")).toThrow("already started");
     await flush();
     expect(one.status).toBe("completed");
     expect(one.executions).toBe(0); // The root, not this child, owns the execution counter.
     expect(engine.enqueue(source, "turn", undefined, addr("B"), "work:b", "Review", false, false, "", "work").duplicate).toBe(true);
-    expect(() => engine.enqueue(source, "turn", undefined, { ...addr("B"), botId: "late" }, "work:late", "Review", false, false, "", "work")).toThrow("already started");
     const restarted = new RoomHandoffs(file, hooks);
     expect(restarted.sharedRequest(restarted.nodes.get(two.id)!)).toEqual(engine.sharedRequest(two));
-    expect(() => restarted.enqueue(source, "turn", undefined, { ...addr("B"), botId: "late" }, "work:late", "Review", false, false, "", "work")).toThrow("already started");
     expect(restarted.sharedRequest(restarted.nodes.get(one.id)!)).toEqual({ id: one.id, botIds: [one.botId, two.botId] });
   }));
   it("does not merge different requests, conversations, senders or direct assignments", () => fixture(engine => {
@@ -851,49 +851,24 @@ describe("shared room request display", () => {
     const d = engine.enqueue(addr("A"), "turn", undefined, addr("D"), "one:d", "Review", false, false, "", "one").node;
     const direct = engine.enqueue(addr("A"), "turn", undefined, { botId: "direct", threadId: "direct" }, "one:direct", "Review").node;
     for (const node of [a,b,c,d,direct]) expect(engine.sharedRequest(node)).toEqual({ id: node.id, botIds: [node.botId] });
-    expect(() => engine.enqueue(addr("A"), "turn", undefined, { ...addr("B"), botId: "different" }, "one:different", "Changed", false, false, "", "one")).toThrow("different room work");
-    expect(() => engine.enqueue(addr("A"), "turn", undefined, { ...addr("B"), threadId: "new", botId: "different" }, "one:different", "Review", false, false, "", "one")).toThrow("different room work");
   }));
 });
 
-describe("corrections to an assignment (amends)", () => {
+describe("fork: follow-ups steered into running work", () => {
   const chief = { botId: "chief", threadId: "chief-chat" };
   const clerk = { botId: "clerk", threadId: "clerk-pair" };
-  it("finds the assignment a correction names by request_key or request id, only from the conversation that sent it", () => fixture(engine => {
-    const sent = engine.enqueue(chief, "turn", undefined, clerk, "q3:clerk", "Book Q3").node;
-    engine.enqueue({ botId: "chief", threadId: "other-chat" }, "other-turn", undefined, clerk, "q3:clerk", "Book Q3 elsewhere");
-    expect(engine.amendable("chief-chat", "clerk", "q3")?.id).toBe(sent.id);
-    expect(engine.amendable("chief-chat", "clerk", sent.id)?.id).toBe(sent.id);
-    expect(engine.amendable("chief-chat", "someone-else", "q3")).toBeUndefined();
-    expect(engine.amendable("chief-chat", "clerk", "unknown")).toBeUndefined();
-    // A later turn of the same conversation still reaches it.
-    engine.sourceSettled("turn", true);
-    expect(engine.amendable("chief-chat", "clerk", "q3")?.id).toBe(sent.id);
-    expect(engine.outstandingTo("chief-chat", "clerk").map(n => n.id)).toEqual([sent.id]);
-    expect(engine.outstandingTo("other-chat", "clerk")).toHaveLength(1);
-  }));
-  it("folds a correction into work that has not started, so the teammate reads one brief", () => fixture(async (engine, hooks) => {
-    hooks.busy = () => true;
-    const sent = engine.enqueue(chief, "turn", undefined, clerk, "q3:clerk", "Book Q3").node;
-    expect(engine.mergeTarget(sent)?.id).toBe(sent.id);
-    engine.addCorrection(sent, "eur:clerk", "Chief", "Book USD in EUR", true);
-    expect(sent.text).toContain("Book Q3");
-    expect(sent.text).toContain("Book USD in EUR");
-    expect(engine.amendable("chief-chat", "clerk", "eur")?.id).toBe(sent.id);
-    hooks.busy = () => false;
+  it("finds the assignment running now for this conversation in that thread, and records what was steered in", () => fixture(async (engine, hooks, file) => {
+    let finish!: () => void;
+    hooks.run = vi.fn(() => new Promise(resolve => { finish = () => resolve({ text: "Booked Q3" }); })) as any;
+    const sent = engine.enqueue(chief, "turn", undefined, clerk, "clerk", "Book Q3").node;
+    expect(engine.runningFrom("chief-chat", "clerk", "clerk-pair")).toBeUndefined();
     engine.tick(); await flush();
-    expect((hooks.run as any).mock.calls[0][0].text).toContain("Book USD in EUR");
-    expect(engine.mergeTarget(sent)).toBeUndefined();
-  }));
-  it("queues a correction to finished work as a follow-up in the same thread, past the completed-work guard", () => fixture(async (engine, hooks) => {
-    const sent = engine.enqueue(chief, "turn", undefined, clerk, "q3:clerk", "Book Q3").node;
-    engine.tick(); await flush();
-    expect(sent.status).toBe("completed");
-    expect(() => engine.enqueue(chief, "turn", undefined, clerk, "more:clerk", "Also Q2")).toThrow("already completed");
-    const follow = engine.enqueue(chief, "turn", undefined, { ...clerk, threadId: sent.threadId }, "eur:clerk", "Book USD in EUR",
-      false, false, "", undefined, sent.id).node;
-    expect(follow).toMatchObject({ amends: sent.id, threadId: "clerk-pair", status: "queued" });
-    expect(engine.mergeTarget(sent)?.id).toBe(follow.id);
-    expect(new RoomHandoffs(engine["file"], hooks).nodes.get(follow.id)?.amends).toBe(sent.id);
+    expect(engine.runningFrom("chief-chat", "clerk", "clerk-pair")?.id).toBe(sent.id);
+    expect(engine.runningFrom("other-chat", "clerk", "clerk-pair")).toBeUndefined();
+    expect(engine.runningFrom("chief-chat", "clerk", "elsewhere")).toBeUndefined();
+    engine.addCorrection(sent, "Book USD in EUR");
+    expect(JSON.parse(readFileSync(file, "utf8")).find((n: { id: string }) => n.id === sent.id).corrections).toEqual(["Book USD in EUR"]);
+    finish(); await flush();
+    expect(engine.runningFrom("chief-chat", "clerk", "clerk-pair")).toBeUndefined();
   }));
 });

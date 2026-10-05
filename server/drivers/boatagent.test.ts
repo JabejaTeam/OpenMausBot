@@ -1,12 +1,12 @@
 // Boat agent contract tests against a scripted fake of boat.dev's boat HTTP
 // API. The driver polls events + prompt status; the fake advances one poll
 // per GET so we can assert message → tool → message order without sleeping.
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs } from "../config.ts";
 import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
-import { BoatAgentDriver } from "./boatagent.ts";
+import { BoatAgentDriver, boatErrorMessage, COMPUTER_ENGINE_CLOUD_UNAVAILABLE, PROVIDER_NOT_CONFIGURED_MESSAGE } from "./boatagent.ts";
 import { OMB_ASK_TOOL } from "../../shared/ask-question.ts";
 
 const BOAT = "boat-1";
@@ -54,7 +54,7 @@ function installFakeBoat(script: Poll[], prompts: string[] = []) {
   };
 }
 
-const computer = { boxId: BOAT, token: "boat-test-token" };
+const computer = { boxId: BOAT };
 
 describe("BoatAgentDriver turns (fake API)", () => {
   let instance: ProviderInstance;
@@ -74,6 +74,13 @@ describe("BoatAgentDriver turns (fake API)", () => {
 
   beforeEach(() => {
     ensureDirs();
+  });
+
+  it("refuses restricted remote-agent turns before posting a prompt", async () => {
+    const prompts: string[] = [];
+    restoreFetch = installFakeBoat([], prompts); await create();
+    await expect(instance.adapter.sendTurn({ threadId: "scoped", text: "Must not run", integrations: { computer }, toolScope: { allow: ["native:*", "mcp:notes:read"] } })).rejects.toThrow(/tool selection.*not supported/i);
+    expect(prompts).toEqual([]);
   });
 
   afterEach(async () => {
@@ -429,5 +436,129 @@ describe("BoatAgentDriver turns (fake API)", () => {
     restoreFetch = installFakeBoat([{ events: [], status: { promptRun: { status: "running" } } }]);
     await create();
     expect(await instance.adapter.respondToRequest("t-none", "whatever", { behavior: "answer", message: "hi" })).toBe("unavailable");
+  });
+});
+
+// Cloud Pro includes Boat through the Admin's relay. The person's own token
+// wins and goes only to Boat; without one, the included token goes only to the
+// relay. The public model catalog follows the API in use too.
+describe("BoatAgentDriver credential and base URL", () => {
+  const RELAY = "https://cloud.example.test/api/cloud/services/boat/api/box/v1";
+  const INCLUDED = "box_omb_included-relay-token";
+  let seen: Array<{ url: string; auth: string | null }> = [];
+  let instance: ProviderInstance | undefined;
+  let recorder: EventRecorder | undefined;
+  let restoreFetch: () => void = () => {};
+
+  beforeEach(() => {
+    ensureDirs();
+    vi.stubEnv("BOX_TOKEN", undefined);
+    vi.stubEnv("OMB_BOX_API", undefined);
+    vi.stubEnv("OMB_CLOUD_BOAT_URL", RELAY);
+    vi.stubEnv("OMB_CLOUD_BOAT_TOKEN", INCLUDED);
+    seen = [];
+    const previous = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method ?? "GET").toUpperCase();
+      seen.push({ url, auth: new Headers(init?.headers).get("authorization") });
+      if (url.endsWith("/api/provider-models")) return json({ "claude-code": { models: [{ id: "claude-fable-5" }] } });
+      if (url.endsWith("/me")) return json({ ok: true });
+      if (method === "POST" && /\/boxes\/[^/]+\/prompt$/.test(url)) return json({ promptRun: { id: PROMPT } });
+      if (url.includes("/events")) return json({ events: [{ id: "e1", type: "response", text: "done" }] });
+      if (url.includes(`/prompts/${PROMPT}`)) return json({ promptRun: { status: "finished", result: "done" } });
+      return json({ error: `unexpected ${method} ${url}` }, 404);
+    }) as typeof fetch;
+    restoreFetch = () => {
+      globalThis.fetch = previous;
+    };
+  });
+
+  afterEach(async () => {
+    recorder?.stop();
+    await instance?.dispose();
+    instance = undefined;
+    restoreFetch();
+    vi.unstubAllEnvs();
+  });
+
+  const runTurn = async (environment: Record<string, string>, threadId: string) => {
+    recorder?.stop();
+    await instance?.dispose();
+    instance = await BoatAgentDriver.create({ instanceId: "computer", displayName: "Computer", environment, enabled: true, config: { pollMs: 0 } });
+    recorder = recordEvents(instance.adapter);
+    expect(await instance.snapshot()).toMatchObject({ state: "available" });
+    await instance.adapter.sendTurn({ threadId, text: "go", integrations: { computer } });
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+  };
+
+  it("never runs on an OMB Cloud's included account: unavailable, and nothing reaches the relay", async () => {
+    // The included account has no agent sign-ins and must not get any: they
+    // would be the operator's model use on every customer's box.
+    instance = await BoatAgentDriver.create({ instanceId: "computer", displayName: "Computer", environment: {}, enabled: true, config: { pollMs: 0 } });
+    expect(await instance.snapshot()).toEqual({ state: "unavailable", reason: COMPUTER_ENGINE_CLOUD_UNAVAILABLE });
+    await expect(instance.adapter.sendTurn({ threadId: "t-included", text: "go", integrations: { computer } })).rejects.toThrow(COMPUTER_ENGINE_CLOUD_UNAVAILABLE);
+    expect(seen).toEqual([]);
+  });
+
+  it("an own token wins and goes only to Boat, catalog included", async () => {
+    await runTurn({ BOX_TOKEN: "box_own" }, "t-own");
+    expect(seen.map((call) => call.url)).toContain("https://ascii.dev/api/provider-models");
+    expect(seen.map((call) => call.url)).toContain(`https://ascii.dev/api/box/v1/boxes/${BOAT}/prompt`);
+    expect(seen.every((call) => call.url.startsWith("https://ascii.dev/"))).toBe(true);
+    expect(seen.filter((call) => call.auth).every((call) => call.auth === "Bearer box_own")).toBe(true);
+  });
+
+  it("is unavailable with neither an own token nor an included one", async () => {
+    vi.stubEnv("OMB_CLOUD_BOAT_TOKEN", undefined);
+    instance = await BoatAgentDriver.create({ instanceId: "computer", displayName: "Computer", environment: {}, enabled: true, config: { pollMs: 0 } });
+    expect(await instance.snapshot()).toMatchObject({ state: "unavailable" });
+    expect(seen).toEqual([]);
+  });
+});
+
+// Boat refuses a prompt it cannot run with its documented 409 envelope. The
+// person used to see only the bare code ("provider_not_configured").
+describe("BoatAgentDriver Boat refusals", () => {
+  const REFUSAL = {
+    ok: false, type: "sandbox.error", status: 409, code: "provider_not_configured",
+    message: "Prompting is locked until Claude Code is configured on the Agents page.",
+    error: { code: "provider_not_configured", message: "Prompting is locked until Claude Code is configured on the Agents page.", status: 409,
+      details: { provider: "claude-code", setupUrl: "https://boat.dev/dashboard?tab=agents" } },
+  };
+  let instance: ProviderInstance | undefined;
+  let restoreFetch: () => void = () => {};
+  afterEach(async () => {
+    await instance?.dispose();
+    instance = undefined;
+    restoreFetch();
+  });
+
+  it("names the missing sign-in and the next action instead of the bare code", async () => {
+    ensureDirs();
+    const previous = globalThis.fetch;
+    let prompts = 0;
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/provider-models")) return json({ "claude-code": { models: [{ id: "claude-fable-5" }] } });
+      if (String(init?.method).toUpperCase() === "POST" && /\/boxes\/[^/]+\/prompt$/.test(url)) { prompts++; return json(REFUSAL, 409); }
+      return json({ error: "unexpected" }, 404);
+    }) as typeof fetch;
+    restoreFetch = () => { globalThis.fetch = previous; };
+    instance = await BoatAgentDriver.create({ instanceId: "computer", displayName: "Computer", environment: { BOX_TOKEN: "box_own" }, enabled: true, config: { pollMs: 0 } });
+    await expect(instance.adapter.sendTurn({ threadId: "refused", text: "hi", model: "claude-fable-5", integrations: { computer } }))
+      .rejects.toThrow(PROVIDER_NOT_CONFIGURED_MESSAGE);
+    expect(prompts).toBe(1);
+    // Nothing sticks in the driver: the thread is free for the next turn.
+    expect(instance.adapter.hasSession?.("refused")).toBe(false);
+  });
+
+  it("prefers Boat's sentence over its code, and never shows an empty error", () => {
+    expect(boatErrorMessage({ code: "box_busy", message: "The box is busy." }, 409)).toBe("The box is busy.");
+    expect(boatErrorMessage({ error: { code: "x", message: "Nested sentence." } }, 400)).toBe("Nested sentence.");
+    expect(boatErrorMessage({ error: "Plain string" }, 503)).toBe("Plain string");
+    expect(boatErrorMessage({ code: "only_code" }, 400)).toBe("only_code");
+    expect(boatErrorMessage(null, 502)).toBe("box HTTP 502");
+    expect(boatErrorMessage({ error: { code: "provider_not_configured" } }, 409)).toBe(PROVIDER_NOT_CONFIGURED_MESSAGE);
   });
 });

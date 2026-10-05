@@ -15,7 +15,8 @@
 //                      | api-error (the CLI reports a non-auth API error as
 //                        assistant text, then an error result; no model output)
 //   FAKE_CLAUDE_API_ERROR text for the api-error frame (default: overloaded).
-//   FAKE_CLAUDE_DUMP   path to write {argv, env, prompt, systemPrompt,
+//   FAKE_CLAUDE_RELEASE with hang: the turn ends normally once this file exists.
+//   FAKE_CLAUDE_DUMP   path to write {argv, env, cwd, prompt, systemPrompt,
 //                      mcpConfig} as JSON,
 //                      so the test can assert on argv shape and env hygiene.
 //                      mcpConfig is read back from the --mcp-config file the
@@ -69,6 +70,28 @@
 //                      which `--permission-mode auto` starts in "default",
 //                      the way the real CLI (2.1.266) does for Haiku 4.5 and
 //                      Sonnet 4.5: init reports the mode it actually runs in.
+//   FAKE_CLAUDE_LATE_STEER_GATE path: a message that arrives mid-turn landed
+//                      after the turn's last model call began. The real CLI
+//                      (2.1.282) cannot fold it then: it finishes the turn
+//                      with `result` and runs the message as its NEXT turn on
+//                      the same stdin — init, tool call, reply. In `slow`
+//                      mode that reply waits for this file, so a test can
+//                      probe the harness while the continuation is running.
+//   FAKE_CLAUDE_LATE_STEER_INIT_GATE path: with the gate above, the late
+//                      turn's `init` waits for this file too, so a test can
+//                      act while the first result is held and nothing has
+//                      announced the continuation yet.
+//   FAKE_CLAUDE_LATE_STEER_SILENT 1: the late turn prints `init` and then
+//                      nothing at all — a continuation that never speaks.
+//   FAKE_CLAUDE_SLOW_TAIL_TOOL 1: `slow` makes one more tool call right
+//                      before its reply — a fold seam the harness sees after
+//                      a steer that was already too late to be folded.
+//   FAKE_CLAUDE_QUEUED_TURN_COUNT unset | zero | count — whether a result
+//                      carries queued_turn_count. Unset: absent, an older
+//                      CLI. zero: always 0, what 2.1.282 reports for words
+//                      waiting on stdin (they are not in its command queue,
+//                      yet it runs them next). count: the late steers still
+//                      queued, the field's documented meaning.
 //   Every result's total_cost_usd is the process's running total (0.01 per
 //   result), the way the real CLI reports it: read the latest, never sum.
 //   Its modelUsage is the same running count per model (tokens and costUSD).
@@ -77,9 +100,18 @@
 //                      total already counts the earlier turns. The fake saves
 //                      its running cost per session id here, and a --resume
 //                      launch starts from it.
+//   FAKE_CLAUDE_ROUTER_PING 1: before each turn's reply, send one POST to
+//                      $ANTHROPIC_BASE_URL/v1/messages carrying the headers
+//                      the real CLI derives from its env (ANTHROPIC_AUTH_TOKEN
+//                      as a Bearer token, ANTHROPIC_API_KEY as x-api-key), so a
+//                      test's stub router sees what a real turn would send.
+//                      Nothing is sent when ANTHROPIC_BASE_URL is unset.
 //   FAKE_CLAUDE_RESUMED_API_ERROR 1: a --resume launch plays its first turn
 //                      the `api-error` way — an error result with no cost
 //                      figure — and its later turns normally.
+//   FAKE_CLAUDE_EXIT_DELAY_MS ms this process keeps running after SIGTERM
+//                      before it exits: a CLI that is slow to stop, as one
+//                      can be on Windows, where taskkill is asynchronous.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawnSync } from "node:child_process";
@@ -100,6 +132,12 @@ const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
     }
   }, 500);
   orphanWatch.unref();
+}
+{
+  const exitDelay = Number(process.env.FAKE_CLAUDE_EXIT_DELAY_MS);
+  if (Number.isFinite(exitDelay) && exitDelay > 0) {
+    process.on("SIGTERM", () => { setTimeout(() => process.exit(0), exitDelay); });
+  }
 }
 const scriptedReplies = (() => {
   try {
@@ -196,6 +234,18 @@ if (argv[0] === "--version") {
   // FAKE_CLAUDE_VERSION lets a test stand in for an older CLI: the driver
   // withholds flags that version predates (CLAUDE_FLAG_FLOORS).
   process.stdout.write(`${process.env.FAKE_CLAUDE_VERSION ?? "2.1.232"} (Claude Code)\n`);
+  process.exit(0);
+}
+
+if (argv[0] === "--help") {
+  // Lists --autocompact in the option column like the real CLI, unless the
+  // fake stands in for a build without it: FAKE_CLAUDE_AUTOCOMPACT=0, or a
+  // version below the 2.1.122 floor.
+  const [maj = 0, min = 0, pat = 0] = (process.env.FAKE_CLAUDE_VERSION ?? "2.1.232").split(".").map(Number);
+  const has = process.env.FAKE_CLAUDE_AUTOCOMPACT !== "0" && (maj > 2 || (maj === 2 && (min > 1 || (min === 1 && pat >= 122))));
+  process.stdout.write(
+    `Usage: claude [options]\n\nOptions:\n  --model <model>  Model\n${has ? "  --autocompact <tokens>  Compaction window\n" : ""}  -h, --help  Display help\n`,
+  );
   process.exit(0);
 }
 
@@ -303,9 +353,37 @@ const requestedPermissionMode = argAfter("--permission-mode") ?? "default";
 const autoUnavailableFor = (process.env.FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS ?? "").split(",").filter(Boolean);
 const permissionMode =
   requestedPermissionMode === "auto" && autoUnavailableFor.includes(model) ? "default" : requestedPermissionMode;
+// The built-in tools init reports, as the real CLI does: --tools when given,
+// else its default set. FAKE_CLAUDE_KEEP_BASH=1 plays a CLI that keeps Bash
+// whatever it was told.
+const toolsFlag = argAfter("--tools");
+const tools = [...new Set([...(toolsFlag ? toolsFlag.split(",") : ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch"]),
+  ...(process.env.FAKE_CLAUDE_KEEP_BASH === "1" ? ["Bash"] : [])])];
 let dumped = false;
 let turnRunning = false;
 let steered: string[] = [];
+/** The folded steers as they were sent, echoed when the reply takes them in. */
+let steeredMessages: JsonValue[] = [];
+// --replay-user-messages (2.1.282): each stdin user message is echoed, with
+// the uuid it was sent with, as a turn takes it in — the prompt as its turn
+// starts, a folded steer before the reply that answers it, a late steer as
+// its own turn starts.
+const replayUserMessages = argv.includes("--replay-user-messages");
+let replayCount = 0;
+const replay = (sent: JsonValue) => {
+  if (!replayUserMessages) return;
+  const message = (sent ?? {}) as { uuid?: unknown; message?: unknown };
+  const uuid = typeof message.uuid === "string" ? message.uuid : `fake-replay-${process.pid}-${++replayCount}`;
+  out({ type: "user", message: message.message ?? null, uuid, session_id: sessionId, parent_tool_use_id: null, isReplay: true });
+};
+const replaySteered = () => {
+  for (const message of steeredMessages.splice(0)) replay(message);
+};
+// Messages that landed after the running turn's last model call
+// (FAKE_CLAUDE_LATE_STEER_GATE): each becomes the next turn once it ends.
+const lateSteers: JsonValue[] = [];
+let lateContinuation = false;
+let lateTurnWaiting = false;
 // the running cost behind total_cost_usd and modelUsage; a --resume launch
 // starts from the session's saved one (FAKE_CLAUDE_COST_STATE)
 type FakeModelUsage = { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; costUSD: number };
@@ -342,13 +420,47 @@ const promptText = (prompt: JsonValue): string => {
   return typeof m?.content === "string" ? m.content : "";
 };
 
-const finishIfDone = () => {
-  if (stdinEnded && !turnRunning) process.exit(0);
+/** A message the finished turn could not fold runs as the next turn — once
+ * FAKE_CLAUDE_LATE_STEER_INIT_GATE, if set, lets its `init` out. True while
+ * one is queued or waiting. */
+const startLateTurn = (): boolean => {
+  if (lateTurnWaiting) return true;
+  const late = lateSteers[0];
+  if (late === undefined) return false;
+  const initGate = process.env.FAKE_CLAUDE_LATE_STEER_INIT_GATE;
+  if (initGate && !existsSync(initGate)) {
+    lateTurnWaiting = true;
+    const poll = setInterval(() => {
+      if (!existsSync(initGate)) return;
+      clearInterval(poll);
+      lateTurnWaiting = false;
+      finishIfDone();
+    }, 10);
+    return true;
+  }
+  lateSteers.shift();
+  playTurn(late, true);
+  return true;
 };
 
-const playTurn = (prompt: JsonValue) => {
+const finishIfDone = () => {
+  if (turnRunning) return;
+  if (startLateTurn()) return;
+  if (stdinEnded) process.exit(0);
+};
+
+const finishTurn = () => {
+  runHooks("Stop", { stop_hook_active: false });
+  out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });
+  turnRunning = false;
+  finishIfDone();
+};
+
+const playTurn = (prompt: JsonValue, late = false) => {
   turnRunning = true;
+  lateContinuation = late;
   steered = [];
+  steeredMessages = [];
   // Every prompt this process receives, one JSON object per line. FAKE_CLAUDE_DUMP
   // records only the first, which cannot show what a REUSED session was sent on
   // its second and later turns.
@@ -378,8 +490,22 @@ const playTurn = (prompt: JsonValue) => {
     }
     writeFileSync(
       process.env.FAKE_CLAUDE_DUMP,
-      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, systemPrompt, mcpConfig, settings, settingsMode }, null, 2),
+      JSON.stringify({ pid: process.pid, argv, env: process.env, cwd: process.cwd(), prompt, systemPrompt, mcpConfig, settings, settingsMode }, null, 2),
     );
+  }
+
+  if (process.env.FAKE_CLAUDE_ROUTER_PING === "1" && process.env.ANTHROPIC_BASE_URL) {
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (process.env.ANTHROPIC_AUTH_TOKEN) headers.authorization = `Bearer ${process.env.ANTHROPIC_AUTH_TOKEN}`;
+    if (process.env.ANTHROPIC_API_KEY) headers["x-api-key"] = process.env.ANTHROPIC_API_KEY;
+    // Synchronous on purpose: the turn's frames follow the request, as they do
+    // for the real CLI, and this fake's turn loop is synchronous.
+    spawnSync(process.execPath, [
+      "-e",
+      "fetch(process.argv[1], { method: 'POST', headers: JSON.parse(process.argv[2]), body: '{}' }).then((r) => r.text(), () => {})",
+      `${process.env.ANTHROPIC_BASE_URL.replace(/\/+$/u, "")}/v1/messages`,
+      JSON.stringify(headers),
+    ], { stdio: "ignore", timeout: 5_000 });
   }
 
   // A resumed session the CLI no longer has: it exits before any `init`
@@ -408,7 +534,7 @@ const playTurn = (prompt: JsonValue) => {
     } catch {}
     const quota = Number(process.env.FAKE_CLAUDE_TRANSIENTS) || 0;
     writeFileSync(process.env.FAKE_CLAUDE_STATE, String(launched + 1));
-    out({ type: "system", subtype: "init", session_id: sessionId, model, permissionMode });
+    out({ type: "system", subtype: "init", session_id: sessionId, model, permissionMode, tools });
     if (launched < quota) {
       if (process.env.FAKE_CLAUDE_PARTIAL_FAILS) {
         out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "half an answer" } } });
@@ -419,7 +545,14 @@ const playTurn = (prompt: JsonValue) => {
   }
 
   // the real CLI re-announces init on every turn of a live process
-  out({ type: "system", subtype: "init", session_id: sessionId, model, permissionMode });
+  out({ type: "system", subtype: "init", session_id: sessionId, model, permissionMode, tools });
+
+  // a continuation that announces itself and then never speaks again
+  if (lateContinuation && process.env.FAKE_CLAUDE_LATE_STEER_SILENT) {
+    setInterval(() => {}, 1_000);
+    return;
+  }
+  replay(prompt);
 
   // The CLI accepted the resumed session — it read the prompt — and then
   // died with nothing to show. The prompt may already have run tools, so
@@ -457,8 +590,24 @@ const playTurn = (prompt: JsonValue) => {
 
   if (mode === "hang") {
     // stay alive until killed — lets tests exercise interrupt + the
-    // permission broker while a turn is officially in flight
-    setInterval(() => {}, 1_000);
+    // permission broker while a turn is officially in flight. With
+    // FAKE_CLAUDE_RELEASE, the turn ends normally once that file exists.
+    const release = process.env.FAKE_CLAUDE_RELEASE;
+    const finishGate = process.env.FAKE_CLAUDE_FINISH_GATE;
+    const held = setInterval(() => {
+      if (finishGate && existsSync(finishGate)) {
+        clearInterval(held);
+        out({ type: "assistant", message: { content: [{ type: "text", text: "fixture turn completed" }] } });
+        finishTurn();
+        return;
+      }
+      if (!release || !existsSync(release)) return;
+      clearInterval(held);
+      out({ type: "assistant", message: { content: [{ type: "text", text: "released" }] } });
+      out({ type: "result", is_error: false, stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } });
+      turnRunning = false;
+      finishIfDone();
+    }, finishGate ? 10 : 100);
     return;
   }
 
@@ -542,6 +691,8 @@ const playTurn = (prompt: JsonValue) => {
   // total_cost_usd is the process's running total (2.1.282: "read the latest
   // result rather than summing across results"); usage is this turn's own.
   const finish = () => {
+    // anything steered in was taken in before this turn's result
+    replaySteered();
     runHooks("Stop", { stop_hook_active: false });
     runningCost.total = Number((runningCost.total + 0.01).toFixed(2));
     const counted = (runningCost.modelUsage[model] ??= { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0 });
@@ -550,6 +701,7 @@ const playTurn = (prompt: JsonValue) => {
     counted.outputTokens += 5;
     counted.costUSD = Number((counted.costUSD + 0.01).toFixed(2));
     if (costStateFile) writeFileSync(costStateFile, JSON.stringify(runningCost));
+    const queued = process.env.FAKE_CLAUDE_QUEUED_TURN_COUNT;
     out({
       type: "result",
       is_error: false,
@@ -557,6 +709,7 @@ const playTurn = (prompt: JsonValue) => {
       total_cost_usd: runningCost.total,
       usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 },
       modelUsage: runningCost.modelUsage,
+      ...(queued === "zero" ? { queued_turn_count: 0 } : queued === "count" ? { queued_turn_count: lateSteers.length } : {}),
     });
     turnRunning = false;
     finishIfDone();
@@ -578,11 +731,21 @@ const playTurn = (prompt: JsonValue) => {
     // was folded in, the way the real CLI includes a mid-turn message in
     // the same turn's next model call
     const finishSlowTurn = () => {
+      if (process.env.FAKE_CLAUDE_SLOW_TAIL_TOOL) {
+        // one more tool call before the reply: a fold seam the harness sees
+        // AFTER a steer that this turn's stdin drain had already passed by
+        const id = `tu-${process.pid}-${++toolUseCount}`;
+        out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: "echo tail" } }] } });
+        out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: false, content: [{ type: "text", text: "tail" }] }] } });
+      }
       const tail = steered.length ? ` + steered: ${steered.join(" | ")}` : "";
+      replaySteered();
       out({ type: "assistant", message: { content: [{ type: "text", text: `reply to: ${promptText(prompt)}${tail}` }] } });
       finish();
     };
-    const finishGate = process.env.FAKE_CLAUDE_SLOW_FINISH_GATE;
+    // a late steer's turn holds on its own gate, so a test can look at the
+    // harness while the CLI is still working on the words it steered
+    const finishGate = lateContinuation ? process.env.FAKE_CLAUDE_LATE_STEER_GATE : process.env.FAKE_CLAUDE_SLOW_FINISH_GATE;
     if (finishGate) {
       const poll = setInterval(() => {
         if (!existsSync(finishGate)) return;
@@ -617,8 +780,15 @@ process.stdin.on("data", (c) => {
     } catch {
       continue;
     }
-    if (turnRunning) {
-      steered.push(promptText(prompt));
+    if (turnRunning || lateTurnWaiting) {
+      // folded into the running turn, unless it landed after that turn's
+      // last model call — then the real CLI queues it for the next turn,
+      // behind any queued message whose turn has not been announced yet
+      if (process.env.FAKE_CLAUDE_LATE_STEER_GATE) lateSteers.push(prompt);
+      else {
+        steered.push(promptText(prompt));
+        steeredMessages.push(prompt);
+      }
       if (process.env.FAKE_CLAUDE_STEER_RECEIVED) writeFileSync(process.env.FAKE_CLAUDE_STEER_RECEIVED, "received");
     } else {
       playTurn(prompt);

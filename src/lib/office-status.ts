@@ -5,7 +5,7 @@ import { latestThreadId } from "./office-layout";
 
 export type OfficeStatus = "waiting" | "working" | "unread" | "idle";
 
-type Activity = "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | undefined;
+type Activity = "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer" | undefined;
 
 interface StatusTask {
   threadId: string;
