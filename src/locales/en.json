@@ -484,6 +484,8 @@
   "settings.workRules.subtitle": "One place for how bots work. These rules reach bots at every turn and win over working rules in a bot's own instructions, its memory and a repository's AGENTS.md or CLAUDE.md.",
   "settings.workRules.everyone": "Every bot",
   "settings.workRules.everyoneHint": "For example what a bot may expect when it hands work to a code agent.",
+  "settings.workRules.others": "Every bot except code agents",
+  "settings.workRules.othersHint": "Rules code agents do not need: they work from the assignment their project manager gives them.",
   "settings.workRules.code": "Code agents",
   "settings.workRules.codeHint": "Bots switched on as Code agent in their settings, or created as one.",
   "settings.workRules.pm": "Project managers",

@@ -321,7 +321,7 @@ import { holdIncludedServices } from "./included-services.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
 import { ensureThreadWorktree, removeThreadWorktree, threadWorktreePath, threadWorktreeSystemPrompt } from "./thread-worktrees.ts";
-import { kindInstructionsSystemPrompt } from "./kind-instructions.ts";
+import { kindInstructionsSystemPrompt, kindTakesTeamKnowledge, teamContextPrompt } from "./kind-instructions.ts";
 import { notePerson, personTurnPreamble, readPersonProfile, updatePersonProfile } from "./person-profiles.ts";
 import { isBotKind } from "../shared/wire.ts";
 import { personKeyFor, personKeyForEmail } from "./person-key.ts";
@@ -386,7 +386,6 @@ import {
   readSections,
   sectionContextKey,
   sectionContextLabel,
-  sectionContextSystemPrompt,
   writeSectionContext,
   SECTION_CONTEXT_MAX_BYTES,
 } from "./section-context.ts";
@@ -1683,7 +1682,7 @@ function recentWorkSources(bot: BotRecord) {
  * or a room must not be able to pull a private chat into its reply. The
  * conversations are the ones session_search would search, minus this one. */
 function autoRecallPrompt(bot: BotRecord, threadId: string, message: string, opts: { conversations: boolean; userName: string }): string {
-  if (bot.memoryEnabled === false || !autoRecallEnabled(cfg)) return "";
+  if (bot.memoryEnabled === false || !kindTakesTeamKnowledge(bot.kind) || !autoRecallEnabled(cfg)) return "";
   const roomByThread = new Map<string, GroupRecord>();
   if (opts.conversations) {
     for (const group of store.groups) {
@@ -4003,7 +4002,7 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "credential", label: "Credentials", text: agentsMounted ? CREDENTIAL_PROMPT : "" },
     { id: "routine", label: "Routines", text: agentsMounted ? ROUTINE_PROMPT : "" },
     { id: "profile", label: "Profile changes", text: agentsMounted ? PROFILE_PROMPT : "" },
-    { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
+    { id: "section-context", label: "Section context", text: teamContextPrompt(bot) },
     { id: "kind-instructions", label: "Workspace rules", text: kindInstructionsSystemPrompt(bot.kind) },
     { id: "team-memory", label: "Team memory", text: teamMemory.systemPrompt(bot.section) + (agentsMounted ? TEAM_MEMORY_PROMPT : "") },
     { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace), enabled: bot.memoryEnabled !== false }) },
@@ -9998,7 +9997,7 @@ async function startTurn(
       // retain the prior selection, so both still belong to the session here. An
       // external update that finds any of it changed since the session started
       // gets the fresh session and replay it always got, rather than a resume.
-      const persistentConfig = [bot.name, bot.title, bot.description, sectionContextSystemPrompt(bot.section), kindInstructionsSystemPrompt(bot.kind),
+      const persistentConfig = [bot.name, bot.title, bot.description, teamContextPrompt(bot), kindInstructionsSystemPrompt(bot.kind),
         ...(instance.driverKind === "codex" ? [model, effort ?? null] : [])];
       const sessionConfig = (soul: string | undefined) =>
         createHash("sha256").update(JSON.stringify([...persistentConfig, soul])).digest("hex").slice(0, 16);
@@ -10796,7 +10795,7 @@ async function startTurn(
         { id: "routine-execution", label: "Routine execution", text: opts?.automationSource === "schedule" || opts?.automationSource === "manual" ? ROUTINE_EXECUTION_PROMPT : "" },
         { id: "profile", label: "Profile changes", text: profilePrompt },
         { id: "learn", label: "Skill authoring", text: learnPrompt },
-        { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
+        { id: "section-context", label: "Section context", text: teamContextPrompt(bot) },
         { id: "kind-instructions", label: "Workspace rules", text: kindInstructionsSystemPrompt(bot.kind) },
         { id: "thread-worktree", label: "Own copy", text: cwd && bot.cwd && cwd === threadWorktreePath(bot.id, threadId) ? threadWorktreeSystemPrompt(bot.cwd, cwd, threadId) : "" },
         { id: "team-memory", label: "Team memory", text: teamMemory.systemPrompt(bot.section) + (integrations.agents ? TEAM_MEMORY_PROMPT : "") },
@@ -13194,7 +13193,7 @@ async function runGroupMemberTurn(
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "recall", label: "Recall", text: integrations.agents && bot.memoryEnabled !== false ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
     { id: "recent", label: "Recent work", text: recentWorkPrompt(recentLines) },
-    { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
+    { id: "section-context", label: "Section context", text: teamContextPrompt(bot) },
     { id: "kind-instructions", label: "Workspace rules", text: kindInstructionsSystemPrompt(bot.kind) },
     { id: "team-memory", label: "Team memory", text: teamMemory.systemPrompt(bot.section) + (integrations.agents ? TEAM_MEMORY_PROMPT : "") },
     // the room path has always put a newline before memory and trimmed

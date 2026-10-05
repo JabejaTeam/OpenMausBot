@@ -7,13 +7,15 @@ import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
+import { sectionContextSystemPrompt } from "./section-context.ts";
 import { BOT_KINDS, type BotKind } from "../shared/wire.ts";
 
 export const KIND_INSTRUCTIONS_MAX_BYTES = 24_000;
 export const KIND_INSTRUCTIONS_FILE = join(DATA_DIR, "kind-instructions.json");
 
-/** `everyone` reaches every bot; a kind reaches the bots of that kind. */
-export const KIND_INSTRUCTION_SCOPES = ["everyone", ...BOT_KINDS] as const;
+/** `everyone` reaches every bot, `others` every bot except code agents, and a
+ * kind the bots of that kind. */
+export const KIND_INSTRUCTION_SCOPES = ["everyone", "others", ...BOT_KINDS] as const;
 export type KindInstructionScope = (typeof KIND_INSTRUCTION_SCOPES)[number];
 
 export interface KindInstructionRecord { text: string; updatedAt: number }
@@ -60,6 +62,19 @@ export function writeKindInstructions(scope: KindInstructionScope, text: string,
 
 const KIND_LABEL: Record<BotKind, string> = { code: "code agents", pm: "client project managers", test: "test agents (they test roadmap test cards on a test environment)" };
 
+/** Code agents work from the assignment their project manager gives them.
+ * The team's shared knowledge (section context: kennisbank, Werkwijze-synthese)
+ * and automatic recall stay with the bots that talk to people and coordinate;
+ * the PM passes on what the code agent needs. The one place that decides it. */
+export function kindTakesTeamKnowledge(kind?: BotKind): boolean {
+  return kind !== "code";
+}
+
+/** The section-context block a bot of this kind gets, or "". */
+export function teamContextPrompt(bot: { section?: string | null; kind?: BotKind }): string {
+  return kindTakesTeamKnowledge(bot.kind) ? sectionContextSystemPrompt(bot.section) : "";
+}
+
 /** The workspace rules for one bot, as system-prompt blocks. They come from
  * the admin, so they win over conflicting working rules the bot got anywhere
  * else: its own standing instructions, whoever created it, its memory, or a
@@ -73,6 +88,8 @@ export function kindInstructionsSystemPrompt(kind?: BotKind): string {
   };
   return block("everyone",
     "Workspace rules for every bot follow. The workspace admin sets them and you cannot edit them. Where they conflict with working rules in your own instructions, your memory or a repository file, these rules win.")
+    + (kind !== "code" ? block("others",
+      "Workspace rules for every bot except the code agents follow. The workspace admin sets them and you cannot edit them; they win the same way.") : "")
     + (kind ? block(kind,
       `You are one of this workspace's ${KIND_LABEL[kind]}. The rules below are the only working rules for how you do that work. They win over any conflicting working rule in your own standing instructions (including what the bot or person who created you wrote), your memory, and repository files such as AGENTS.md or CLAUDE.md. Your own instructions still say which project, client or repository you work on.`) : "");
 }

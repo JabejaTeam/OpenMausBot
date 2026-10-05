@@ -1,7 +1,9 @@
 // Workspace rules by kind of bot through the real server and the fake Claude
 // CLI, which dumps the system prompt it was spawned with: a code agent gets
 // the shared and the code rules, a plain bot only the shared ones, and an
-// edited text reaches the next turn without touching any bot.
+// edited text reaches the next turn without touching any bot. A code agent
+// also gets no team context, no "others" rules and no automatic recall: it
+// works from the assignment its project manager gives.
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,11 +43,16 @@ async function waitFor<T>(read: () => Promise<T | null | undefined> | T | null |
 
 /** Send one message and return the system prompt the engine was spawned with. */
 async function promptFor(bot: { id: string; threadId: string }, text: string): Promise<string> {
+  return (await turnFor(bot, text)).systemPrompt ?? "";
+}
+
+/** Send one message and return what the engine was spawned with. */
+async function turnFor(bot: { id: string; threadId: string }, text: string): Promise<{ systemPrompt: string | null; prompt: unknown }> {
   rmSync(dumpPath, { force: true });
   expect((await api("POST", `/api/bots/${bot.id}/messages`, { text, threadId: bot.threadId })).status).toBe(202);
   const dump = await waitFor(() => {
     if (!existsSync(dumpPath)) return null;
-    try { return JSON.parse(readFileSync(dumpPath, "utf8")) as { systemPrompt: string | null }; } catch { return null; }
+    try { return JSON.parse(readFileSync(dumpPath, "utf8")) as { systemPrompt: string | null; prompt: unknown }; } catch { return null; }
   });
   expect(dump, log.slice(-3_000)).not.toBeNull();
   await waitFor(async () => {
@@ -53,7 +60,7 @@ async function promptFor(bot: { id: string; threadId: string }, text: string): P
     const asked = list.findIndex((m) => m.role === "user" && m.text?.includes(text));
     return asked >= 0 && list.slice(asked + 1).some((m) => m.role === "bot" && m.text);
   });
-  return dump!.systemPrompt ?? "";
+  return dump!;
 }
 
 posixOnly("workspace rules by kind of bot", () => {
@@ -111,5 +118,32 @@ posixOnly("workspace rules by kind of bot", () => {
 
     expect((await api("PATCH", `/api/bots/${switched.id}`, { kind: null })).body.bot.kind).toBeUndefined();
     expect(await promptFor(switched, "Back to plain")).not.toContain("CODE-RULE");
+  }, 120_000);
+
+  it("keeps team context, the others rules and recall from code agents", async () => {
+    expect((await api("PUT", "/api/kind-instructions/everyone", { text: "EVERYONE-RULE: expect only the edit." })).status).toBe(200);
+    expect((await api("PUT", "/api/kind-instructions/others", { text: "OTHERS-RULE: make a test card per card." })).status).toBe(200);
+    const coder = (await api("POST", "/api/bots", { name: "Delivery Coder", settings: { kind: "code" } })).body.bot;
+    const pm = (await api("POST", "/api/bots", { name: "Delivery PM", settings: { kind: "pm" } })).body.bot;
+    const team = (await api("POST", "/api/sidebar-sections", { name: "Delivery", botIds: [coder.id, pm.id] })).body;
+    expect(team.bots.every((bot: any) => bot.section === "Delivery")).toBe(true);
+    expect((await api("PUT", "/api/section-context?section=Delivery", { text: "TEAM-CONTEXT: synthese and kennisbank." })).status).toBe(200);
+    for (const bot of [coder, pm]) {
+      expect((await api("PUT", `/api/bots/${bot.id}/memory/file`, {
+        path: "memory/dining.md", text: "---\ntitle: Dining\naliases: [restaurants]\n---\n- RECALL-NOTE: loves pasta\n",
+      })).status).toBe(200);
+    }
+
+    const coded = await turnFor(coder, "Which restaurants do we know?");
+    expect(coded.systemPrompt).toContain("EVERYONE-RULE");
+    expect(coded.systemPrompt).not.toContain("OTHERS-RULE");
+    expect(coded.systemPrompt).not.toContain("TEAM-CONTEXT");
+    expect(JSON.stringify(coded.prompt)).not.toContain("RECALL-NOTE");
+
+    const managed = await turnFor(pm, "Which restaurants do we know?");
+    expect(managed.systemPrompt).toContain("EVERYONE-RULE");
+    expect(managed.systemPrompt).toContain("OTHERS-RULE");
+    expect(managed.systemPrompt).toContain("TEAM-CONTEXT");
+    expect(JSON.stringify(managed.prompt)).toContain("RECALL-NOTE");
   }, 120_000);
 });

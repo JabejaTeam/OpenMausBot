@@ -484,6 +484,8 @@
   "settings.workRules.subtitle": "Eén plek voor hoe bots werken. Deze regels bereiken de bots bij elke beurt en gaan voor op werkregels in de eigen instructies van een bot, zijn geheugen en de AGENTS.md of CLAUDE.md van een repository.",
   "settings.workRules.everyone": "Elke bot",
   "settings.workRules.everyoneHint": "Bijvoorbeeld wat een bot mag verwachten wanneer hij werk aan een code-agent overdraagt.",
+  "settings.workRules.others": "Elke bot behalve code-agents",
+  "settings.workRules.othersHint": "Regels die code-agents niet nodig hebben: zij werken met de opdracht die hun projectmanager geeft.",
   "settings.workRules.code": "Code-agents",
   "settings.workRules.codeHint": "Bots die in hun instellingen als code-agent zijn ingeschakeld, of als zodanig zijn aangemaakt.",
   "settings.workRules.pm": "Projectmanagers",
