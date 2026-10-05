@@ -70,7 +70,8 @@ export function roomDecor(room: OfficeRoom, desk: OfficeDesk): Placement[] {
   if (shared) {
     const rugX = Math.min(shared.width + 1.6, room.width - 2 * WALL_GAP);
     const rugZ = Math.min(shared.depth + 2.2, room.depth - 2 * WALL_GAP);
-    items.push({ model: "rugRectangle", x: shared.x, z: shared.z, stretch: { x: rugX, z: rugZ } });
+    // a cm above the office floor, so the two never share a depth
+    items.push({ model: "rugRectangle", x: shared.x, y: 0.02, z: shared.z, stretch: { x: rugX, z: rugZ } });
   }
   items.push({ model: "pottedPlant", x: left + 0.55, z: back + 0.55 });
   items.push({ model: "bookcaseOpenLow", x: right - 0.6 - WALL_GAP, z: back + 0.2 + WALL_GAP / 2 });

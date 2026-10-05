@@ -176,7 +176,7 @@ function screenTexture(accent: string): THREE.CanvasTexture {
 export class OfficeScene {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(38, 1, 0.1, 400);
+  private camera = new THREE.PerspectiveCamera(38, 1, 0.5, 400) // near ≥ 0.5: the camera stays ≥ 4 m away; more depth precision;
   private controls: OrbitControls;
   private clock = new THREE.Clock();
   private world = new THREE.Group();

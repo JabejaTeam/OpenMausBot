@@ -42,7 +42,8 @@ export class OfficeBuilding {
 
   private materials = {
     slab: new THREE.MeshStandardMaterial({ color: "#b9b6b0", roughness: 0.82 }),
-    oak: new THREE.MeshStandardMaterial({ color: "#a98d6c", roughness: 0.7 }),
+    // floors lie on the slab: polygonOffset keeps them in front at any zoom (no z-fighting)
+    oak: new THREE.MeshStandardMaterial({ color: "#a98d6c", roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }),
     ground: new THREE.MeshStandardMaterial({ color: "#3a3d40", roughness: 1 }),
     glass: new THREE.MeshStandardMaterial({ color: "#dbe8ef", roughness: 0.05, metalness: 0, transparent: true, opacity: 0.16, depthWrite: false }),
     frame: new THREE.MeshStandardMaterial({ color: "#3b3f45", roughness: 0.4, metalness: 0.6 }),
@@ -79,7 +80,7 @@ export class OfficeBuilding {
 
     const ground = new THREE.Mesh(this.geo(new THREE.PlaneGeometry(600, 600)), this.materials.ground);
     ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.02;
+    ground.position.y = -0.06; // well under the slab, never level with it
     ground.receiveShadow = true;
     const slab = new THREE.Mesh(this.geo(new THREE.BoxGeometry(width, 0.04, depth)), this.materials.slab);
     slab.position.set(cx, -0.02, cz);
@@ -140,7 +141,7 @@ export class OfficeBuilding {
 
     const floor = new THREE.Mesh(this.geo(new THREE.PlaneGeometry(room.width, room.depth)), this.materials.oak);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.set(room.x, 0.004, room.z);
+    floor.position.set(room.x, 0.01, room.z);
     floor.receiveShadow = true;
     floor.userData.deskId = room.id;
     this.floors.push(floor);
@@ -215,9 +216,9 @@ export class OfficeBuilding {
       texture.colorSpace = THREE.SRGBColorSpace;
       texture.anisotropy = 4;
       const { width, height } = logoSize(aspect, office.room.width, maxHeight);
-      const logo = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshStandardMaterial({ map: texture, transparent: true, roughness: 0.6 }));
+      const logo = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshStandardMaterial({ map: texture, transparent: true, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
       // high on the wall, its top 15 cm under the ceiling line
-      logo.position.set(office.room.x, WALL_HEIGHT - 0.15 - height / 2, office.room.z - office.room.depth / 2 + WALL_THICKNESS / 2 + 0.006);
+      logo.position.set(office.room.x, WALL_HEIGHT - 0.15 - height / 2, office.room.z - office.room.depth / 2 + WALL_THICKNESS / 2 + 0.02);
       office.logo = logo;
       this.group.add(logo);
     };
