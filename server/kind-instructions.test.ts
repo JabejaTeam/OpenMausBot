@@ -2,7 +2,7 @@ import { rmSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
-  KIND_INSTRUCTIONS_FILE, KIND_INSTRUCTIONS_MAX_BYTES, kindInstructionsSystemPrompt, kindTakesTeamKnowledge, readKindInstructions, writeKindInstructions,
+  KIND_INSTRUCTIONS_FILE, KIND_INSTRUCTIONS_MAX_BYTES, kindInstructionsSystemPrompt, kindTakesSharedContext, readKindInstructions, writeKindInstructions,
 } from "./kind-instructions.ts";
 import { clientBotPatchViolation } from "./request-auth.ts";
 import { Store } from "./store.ts";
@@ -48,9 +48,9 @@ describe("workspace rules by kind of bot", () => {
     expect(kindInstructionsSystemPrompt()).toContain("Make a test card per card.");
     expect(kindInstructionsSystemPrompt("pm")).toContain("Make a test card per card.");
     expect(kindInstructionsSystemPrompt("code")).not.toContain("Make a test card per card.");
-    expect(kindTakesTeamKnowledge("code")).toBe(false);
-    expect(kindTakesTeamKnowledge("pm")).toBe(true);
-    expect(kindTakesTeamKnowledge(undefined)).toBe(true);
+    expect(kindTakesSharedContext("code")).toBe(false);
+    expect(kindTakesSharedContext("pm")).toBe(true);
+    expect(kindTakesSharedContext(undefined)).toBe(true);
   });
 
   it("clears a scope with empty text and refuses oversized text", () => {

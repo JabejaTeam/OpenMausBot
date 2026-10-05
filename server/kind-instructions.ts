@@ -63,16 +63,25 @@ export function writeKindInstructions(scope: KindInstructionScope, text: string,
 const KIND_LABEL: Record<BotKind, string> = { code: "code agents", pm: "client project managers", test: "test agents (they test roadmap test cards on a test environment)" };
 
 /** Code agents work from the assignment their project manager gives them.
- * The team's shared knowledge (section context: kennisbank, Werkwijze-synthese)
- * and automatic recall stay with the bots that talk to people and coordinate;
- * the PM passes on what the code agent needs. The one place that decides it. */
-export function kindTakesTeamKnowledge(kind?: BotKind): boolean {
+ * The team's shared knowledge (section context: kennisbank, Werkwijze-synthese),
+ * automatic recall and the brief of their own recent work elsewhere stay with
+ * the bots that talk to people and coordinate; the PM passes on what the code
+ * agent needs. The one place that decides it. */
+export function kindTakesSharedContext(kind?: BotKind): boolean {
   return kind !== "code";
 }
 
 /** The section-context block a bot of this kind gets, or "". */
 export function teamContextPrompt(bot: { section?: string | null; kind?: BotKind }): string {
-  return kindTakesTeamKnowledge(bot.kind) ? sectionContextSystemPrompt(bot.section) : "";
+  return kindTakesSharedContext(bot.kind) ? sectionContextSystemPrompt(bot.section) : "";
+}
+
+/** Code agents take every new assignment in a fresh work thread, so a fresh
+ * engine session and worktree: one long-lived thread per PM conversation fills
+ * their context with the assignments before it. A follow-up while one runs
+ * still steers that one (steerCorrection). */
+export function kindStartsFreshPerAssignment(kind?: BotKind): boolean {
+  return kind === "code";
 }
 
 /** The workspace rules for one bot, as system-prompt blocks. They come from

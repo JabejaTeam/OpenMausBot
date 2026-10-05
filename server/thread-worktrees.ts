@@ -95,10 +95,9 @@ export function threadWorktreeSystemPrompt(repo: string, path: string, threadId:
   return `\n\nYour own copy of the project. This conversation works in its own git worktree, ${path}, on branch ${branch}. The shared project folder is ${repo} (branch ${main}). Other conversations work in their own copies at the same time, so never edit files in the shared folder; it only receives merged work, and its dev preview shows only that.
 - Starting an assignment: if \`git status\` is clean, run \`git rebase ${main}\` first so you build on the latest merged work. If package-lock.json changed, run \`npm ci\`.
 - Finishing an assignment, in this order:
-  1. Commit your work on ${branch}.
-  2. Run the checks your workspace rules call done (for code agents: the typecheck), not a repository's full CI list, and fix what fails.
-  3. \`git rebase ${main}\`. If that brought in new commits, run those checks again.
-  4. \`git -C "${repo}" merge --ff-only ${branch}\`. If it refuses because ${main} moved on, repeat from step 3.
+  1. Commit your work on ${branch}. The commit runs the checks your workspace rules call done (a pre-commit hook); fix what it reports and commit again.
+  2. \`git rebase ${main}\`. If that brought in new commits, run those checks again.
+  3. \`git -C "${repo}" merge --ff-only ${branch}\`. If it refuses because ${main} moved on, repeat from step 2.
   Report the merged commit hash. Work is done only when it is merged.
 - A rebase conflict with someone else's work: resolve it only when the fix is clearly mechanical; otherwise stop and report the conflict to whoever gave you the assignment.
 - Never switch branches or commit in the shared folder.`;

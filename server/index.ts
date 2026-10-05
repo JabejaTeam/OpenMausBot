@@ -321,7 +321,7 @@ import { holdIncludedServices } from "./included-services.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
 import { ensureThreadWorktree, removeThreadWorktree, threadWorktreePath, threadWorktreeSystemPrompt } from "./thread-worktrees.ts";
-import { kindInstructionsSystemPrompt, kindTakesTeamKnowledge, teamContextPrompt } from "./kind-instructions.ts";
+import { kindInstructionsSystemPrompt, kindStartsFreshPerAssignment, kindTakesSharedContext, teamContextPrompt } from "./kind-instructions.ts";
 import { notePerson, personTurnPreamble, readPersonProfile, updatePersonProfile } from "./person-profiles.ts";
 import { isBotKind } from "../shared/wire.ts";
 import { personKeyFor, personKeyForEmail } from "./person-key.ts";
@@ -1682,7 +1682,7 @@ function recentWorkSources(bot: BotRecord) {
  * or a room must not be able to pull a private chat into its reply. The
  * conversations are the ones session_search would search, minus this one. */
 function autoRecallPrompt(bot: BotRecord, threadId: string, message: string, opts: { conversations: boolean; userName: string }): string {
-  if (bot.memoryEnabled === false || !kindTakesTeamKnowledge(bot.kind) || !autoRecallEnabled(cfg)) return "";
+  if (bot.memoryEnabled === false || !kindTakesSharedContext(bot.kind) || !autoRecallEnabled(cfg)) return "";
   const roomByThread = new Map<string, GroupRecord>();
   if (opts.conversations) {
     for (const group of store.groups) {
@@ -10801,7 +10801,7 @@ async function startTurn(
         { id: "team-memory", label: "Team memory", text: teamMemory.systemPrompt(bot.section) + (integrations.agents ? TEAM_MEMORY_PROMPT : "") },
         // what the bot said lately in its other conversations, so a task
         // never redoes — or forgets — what another one already did
-        { id: "recent", label: "Recent work", text: recentWorkPrompt(recentWork(recentWorkSources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId, ...recentWorkFilter() })) },
+        { id: "recent", label: "Recent work", text: kindTakesSharedContext(bot.kind) ? recentWorkPrompt(recentWork(recentWorkSources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId, ...recentWorkFilter() })) : "" },
         { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace, enabled: bot.memoryEnabled !== false }) },
         // liveBot was captured before awaited setup work; an assignment PUT
         // in that window must still reach this turn's prompt.
@@ -13192,7 +13192,7 @@ async function runGroupMemberTurn(
     { id: "cloud-home", label: "OMB Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled()) : "" },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "recall", label: "Recall", text: integrations.agents && bot.memoryEnabled !== false ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
-    { id: "recent", label: "Recent work", text: recentWorkPrompt(recentLines) },
+    { id: "recent", label: "Recent work", text: kindTakesSharedContext(bot.kind) ? recentWorkPrompt(recentLines) : "" },
     { id: "section-context", label: "Section context", text: teamContextPrompt(bot) },
     { id: "kind-instructions", label: "Workspace rules", text: kindInstructionsSystemPrompt(bot.kind) },
     { id: "team-memory", label: "Team memory", text: teamMemory.systemPrompt(bot.section) + (integrations.agents ? TEAM_MEMORY_PROMPT : "") },
@@ -18202,7 +18202,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               // Outside a room this conversation has one thread with each
               // teammate: the first request opens it, everything after
               // continues it and runs once the work already there is done.
-              const continued = destination ? undefined : store.workThread(target.botId, internalSender.id, address.threadId);
+              const workThread = destination ? undefined : store.workThread(target.botId, internalSender.id, address.threadId);
+              const continued = workThread && (!kindStartsFreshPerAssignment(store.bot(target.botId)?.kind) ||
+                (!parsed.data.rework && roomHandoffs.runningFrom(address.threadId, target.botId, workThread.threadId)))
+                ? workThread : undefined;
               if (!destination) {
                 const task = continued ?? store.createTask(target.botId, `@${internalSender.name} · work`, false, undefined,
                   { botId: internalSender.id, name: internalSender.name, kind: "work", threadId: address.threadId, at: Date.now() });

@@ -78,3 +78,25 @@ it("queues a follow-up to finished work in the same thread", () => fixture(async
   const [first, follow] = f.clerkNodes();
   expect(follow).toMatchObject({ threadId: first.threadId, status: "completed" });
 }), 60_000);
+
+it("gives a code agent every new assignment in a fresh thread, without the one before", () => fixture(async f => {
+  await f.api(`/api/bots/${f.clerk.id}`, { kind: "code" }, "PATCH");
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: f.assign }], reply: "Asked the Bookkeeper" },
+    { reply: "Q3 is booked" },
+    { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Rebook USD invoices in EUR" } }], reply: "Correction passed on" },
+    { reply: "Rebooked in EUR" },
+  ] };
+  f.plan[f.clerk.id] = { turns: [
+    { reply: "Booked Q3" },
+    { reply: "Rebooked in EUR", expectContextIncludes: ["Rebook USD invoices in EUR"], expectContextExcludes: ["Book the Q3 supplier invoices", "Booked Q3"] },
+  ] };
+  f.save();
+  await f.say("Have the Bookkeeper book Q3");
+  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((m: any) => m.text === "Q3 is booked"), { timeout: 20_000 }).toBe(true);
+  await f.say("Oh, the dollar ones must be in euro");
+  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((m: any) => m.text === "Rebooked in EUR"), { timeout: 20_000 }).toBe(true);
+  const [first, follow] = f.clerkNodes();
+  expect(follow.status, JSON.stringify(follow)).toBe("completed");
+  expect(follow.threadId).not.toBe(first.threadId);
+}), 60_000);
