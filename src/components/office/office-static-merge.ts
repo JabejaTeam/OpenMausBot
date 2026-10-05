@@ -36,7 +36,8 @@ function mergeable(mesh: THREE.Mesh): boolean {
 
 /** Drop empty groups under `node`; true when `node` itself is left empty. */
 function prune(node: THREE.Object3D): boolean {
-  for (const child of [...node.children]) if (prune(child)) child.removeFromParent();
+  // a copy: removing a child changes the list
+  for (const child of node.children.slice()) if (prune(child)) child.removeFromParent();
   return node.children.length === 0 && (node.type === "Group" || node.type === "Object3D");
 }
 
