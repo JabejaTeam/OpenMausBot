@@ -96,8 +96,8 @@ export function threadWorktreeSystemPrompt(repo: string, path: string, threadId:
 - Starting an assignment: if \`git status\` is clean, run \`git rebase ${main}\` first so you build on the latest merged work. If package-lock.json changed, run \`npm ci\`.
 - Finishing an assignment, in this order:
   1. Commit your work on ${branch}.
-  2. Run the project's checks (see AGENTS.md or CLAUDE.md in the repo) and fix what fails.
-  3. \`git rebase ${main}\`. If that brought in new commits, run the checks again.
+  2. Run the checks your workspace rules call done (for code agents: the typecheck), not a repository's full CI list, and fix what fails.
+  3. \`git rebase ${main}\`. If that brought in new commits, run those checks again.
   4. \`git -C "${repo}" merge --ff-only ${branch}\`. If it refuses because ${main} moved on, repeat from step 3.
   Report the merged commit hash. Work is done only when it is merged.
 - A rebase conflict with someone else's work: resolve it only when the fix is clearly mechanical; otherwise stop and report the conflict to whoever gave you the assignment.
