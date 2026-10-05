@@ -28,6 +28,7 @@ import { HeadgearInstancer } from "./bean/headgear-instancer.js";
 import { BODY } from "./bean/bean.js";
 // @ts-expect-error plain JS module (preview)
 import { AdaptiveResolution, ShadowScheduler, warmUp } from "./bean/render-perf.js";
+import { markStatic, mergeStatic } from "./office-static-merge";
 
 export interface OfficeBotLook {
   name: string;
@@ -78,7 +79,14 @@ interface Seat {
 }
 
 const DESK_HEIGHT = 0.75;
-const reducedMotion = () => globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+// one live query, read every frame (matchMedia itself is not free)
+const motionQuery = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
+const reducedMotion = () => motionQuery?.matches ?? false;
+/** Nothing to draw: the loop sleeps, and looks again this often (a bot may
+ * set off for a walk); anything that changes the view wakes it at once. */
+const IDLE_CHECK_MS = 250;
+/** Around a bot: what its motion (and its shadow) can touch on screen. */
+const BOT_REACH = 1.5;
 /** top of a seated robot's head; replaced by the measured value once loaded */
 let HEAD_Y = 1.36;
 const ROBOT_URL = "/office/bean.glb";
@@ -176,7 +184,8 @@ function screenTexture(accent: string): THREE.CanvasTexture {
 export class OfficeScene {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(38, 1, 0.5, 400) // near ≥ 0.5: the camera stays ≥ 4 m away; more depth precision;
+  // near ≥ 0.5: the camera stays ≥ 4 m away; more depth precision (no z-fighting)
+  private camera = new THREE.PerspectiveCamera(38, 1, 0.5, 400);
   private controls: OrbitControls;
   private clock = new THREE.Clock();
   private world = new THREE.Group();
@@ -258,12 +267,14 @@ export class OfficeScene {
 
     this.scene.add(this.world);
     // the building and its light, which follows the sky over Brussels
-    this.building = new OfficeBuilding(this.scene, this.renderer);
+    this.building = new OfficeBuilding(this.scene, this.renderer, () => this.invalidate());
+    this.scene.add(this.baked);
     // shadows are re-drawn on demand (bean/render-perf): a new sun is a reason
     this.shadows = new ShadowScheduler(this.renderer);
     const sky = () => {
       this.building.applyDaylight(daylight(), this.renderer);
       this.shadows.invalidate();
+      this.invalidate();
     };
     sky();
     this.daylightTimer = setInterval(sky, 60_000);
@@ -279,7 +290,12 @@ export class OfficeScene {
     this.controls.maxPolarAngle = 1.3;
     this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
     this.controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
-    this.controls.addEventListener("start", () => (this.flight = null));
+    this.controls.addEventListener("start", () => {
+      this.flight = null;
+      this.invalidate();
+    });
+    // a wheel or drag moves the camera outside the loop: draw it
+    this.controls.addEventListener("change", () => this.invalidate());
 
     const canvas = this.renderer.domElement;
     canvas.addEventListener("pointermove", this.onPointerMove);
@@ -314,6 +330,7 @@ export class OfficeScene {
   setTeamLooks(looks: Record<string, TeamLook>): void {
     this.teamLooks = looks;
     if (this.layout) this.building.applyLooks(this.layout, looks);
+    this.invalidate();
   }
   private robot: Robot | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -332,6 +349,7 @@ export class OfficeScene {
       if (on) { this.scene.updateMatrixWorld(); this.headgear.showAll(first); }
       else this.headgear.update(this.clock.elapsedTime, 0);
     });
+    this.invalidate();
   }
   private layout: OfficeLayout | null = null;
   private disposed = false;
@@ -386,6 +404,8 @@ export class OfficeScene {
       seat.mixer?.stopAllAction();
     }
     for (const geometry of this.geometries.splice(1)) geometry.dispose(); // keep the floor
+    this.baked.clear();
+    for (const geometry of this.bakedGeometries.splice(0)) geometry.dispose();
     this.seats.clear();
     this.headgear ??= new HeadgearInstancer(this.scene);
     this.headgear.wearers.clear();
@@ -422,7 +442,7 @@ export class OfficeScene {
           group.add(leg);
         }
       }
-      this.world.add(group);
+      this.world.add(markStatic(group));
 
       for (const placed of desk.seats) {
         const look = looks.get(placed.botId);
@@ -482,18 +502,18 @@ export class OfficeScene {
         if (chair) {
           const keyboard = this.kit.place({ model: "computerKeyboard", x: 0, z: 0.68, y: DESK_HEIGHT + 0.025 });
           const mouse = this.kit.place({ model: "computerMouse", x: 0.32, z: 0.7, y: DESK_HEIGHT + 0.025 });
-          root.add(chair, ...[keyboard, mouse].filter((item): item is THREE.Object3D => Boolean(item)));
+          root.add(markStatic(chair), ...[keyboard, mouse].filter((item): item is THREE.Object3D => Boolean(item)).map(markStatic));
           // the simple chair stays as the real one's (unseen) hit area
           chairSeat.visible = chairBack.visible = false;
           root.add(chairSeat, chairBack);
         } else {
-          root.add(chairSeat, chairBack, chairPost);
+          root.add(chairSeat, chairBack, markStatic(chairPost));
         }
         // the robot and its hit area move together when it goes for a walk
         const body = new THREE.Group();
         body.add(hit);
         if (robot.avatar) body.add(robot.avatar);
-        root.add(body, monitor, screen, stand, foot);
+        root.add(body, markStatic(monitor), screen, markStatic(stand), markStatic(foot));
         this.world.add(marker);
         this.world.add(root);
         this.pickables.push(hit, chairBack, chairSeat, screen);
@@ -509,10 +529,17 @@ export class OfficeScene {
     // the offices round the desks; their floors fly you to the team
     this.building.build(layout, this.teamLooks, this.kit);
     this.pickables.push(...this.building.floors);
+    // what never moves, baked into a few meshes (office-static-merge)
+    this.bakedGeometries = mergeStatic(this.scene, this.baked);
     if (firstLayout) this.fitAll(false);
     // seats moved: draw the arcs again between the new desks (no flash)
     this.syncArcs(false);
+    this.invalidate();
   }
+
+  /** the static parts of the office, merged (office-static-merge) */
+  private baked = new THREE.Group();
+  private bakedGeometries: THREE.BufferGeometry[] = [];
 
   // ── delegation arcs ────────────────────────────────────────────────────
   // A soft arc from the bot that handed work over to the bot doing it; small
@@ -534,6 +561,7 @@ export class OfficeScene {
     // the links already there when the office opens appear quietly
     this.syncArcs(this.linksSeen);
     this.linksSeen = true;
+    this.invalidate();
   }
 
   /** In a handoff right now (either end): a bot talking stays at its desk,
@@ -599,7 +627,9 @@ export class OfficeScene {
     arc.tubeMaterial.dispose();
   }
 
-  private drawArcs(time: number): void {
+  /** Places the arcs; true while one still moves (lights flowing, a fade, a comet). */
+  private drawArcs(time: number): boolean {
+    let moving = false;
     const now = Date.now();
     const lit = linksOf(this.links, this.hovered ?? this.selected);
     for (const arc of this.arcs.values()) {
@@ -616,19 +646,25 @@ export class OfficeScene {
       }
       // a finished quick handoff fades out over what is left of its moment
       const fade = link.active ? 1 : Math.max(0, 1 - (now - link.at) / RECENT_HANDOFF_MS);
+      if (!link.active && fade > 0) moving = true;
       const strength = lit.size ? (lit.has(link.id) ? 1 : 0.35) : 0.75;
       arc.tubeMaterial.opacity = 0.55 * fade * strength;
       arc.beads.forEach((bead, index) => {
         bead.visible = link.active && strength > 0.5;
-        if (bead.visible) bead.position.copy(arc.curve.getPoint((time * 0.22 + index / 3) % 1));
+        if (bead.visible) {
+          bead.position.copy(arc.curve.getPoint((time * 0.22 + index / 3) % 1));
+          moving = true;
+        }
       });
       if (arc.cometFrom !== null) {
         const t = (performance.now() - arc.cometFrom) / 1100;
         arc.comet.visible = t < 1;
         if (t < 1) arc.comet.position.copy(arc.curve.getPoint(easeInOut(Math.max(0, t))));
         else arc.cometFrom = null;
+        moving = true;
       }
     }
+    return moving;
   }
 
   /** Cheap per-update changes: colour, working, unread. */
@@ -641,6 +677,7 @@ export class OfficeScene {
       if (seat.agent) this.headgear?.setColor(seat.agent, look.color);
       this.showStatus(seat, look);
     }
+    this.invalidate();
   }
 
   private showStatus(seat: Seat, look: OfficeBotLook | undefined): void {
@@ -713,14 +750,24 @@ export class OfficeScene {
   private toCamera = new THREE.Vector3();
 
   setSelected(botId: string | null): void {
+    if (botId === this.selected) return;
     this.selected = botId;
+    this.invalidate();
   }
 
   /** Team labels (desk id → element) and the hover name, placed every frame. */
   setOverlays(labels: Map<string, HTMLElement>, hoverLabel: HTMLElement | null): void {
+    const same = labels === this.labels && labels.size === this.overlayCount && hoverLabel === this.hoverLabel
+      && [...labels].every(([id, element]) => this.overlayPlaced.get(id) === element);
     this.labels = labels;
     this.hoverLabel = hoverLabel;
+    this.overlayCount = labels.size;
+    this.overlayPlaced = new Map(labels);
+    // a new label needs placing: draw once (React re-renders call this often)
+    if (!same) this.invalidate();
   }
+  private overlayCount = -1;
+  private overlayPlaced = new Map<string, HTMLElement>();
 
   fitAll(animate = true): void {
     if (!this.layout || !this.desks.length) return;
@@ -761,6 +808,7 @@ export class OfficeScene {
   /** `withPanel`: the flight that opens the panel; the view's shift for the
    * panel follows this flight (lib/office-motion), not the faster slide. */
   private flyTo(position: THREE.Vector3, target: THREE.Vector3, animate: boolean, ms?: number, withPanel = false): void {
+    this.invalidate();
     if (!animate) {
       this.camera.position.copy(position);
       this.controls.target.copy(target);
@@ -815,6 +863,7 @@ export class OfficeScene {
     this.panelClosing = setTimeout(() => {
       this.panelClosing = null;
       this.panel = null;
+      this.invalidate(); // the view's shift for the panel goes
       onClosed();
     }, reducedMotion() ? 0 : PANEL_MOVE_MS);
   }
@@ -833,8 +882,11 @@ export class OfficeScene {
     this.renderer.domElement.style.height = `${height}px`;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    // a resize clears the canvas; draw now so it never flashes empty
+    // a resize clears the canvas; draw now (all of it) so it never flashes empty
+    this.renderer.setScissorTest(false);
     this.renderer.render(this.scene, this.camera);
+    // and the labels follow the new size
+    this.invalidate();
   }
 
   private pick(event: PointerEvent): THREE.Object3D | null {
@@ -852,11 +904,14 @@ export class OfficeScene {
     const botId: string | null = hit?.userData.botId ?? null;
     this.renderer.domElement.style.cursor = hit ? "pointer" : "grab";
     const away = Boolean(botId && this.seats.get(botId)?.walker?.away);
+    const chair = this.hoveredChair;
     this.hoveredChair = away && Boolean(hit?.userData.seat);
+    if (chair !== this.hoveredChair) this.invalidate();
     if (botId !== this.hovered || away !== this.hoveredAway) {
       this.hovered = botId;
       this.hoveredAway = away;
       this.events.onHover(botId, away);
+      this.invalidate();
     }
     const roomId: string | null = hit?.userData.deskId ?? (botId ? this.seats.get(botId)?.homeId ?? null : null);
     if (roomId !== this.hoveredRoom) {
@@ -881,6 +936,7 @@ export class OfficeScene {
   };
 
   private onPointerLeave = () => {
+    this.invalidate();
     if (this.hoveredRoom !== null) {
       this.hoveredRoom = null;
       this.events.onHoverRoom(null);
@@ -893,14 +949,25 @@ export class OfficeScene {
 
   private project = new THREE.Vector3();
 
-  private place(element: HTMLElement, x: number, y: number, z: number): void {
+  private place(element: HTMLElement, x: number, y: number, z: number, width: number, height: number): void {
     this.project.set(x, y, z).project(this.camera);
     const visible = this.project.z < 1 && Math.abs(this.project.x) < 1.2 && Math.abs(this.project.y) < 1.2;
-    element.style.visibility = visible ? "visible" : "hidden";
+    this.setStyle(element, "visibility", visible ? "visible" : "hidden");
     if (!visible) return;
-    const px = ((this.project.x + 1) / 2) * this.host.clientWidth;
-    const py = ((1 - this.project.y) / 2) * this.host.clientHeight;
-    element.style.transform = `translate(${px}px, ${py}px) translate(-50%, -100%)`;
+    const px = ((this.project.x + 1) / 2) * width;
+    const py = ((1 - this.project.y) / 2) * height;
+    this.setStyle(element, "transform", `translate(${px}px, ${py}px) translate(-50%, -100%)`);
+  }
+
+  /** what this loop last wrote, per element: an unchanged value is not
+   * written again (every write makes the browser restyle) */
+  private written = new WeakMap<HTMLElement, { visibility?: string; transform?: string }>();
+  private setStyle(element: HTMLElement, key: "visibility" | "transform", value: string): void {
+    let last = this.written.get(element);
+    if (!last) this.written.set(element, (last = {}));
+    if (last[key] === value) return;
+    last[key] = value;
+    element.style[key] = value;
   }
 
   private headTurn = new THREE.Quaternion();
@@ -920,6 +987,47 @@ export class OfficeScene {
     this.camera.updateMatrixWorld();
     const projected = this.project.copy(point).project(this.camera);
     return ((projected.x + 1) / 2) * this.host.clientWidth;
+  }
+
+  // ── the loop: it draws only while something on screen changes ──────────
+  // Same pixels as drawing every frame: while the camera, a bot, an arc or a
+  // swaying hat moves, every frame is drawn; when nothing does, the last frame
+  // simply stays up and the loop sleeps (IDLE_CHECK_MS) until woken.
+  private dirty = true;
+  private sleeping = false;
+  private wakeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** the previous frame was drawn: its interval says something about the frame rate */
+  private drewLast = false;
+  private frustum = new THREE.Frustum();
+  private viewProjection = new THREE.Matrix4();
+  private reach = new THREE.Sphere(new THREE.Vector3(), BOT_REACH);
+
+  /** Something changed that the next frame must show. */
+  invalidate(): void {
+    this.dirty = true;
+    this.wake();
+  }
+
+  private wake(): void {
+    if (!this.sleeping || this.disposed) return;
+    this.sleeping = false;
+    if (this.wakeTimer) clearTimeout(this.wakeTimer);
+    this.wakeTimer = null;
+    this.clock.getDelta(); // the pause is no motion: moves go on from here
+    this.renderer.setAnimationLoop(this.frame);
+  }
+
+  private sleep(): void {
+    this.sleeping = true;
+    this.drewLast = false;
+    this.renderer.setAnimationLoop(null);
+    this.wakeTimer = setTimeout(() => this.wake(), IDLE_CHECK_MS);
+  }
+
+  /** A bot near the view: its motion or its shadow can show. */
+  private inView(object: THREE.Object3D): boolean {
+    this.reach.center.setFromMatrixPosition(object.matrixWorld);
+    return this.frustum.intersectsSphere(this.reach);
   }
 
   private frame = () => {
@@ -950,6 +1058,7 @@ export class OfficeScene {
       this.camera.lookAt(this.controls.target);
       if (progress === 1) this.flight = null;
     } else {
+      // damping still gliding: a "change" event marks this frame dirty
       this.controls.update();
     }
     // the view shifts by half of what the panel covers (a panel as wide as
@@ -968,8 +1077,10 @@ export class OfficeScene {
         inset = Math.round(THREE.MathUtils.clamp(covered, 0, full));
       }
     }
+    let live = Boolean(flight);
     if (inset !== this.inset) {
       this.inset = inset;
+      live = true;
       if (inset > 0 && width && height) this.camera.setViewOffset(width, height, inset / 2, 0, width, height);
       else this.camera.clearViewOffset();
     }
@@ -978,10 +1089,16 @@ export class OfficeScene {
     const distance = this.camera.position.distanceTo(this.controls.target);
     fog.near = distance * 1.6;
     fog.far = distance * 4;
+    // what the camera sees now: motion outside it needs no frame
+    this.camera.updateMatrixWorld();
+    this.viewProjection.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.viewProjection);
 
     this.screenMap.offset.y = (this.screenMap.offset.y + delta * 0.12) % 1;
-    this.drawArcs(time);
+    if (this.drawArcs(time)) live = true;
+    // casters moving anywhere: the shadow map needs redrawing (bean/render-perf)
     let animating = this.building.update(this.camera, delta) || Boolean(this.flight);
+    if (animating) live = true;
     // screens light up more in the evening
     this.materials.screenWorking.emissiveIntensity = 1 + this.building.lampLevel * 0.5;
     for (const seat of this.seats.values()) {
@@ -1022,33 +1139,54 @@ export class OfficeScene {
     for (const seat of this.seats.values()) {
       if (!seat.agent) continue;
       const mood = MOOD[beanMood(this.looks.get(seat.botId))];
-      if (mood.moves || seat.walker?.away) animating = true;
+      const moving = mood.moves || Boolean(seat.walker?.away);
+      if (moving) {
+        animating = true;
+        if (!live && this.inView(seat.body)) live = true;
+      }
       setExpression(seat.agent, mood.expression, mood.blinks && blinking(time, seat.phase));
     }
+    // hats that move by themselves (a propeller, an antenna) keep drawing while in view
+    if (!live && this.headgear?.animatesIn(this.frustum)) live = true;
+    // read last: the controls' "change" above lands here
+    if (this.dirty) live = true;
+    this.dirty = false;
+    if (!live) return this.sleep();
+
+    // the side panel is opaque: what lies under it is never drawn (the
+    // scissor), and a panel over the whole canvas (phones) draws nothing
+    const covered = this.panel ? THREE.MathUtils.clamp(this.host.getBoundingClientRect().right - this.panel.getBoundingClientRect().left, 0, width) : 0;
+    if (covered >= width) return this.sleep();
+    this.renderer.setScissorTest(covered > 0);
+    if (covered > 0) this.renderer.setScissor(0, 0, Math.ceil(width - covered), height);
+
     this.scene.updateMatrixWorld();
     this.headgear?.update(time, delta);
     this.shadows.tick(animating);
-    this.resolution.tick(this.clockDeltaMs);
+    this.resolution.tick(this.drewLast ? this.clockDeltaMs : undefined);
 
     this.renderer.render(this.scene, this.camera);
+    this.drewLast = true;
 
     for (const desk of this.desks) {
       const label = this.labels.get(desk.id);
       // the team's name over its office door
       const room = this.layout?.rooms.find((item) => item.id === desk.id);
-      if (label && room) this.place(label, room.doorX, WALL_HEIGHT + 0.25, room.z + room.depth / 2);
+      if (label && room) this.place(label, room.doorX, WALL_HEIGHT + 0.25, room.z + room.depth / 2, width, height);
     }
     if (this.hoverLabel) {
       const seat = this.hovered ? this.seats.get(this.hovered) : null;
       // over the empty chair you point at, else over the bot wherever it is
       const at = this.hoveredChair ? seat?.markerHome : seat?.marker.position;
-      if (seat && at) this.place(this.hoverLabel, at.x, HEAD_Y + MARKER_GAP + 0.25, at.z);
-      else this.hoverLabel.style.visibility = "hidden";
+      if (seat && at) this.place(this.hoverLabel, at.x, HEAD_Y + MARKER_GAP + 0.25, at.z, width, height);
+      else this.setStyle(this.hoverLabel, "visibility", "hidden");
     }
   };
 
   dispose(): void {
     this.renderer.setAnimationLoop(null);
+    if (this.wakeTimer) clearTimeout(this.wakeTimer);
+    for (const geometry of this.bakedGeometries) geometry.dispose();
     this.resize.disconnect();
     const canvas = this.renderer.domElement;
     canvas.removeEventListener("pointermove", this.onPointerMove);

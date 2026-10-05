@@ -50,8 +50,11 @@ export class AdaptiveResolution {
     this.wentUp = false;
     renderer.setPixelRatio(max);
   }
-  /** Call once per frame with the real frame interval (ms). */
+  /** Call once per drawn frame with the interval since the previous drawn
+   *  frame (ms). Only back-to-back frames say anything about the frame rate:
+   *  after a pause (nothing to draw) call with no interval, it is skipped. */
   tick(intervalMs) {
+    if (intervalMs === undefined) return;
     this.avg += (Math.min(intervalMs, 100) - this.avg) * 0.1;
     this.slow = this.avg > 20 ? this.slow + 1 : 0;   // below ~50 fps
     this.fast = this.avg < 17.5 ? this.fast + 1 : 0; // holding 60 fps

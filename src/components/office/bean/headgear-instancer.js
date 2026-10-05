@@ -6,6 +6,9 @@
 import * as THREE from "three";
 import { buildAccessories } from "./accessories.js";
 
+/** a piece's reach round its head anchor (metres) */
+const _sphere = new THREE.Sphere(new THREE.Vector3(), 0.6);
+
 export class HeadgearInstancer {
   constructor(scene, { capacity = 128 } = {}) {
     this.scene = scene;
@@ -68,6 +71,17 @@ export class HeadgearInstancer {
         if (p.tinted) p.inst.instanceColor.needsUpdate = true;
       }
     }
+  }
+
+  /** Whether a piece that moves by itself (a propeller, a swaying antenna) is
+   *  worn within `frustum`: then the view must keep drawing. */
+  animatesIn(frustum) {
+    for (const [agent, w] of this.wearers) {
+      if (!this.types.get(w.type)?.tick) continue;
+      _sphere.center.setFromMatrixPosition(agent.anchor.matrixWorld);
+      if (frustum.intersectsSphere(_sphere)) return true;
+    }
+    return false;
   }
 
   /** Every piece visible once (at `agent`), for shader warm-up — see render-perf.js. */

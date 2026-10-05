@@ -10,6 +10,7 @@ import type { Daylight } from "@/lib/office-daylight";
 import { roomDecor } from "@/lib/office-furniture";
 import { logoSize, NAME_MAX_HEIGHT, wallColorFor, wallSignFor, type TeamLook, type WallSign } from "@/lib/office-team-looks";
 import type { FurnitureKit } from "./office-furniture-kit";
+import { markStatic } from "./office-static-merge";
 
 export const WALL_HEIGHT = 2.7;
 const WALL_THICKNESS = 0.12;
@@ -51,7 +52,8 @@ export class OfficeBuilding {
     sky: new THREE.MeshBasicMaterial({ color: "#cfe2f5" }),
   };
 
-  constructor(private scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
+  /** `changed`: something appeared later (a logo that loaded): draw it */
+  constructor(private scene: THREE.Scene, renderer: THREE.WebGLRenderer, private changed: () => void = () => {}) {
     // soft, real reflections from a generic room — no file to load
     const pmrem = new THREE.PMREMGenerator(renderer);
     this.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -101,7 +103,7 @@ export class OfficeBuilding {
       const desk = layout.desks[index];
       if (kit && desk) for (const item of roomDecor(room, desk)) {
         const piece = kit.place(item);
-        if (piece) this.group.add(piece);
+        if (piece) this.group.add(markStatic(piece));
       }
     });
 
@@ -165,23 +167,25 @@ export class OfficeBuilding {
     for (const x of [left, doorLeft, doorRight, right]) {
       const post = new THREE.Mesh(this.geo(new THREE.BoxGeometry(0.05, WALL_HEIGHT, 0.07)), this.materials.frame);
       post.position.set(x, WALL_HEIGHT / 2, front);
-      this.group.add(post);
+      this.group.add(markStatic(post));
     }
     const rail = new THREE.Mesh(this.geo(new THREE.BoxGeometry(room.width, 0.06, 0.07)), this.materials.frame);
     rail.position.set(room.x, WALL_HEIGHT - 0.03, front);
     const header = new THREE.Mesh(this.geo(new THREE.BoxGeometry(DOOR_WIDTH, 0.05, 0.07)), this.materials.frame);
     header.position.set(room.doorX, 2.1, front);
-    this.group.add(rail, header);
+    this.group.add(markStatic(rail), markStatic(header));
 
     // a pendant lamp over the desk: warm light in the evening
-    const shade = new THREE.MeshStandardMaterial({ color: "#f4efe6", emissive: "#ffcf96", emissiveIntensity: 0, roughness: 0.6 });
+    const shade = new THREE.MeshStandardMaterial({ color: "#f4efe6", emissive: "#ffcf96", emissiveIntensity: this.lampsOn * 1.4, roughness: 0.6 });
     const lampMesh = new THREE.Mesh(this.geo(new THREE.CylinderGeometry(0.18, 0.32, 0.18, 24, 1, true)), shade);
     lampMesh.position.set(room.x, 2.25, room.z);
     const cord = new THREE.Mesh(this.geo(new THREE.CylinderGeometry(0.008, 0.008, WALL_HEIGHT - 2.34, 6)), this.materials.frame);
     cord.position.set(room.x, (WALL_HEIGHT + 2.34) / 2, room.z);
-    const light = new THREE.PointLight("#ffcf96", 0, Math.max(room.width, room.depth) * 1.2, 1.6);
+    // lit as the sky is now (applyDaylight keeps it so)
+    const light = new THREE.PointLight("#ffcf96", this.lampsOn * 9, Math.max(room.width, room.depth) * 1.2, 1.6);
+    light.visible = this.lampsOn > 0;
     light.position.set(room.x, 2.1, room.z);
-    this.group.add(lampMesh, cord, light);
+    this.group.add(lampMesh, markStatic(cord), light);
     this.lamps.push({ light, shade });
   }
 
@@ -221,6 +225,7 @@ export class OfficeBuilding {
       logo.position.set(office.room.x, WALL_HEIGHT - 0.15 - height / 2, office.room.z - office.room.depth / 2 + WALL_THICKNESS / 2 + 0.02);
       office.logo = logo;
       this.group.add(logo);
+      this.changed();
     };
     if (sign.kind === "logo") {
       new THREE.TextureLoader().load(sign.source, (texture) => {
@@ -283,6 +288,9 @@ export class OfficeBuilding {
     this.lampsOn = light.lamps;
     for (const lamp of this.lamps) {
       lamp.light.intensity = light.lamps * 9;
+      // an unlit lamp is left out of the lighting altogether: by day no
+      // fragment pays for the office lamps (intensity 0 still costs)
+      lamp.light.visible = light.lamps > 0;
       lamp.shade.emissiveIntensity = light.lamps * 1.4;
     }
   }
