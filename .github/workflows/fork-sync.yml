@@ -1,4 +1,4 @@
-# Jabeja fork only: keep feat/new-bot-approval-default on the latest upstream
+# Jabeja fork only: keep main (what runs on the beast) on the latest upstream
 # release. Daily (and on demand) it merges the newest upstream v* tag into a
 # sync/<tag> branch, runs typecheck + the vitest suite in shards, and opens a
 # PR when green. Generated files (GENERATED) are regenerated, never reported;
@@ -25,7 +25,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BASE: feat/new-bot-approval-default
+  BASE: main
   UPSTREAM: https://github.com/milind-soni/OpenMausBot.git
   # Files a tool writes; a sync regenerates them instead of reporting a conflict.
   GENERATED: server/drivers/agents-catalog-goldens/profiles.json
