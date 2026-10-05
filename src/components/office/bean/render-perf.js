@@ -36,6 +36,24 @@ export class ShadowScheduler {
   }
 }
 
+/** At most `fps` drawn frames per second, whatever the display's refresh
+ *  rate (a 120 Hz screen would draw twice as often for the same motion).
+ *  Skipped display frames are carried over, so 90 Hz still averages `fps`. */
+export class FrameCap {
+  constructor(fps = 60) {
+    this.interval = 1000 / fps;
+    this.last = -Infinity;
+  }
+  /** Call at the start of every display frame: false = skip this one. */
+  ready(now) {
+    const elapsed = now - this.last;
+    if (elapsed < this.interval - 1) return false;
+    // keep the rhythm: what overshot this interval counts toward the next
+    this.last = elapsed >= this.interval && elapsed < 2 * this.interval ? now - (elapsed - this.interval) : now;
+    return true;
+  }
+}
+
 /** Pixel ratio that steps down (by 0.25, not below `min`) when frames run late
  *  and steps back up once there is headroom. Each time it has to step down
  *  again after going up, it waits twice as long before trying up again. */

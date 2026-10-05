@@ -27,7 +27,7 @@ import { HeadgearInstancer } from "./bean/headgear-instancer.js";
 // @ts-expect-error plain JS module (preview)
 import { BODY } from "./bean/bean.js";
 // @ts-expect-error plain JS module (preview)
-import { AdaptiveResolution, ShadowScheduler, warmUp } from "./bean/render-perf.js";
+import { AdaptiveResolution, FrameCap, ShadowScheduler, warmUp } from "./bean/render-perf.js";
 import { markStatic, mergeStatic } from "./office-static-merge";
 
 export interface OfficeBotLook {
@@ -1001,6 +1001,8 @@ export class OfficeScene {
   private frustum = new THREE.Frustum();
   private viewProjection = new THREE.Matrix4();
   private reach = new THREE.Sphere(new THREE.Vector3(), BOT_REACH);
+  /** 60 drawn frames a second, also on 120 Hz screens (the user's choice) */
+  private cap = new FrameCap(60);
 
   /** Something changed that the next frame must show. */
   invalidate(): void {
@@ -1031,6 +1033,7 @@ export class OfficeScene {
   }
 
   private frame = () => {
+    if (!this.cap.ready(performance.now())) return;
     const raw = this.clock.getDelta();
     this.clockDeltaMs = raw * 1000;
     const delta = Math.min(raw, 0.1);

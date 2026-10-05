@@ -25,7 +25,8 @@ describe("mergeStatic", () => {
     const baked = mergeStatic(scene, into);
 
     expect(baked).toHaveLength(1);
-    expect(group.children).toHaveLength(0);
+    // the emptied group is gone too: nothing left to walk every frame
+    expect(scene.children).toEqual([into]);
     expect(into.children).toHaveLength(1);
     expect(worldBox(into).equals(before)).toBe(true);
   });

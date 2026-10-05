@@ -34,6 +34,12 @@ function mergeable(mesh: THREE.Mesh): boolean {
   return true;
 }
 
+/** Drop empty groups under `node`; true when `node` itself is left empty. */
+function prune(node: THREE.Object3D): boolean {
+  for (const child of [...node.children]) if (prune(child)) child.removeFromParent();
+  return node.children.length === 0 && (node.type === "Group" || node.type === "Object3D");
+}
+
 /** Bake every marked subtree under `root` into one mesh per material and
  * shadow setting, added to `into` (at the world origin). Returns the baked
  * geometries, to dispose of on the next bake. */
@@ -76,5 +82,9 @@ export function mergeStatic(root: THREE.Object3D, into: THREE.Object3D): THREE.B
     baked.push(merged);
     for (const original of bucket.meshes) original.removeFromParent();
   }
+  // what is left of a baked subtree is empty groups: still walked every frame
+  const roots: THREE.Object3D[] = [];
+  root.traverse((node) => node.userData.static && roots.push(node));
+  for (const node of roots) if (prune(node)) node.removeFromParent();
   return baked;
 }
