@@ -28,7 +28,7 @@ import { HeadgearInstancer } from "./bean/headgear-instancer.js";
 import { BODY } from "./bean/bean.js";
 // @ts-expect-error plain JS module (preview)
 import { AdaptiveResolution, FrameCap, ShadowScheduler, warmUp } from "./bean/render-perf.js";
-import { markStatic, mergeStatic } from "./office-static-merge";
+import { freeze, markStatic, mergeStatic } from "./office-static-merge";
 
 export interface OfficeBotLook {
   name: string;
@@ -76,6 +76,10 @@ interface Seat {
   markerHome: THREE.Vector3;
   homeId: string;
   placed: OfficeSeat;
+  /** the body's nodes that normally update their matrix each frame */
+  movers: THREE.Object3D[];
+  /** seated and idle: its pose is held, those matrices are frozen */
+  still: boolean;
 }
 
 const DESK_HEIGHT = 0.75;
@@ -265,6 +269,12 @@ export class OfficeScene {
       busy: new THREE.MeshBasicMaterial({ color: theme.success, depthTest: false }),
     };
 
+    // matrices: the loop updates them once per drawn frame (render() would do
+    // it a second time), and the fixed frames of the scene never recompute
+    this.scene.matrixWorldAutoUpdate = false;
+    freeze(this.scene);
+    freeze(this.world);
+    freeze(this.baked);
     this.scene.add(this.world);
     // the building and its light, which follows the sky over Brussels
     this.building = new OfficeBuilding(this.scene, this.renderer, () => this.invalidate());
@@ -515,10 +525,13 @@ export class OfficeScene {
         if (robot.avatar) body.add(robot.avatar);
         root.add(body, markStatic(monitor), screen, markStatic(stand), markStatic(foot));
         this.world.add(marker);
-        this.world.add(root);
+        // the seat stays put (its bot walks off with `body`, which keeps updating)
+        this.world.add(freeze(root));
+        freeze(screen);
         this.pickables.push(hit, chairBack, chairSeat, screen);
         const walker = this.makeWalker(body, robot, root);
-        const seat: Seat = { botId: placed.botId, root, ...robot, screen, marker, spinner, alert, dot, phase: Math.random() * Math.PI * 2, body, walker, markerHome: marker.position.clone(), homeId: desk.id, placed };
+        const seat: Seat = { botId: placed.botId, root, ...robot, screen, marker, spinner, alert, dot, phase: Math.random() * Math.PI * 2, body, walker, markerHome: marker.position.clone(), homeId: desk.id, placed, movers: [], still: false };
+        body.traverse((node) => node.matrixAutoUpdate && seat.movers.push(node));
         this.showStatus(seat, look);
         if (seat.agent) this.headgear.wear(seat.agent, headgearFor(placed.botId, look?.chief), look?.color ?? "#8e8e93");
         this.seats.set(placed.botId, seat);
@@ -982,6 +995,17 @@ export class OfficeScene {
 
   private clockDeltaMs = 0;
 
+  /** A bot sitting idle holds its pose (lib/office-bean MOOD): its skeleton's
+   * matrices are frozen until it works, waits or gets up — same pose, no work. */
+  private holdStill(seat: Seat, still: boolean): void {
+    if (seat.still === still) return;
+    seat.still = still;
+    for (const node of seat.movers) {
+      if (still) node.updateMatrix();
+      node.matrixAutoUpdate = !still;
+    }
+  }
+
   /** A world point's on-screen x, with the camera as it is now. */
   private screenX(point: THREE.Vector3): number {
     this.camera.updateMatrixWorld();
@@ -1130,6 +1154,7 @@ export class OfficeScene {
           this.turnHead(seat, 0, 0);
         }
       }
+      this.holdStill(seat, Boolean(seat.avatar) && !seat.walker?.away && !look?.waiting && !look?.working);
       if (seat.marker.visible) {
         seat.marker.quaternion.copy(this.camera.quaternion);
         if (seat.spinner.visible) seat.spinner.rotation.z = -time * 6;

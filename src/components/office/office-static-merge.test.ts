@@ -48,6 +48,9 @@ describe("mergeStatic", () => {
     expect(mergeStatic(scene, new THREE.Group())).toHaveLength(0);
     expect(scene.children).toEqual([loose, picked, panes, mirrored, hidden]);
     expect(panes.children).toHaveLength(2);
+    // what stays is frozen (no matrix work per frame), what is not marked is not
+    expect([picked, mirrored, hidden, ...panes.children].every((mesh) => !mesh.matrixAutoUpdate)).toBe(true);
+    expect(loose.matrixAutoUpdate).toBe(true);
   });
 
   it("keeps shadow settings apart", () => {

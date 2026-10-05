@@ -5,10 +5,18 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
-/** Mark a subtree that never moves, never changes material and is never
- * picked: mergeStatic() may bake it. */
+/** Mark a subtree that never moves and never changes material: mergeStatic()
+ * may bake it (unless it is picked) and freezes what it leaves. */
 export function markStatic<T extends THREE.Object3D>(object: T): T {
   object.userData.static = true;
+  return object;
+}
+
+/** Never moves again: its matrices are set now and no longer recomputed every
+ * frame (three recomputes every object's matrix each frame by default). */
+export function freeze<T extends THREE.Object3D>(object: T): T {
+  object.updateMatrix();
+  object.matrixAutoUpdate = false;
   return object;
 }
 
@@ -87,5 +95,7 @@ export function mergeStatic(root: THREE.Object3D, into: THREE.Object3D): THREE.B
   const roots: THREE.Object3D[] = [];
   root.traverse((node) => node.userData.static && roots.push(node));
   for (const node of roots) if (prune(node)) node.removeFromParent();
+  // what stays as it was (picked, see-through, one of a kind) is frozen
+  for (const node of roots) node.traverse((child) => (child.matrixAutoUpdate = false));
   return baked;
 }

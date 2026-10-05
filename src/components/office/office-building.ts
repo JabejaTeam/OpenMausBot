@@ -10,7 +10,7 @@ import type { Daylight } from "@/lib/office-daylight";
 import { roomDecor } from "@/lib/office-furniture";
 import { logoSize, NAME_MAX_HEIGHT, wallColorFor, wallSignFor, type TeamLook, type WallSign } from "@/lib/office-team-looks";
 import type { FurnitureKit } from "./office-furniture-kit";
-import { markStatic } from "./office-static-merge";
+import { freeze, markStatic } from "./office-static-merge";
 
 export const WALL_HEIGHT = 2.7;
 const WALL_THICKNESS = 0.12;
@@ -63,6 +63,8 @@ export class OfficeBuilding {
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.radius = 5;
     this.sun.shadow.bias = -0.0004;
+    // the building's frame never moves; its walls do (they drop), so they keep updating
+    freeze(this.group);
     scene.add(this.hemi, this.sun, this.sun.target, this.group);
   }
 
@@ -87,7 +89,7 @@ export class OfficeBuilding {
     const slab = new THREE.Mesh(this.geo(new THREE.BoxGeometry(width, 0.04, depth)), this.materials.slab);
     slab.position.set(cx, -0.02, cz);
     slab.receiveShadow = true;
-    this.group.add(ground, slab);
+    this.group.add(markStatic(ground), markStatic(slab));
 
     // the outside walls: window walls on three sides, the camera's side too
     // (it drops away when the camera looks over it)
@@ -147,7 +149,7 @@ export class OfficeBuilding {
     floor.receiveShadow = true;
     floor.userData.deskId = room.id;
     this.floors.push(floor);
-    this.group.add(floor);
+    this.group.add(markStatic(floor));
 
     const backWall = this.wall(left, back, right, back, WALL_HEIGHT, wallMaterial, new THREE.Vector2(0, -1));
     this.offices.set(room.id, { room, material: wallMaterial, backWall, logo: null });
@@ -162,7 +164,7 @@ export class OfficeBuilding {
       if (to - from < 0.05) continue;
       const pane = new THREE.Mesh(this.geo(new THREE.BoxGeometry(to - from, WALL_HEIGHT, 0.02)), this.materials.glass);
       pane.position.set((from + to) / 2, WALL_HEIGHT / 2, front);
-      this.group.add(pane);
+      this.group.add(markStatic(pane));
     }
     for (const x of [left, doorLeft, doorRight, right]) {
       const post = new THREE.Mesh(this.geo(new THREE.BoxGeometry(0.05, WALL_HEIGHT, 0.07)), this.materials.frame);
@@ -185,7 +187,7 @@ export class OfficeBuilding {
     const light = new THREE.PointLight("#ffcf96", this.lampsOn * 9, Math.max(room.width, room.depth) * 1.2, 1.6);
     light.visible = this.lampsOn > 0;
     light.position.set(room.x, 2.1, room.z);
-    this.group.add(lampMesh, markStatic(cord), light);
+    this.group.add(markStatic(lampMesh), markStatic(cord), markStatic(light));
     this.lamps.push({ light, shade });
   }
 
@@ -224,7 +226,7 @@ export class OfficeBuilding {
       // high on the wall, its top 15 cm under the ceiling line
       logo.position.set(office.room.x, WALL_HEIGHT - 0.15 - height / 2, office.room.z - office.room.depth / 2 + WALL_THICKNESS / 2 + 0.02);
       office.logo = logo;
-      this.group.add(logo);
+      this.group.add(freeze(logo));
       this.changed();
     };
     if (sign.kind === "logo") {
