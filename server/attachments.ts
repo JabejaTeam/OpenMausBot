@@ -29,7 +29,7 @@ export const FILE_MAX_BYTES = 25 * 1024 * 1024;
 /** Attachments are durable because prompts refer to their paths. Never
  * silently evict them: once this ceiling is reached, a new upload gets an
  * explicit 507 and the person can decide what to remove. */
-export const ATTACHMENTS_MAX_BYTES = 512 * 1024 * 1024;
+export const ATTACHMENTS_MAX_BYTES = 5 * 1024 * 1024 * 1024; // fork: 512 MiB filled up in a day of bot screenshots
 
 /** Interrupted streamed uploads use private partial files. A crash can leave
  * one behind, so future uploads remove only our stale partials — never a
