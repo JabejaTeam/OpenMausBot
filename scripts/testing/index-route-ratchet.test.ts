@@ -15,11 +15,17 @@ const EXACT: Record<string, number> = {
   ".includes(path)": 3,
 };
 
+// Jabeja fork: inline routes not yet moved to server/routes (relay-question,
+// person-profile, email-card actions, the per-person connectors guard). Kept
+// apart so upstream's numbers above stay verbatim; moving one out lowers this.
+const FORK_EXTRA: Record<string, number> = { 'path === "/': 2, "path.match(": 1, "path.startsWith(": 1 };
+
 const count = (needle: string) => INDEX.split(needle).length - 1;
 
 describe("server/index.ts gains no route handlers", () => {
   it("matches request paths exactly as often as written here", () => {
-    const changed = Object.entries(EXACT).flatMap(([needle, written]) => {
+    const changed = Object.entries(EXACT).flatMap(([needle, upstream]) => {
+      const written = upstream + (FORK_EXTRA[needle] ?? 0);
       const n = count(needle);
       if (n > written) return [`${needle} appears ${n} times, more than ${written}: put the new route in server/routes`];
       if (n < written) return [`${needle} appears ${n} times: lower its number here to ${n}`];

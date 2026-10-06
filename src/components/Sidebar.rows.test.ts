@@ -38,6 +38,7 @@ vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => true }));
 const { Sidebar } = await import("./Sidebar");
 const { BotEditorStore, initialState, reducer } = await import("@/state/store");
 const { setLocale, t } = await import("@/lib/i18n");
+const { threadUpdatedLabel } = await import("./SidebarThreadRow");
 
 const HOUR = 3_600_000;
 const NOW = new Date(2026, 9, 4, 12, 0).getTime();
@@ -127,7 +128,8 @@ describe("sidebar rows", () => {
   it("draws every bot row and the open thread list", () => {
     for (const id of ["atlas", "scout", "pepper"]) expect(document.querySelector(`[data-sidebar-bot-row="${id}"]`)).not.toBeNull();
     for (const id of ["atlas-now", "atlas-earlier", "atlas-old"]) expect(document.querySelector(`[data-sidebar-thread-row="${id}"]`)).not.toBeNull();
-    expect(document.body.textContent).toContain(t("task.updated.hours", { count: 1 }));
+    // fork: rows date a thread the way Messages does (threadUpdatedLabel)
+    expect(document.body.textContent).toContain(threadUpdatedLabel(NOW - HOUR, NOW));
   });
 
   it("renders no row for a store event no row shows", async () => {
@@ -144,7 +146,7 @@ describe("sidebar rows", () => {
     const message = { ...reply("a3", "a2", "One more thing."), at: NOW };
     const changed = await rowRendersAfter(update((current) => reducer(current, { type: "messageAdded", threadId: "atlas-now", message })));
     expect(changed).toEqual({ bots: { Atlas: 1 }, threads: { "Report draft": 1 } });
-    expect(document.querySelector('[data-sidebar-thread-row="atlas-now"]')?.textContent).toContain(t("task.updated.justNow"));
+    expect(document.querySelector('[data-sidebar-thread-row="atlas-now"]')?.textContent).toContain(threadUpdatedLabel(NOW, NOW));
   });
 
   it("renders only the renamed thread's row among the threads", async () => {
@@ -171,7 +173,7 @@ describe("sidebar rows", () => {
       const changed = await rowRendersAfter(draw);
       expect(changed.bots).toEqual({ Atlas: 1, Scout: 1, Pepper: 1 });
       expect(Object.keys(changed.threads)).toHaveLength(3);
-      expect(document.querySelector('[data-sidebar-thread-row="atlas-earlier"]')?.textContent).toContain("vor 2 Std.");
+      expect(document.querySelector('[data-sidebar-thread-row="atlas-earlier"]')?.textContent).toContain(threadUpdatedLabel(NOW - 2 * HOUR, NOW));
     } finally {
       setLocale("en");
       await draw();

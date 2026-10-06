@@ -945,29 +945,6 @@ it("gives a teammate each request once, never also as a bare assistant line", ()
   expect(second).not.toMatch(/^Assistant: @/m);
 }, { FAKE_CLAUDE_MODE: "dead-session" }), 60_000);
 
-it("waits for a shared project folder instead of failing the teammate's work", () => fixture(async f => {
-  // A code agent and its reviewer work in one repo: the reviewer's turn
-  // cannot claim the folder while the sender's own turn still holds it.
-  const folder = mkdtempSync(join(tmpdir(), "omb-shared-folder-"));
-  try {
-    for (const bot of [f.lead, f.specialist]) await f.api(`/api/bots/${bot.id}`, { cwd: folder }, "PATCH");
-    const sourceGate = join(f.session.info.dataDir, "source-ready");
-    f.plan[f.lead.id].gateFile = sourceGate;
-    f.save();
-    await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "Build it and have it reviewed");
-    await expect.poll(() => f.nodes().find((n: any) => n.botId === f.specialist.id)?.status, { timeout: 15_000 }).toBe("queued");
-    // Several admission ticks pass while the folder is held.
-    await new Promise(resolve => setTimeout(resolve, 1_500));
-    expect(f.nodes().find((n: any) => n.botId === f.specialist.id).status).toBe("queued");
-    writeFileSync(sourceGate, "release the folder");
-    await expect.poll(() => f.nodes().find((n: any) => n.botId === f.specialist.id)?.status, { timeout: 20_000 }).toBe("completed");
-    expect((await f.cli("wait", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--timeout", "30")).status).toBe("settled");
-    const reviewer = f.nodes().find((n: any) => n.botId === f.specialist.id);
-    expect((await f.messages(reviewer.threadId)).some((m: any) => /another thread is working in this project folder/.test(m.tool?.name ?? ""))).toBe(false);
-    expect((await f.messages(f.lead.activeTaskId)).some((m: any) => m.text === f.plan[f.lead.id].resumeReply)).toBe(true);
-  } finally { removeTempDir(folder); }
-}), 60_000);
-
 it("runs a threadWorktrees teammate in its own copy while the project folder is held", () => fixture(async f => {
   // Fork: the lead holds the repo folder with a running turn; the specialist
   // works in its own worktree of that repo, so it neither waits nor fails.

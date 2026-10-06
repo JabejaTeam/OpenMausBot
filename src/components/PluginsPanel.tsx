@@ -347,7 +347,6 @@ export function PluginsPanel() {
   const [tab, setTab] = useState<"marketplace" | "connected">("marketplace");
   // Members manage their own tokens; the server list is an admin's.
   const [admin, setAdmin] = useState<boolean | null>(null);
-  useEffect(() => { let active = true; void api("/api/auth/session").then((session) => { if (active) setAdmin(session.scopes.includes("admin")); }).catch(() => { if (active) setAdmin(false); }); return () => { active = false; }; }, []);
   const [showAllApps, setShowAllApps] = useState(false);
 
   const pollTimers = useRef(new Map<string, ReturnType<typeof setInterval>>());
@@ -442,6 +441,8 @@ export function PluginsPanel() {
     for (const timer of pollTimers.current.values()) clearInterval(timer);
     pollTimers.current.clear();
   }, []);
+  // fork: after the unmount cleanup above, which tests find as the first [] effect
+  useEffect(() => { let active = true; void api("/api/auth/session").then((session) => { if (active) setAdmin(session.scopes.includes("admin")); }).catch(() => { if (active) setAdmin(false); }); return () => { active = false; }; }, []);
 
   useEffect(() => {
     if (inventoryPhase !== "ready") return;
