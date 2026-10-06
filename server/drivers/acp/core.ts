@@ -163,8 +163,8 @@ interface AcpTurn {
   runningTools: Set<string>;
   /** Synthetic item ids handed to `tool_call` notifications the agent sent
    * without a `toolCallId`: lifecycle consumers pair a tool's start with
-   * its completion by `itemId` (the #1653 computer-call fence among them),
-   * so an unkeyed call must still carry one stable id across both events. */
+   * its completion by `itemId` (the tool chip's result among them), so an
+   * unkeyed call must still carry one stable id across both events. */
   unkeyedToolIds: string[];
   interruptTimer: ReturnType<typeof setTimeout> | null;
   /** ends the quiet-status watch started with the prompt */
@@ -322,8 +322,15 @@ export interface AcpSupport {
    * sends no prompt and discards the process (see approvalUnconfirmed). */
   sessionScopedApproval?: boolean;
   /** Mutate the child env in place: strip a key, inject a policy. Receives the
-   *  instance config so a support can vary with fullAuto. */
-  transformEnv?(env: Record<string, string | undefined>, config: AcpConfig, instanceId: string): void;
+   *  instance config so a support can vary with fullAuto, and the instance
+   *  environment so it can tell a key the server put there on purpose from
+   *  one riding along in the server's own env. */
+  transformEnv?(
+    env: Record<string, string | undefined>,
+    config: AcpConfig,
+    instanceId: string,
+    instanceEnvironment: Readonly<Record<string, string>>,
+  ): void;
   /** Resolve a managed or account-scoped executable just before use. */
   resolveCommand?(
     env: Record<string, string | undefined>,
@@ -674,7 +681,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         // The operator's own secrets are outside any driver's allowlist.
         stripControlPlaneEnv(env);
-        support.transformEnv?.(env, activeConfig, instanceId);
+        support.transformEnv?.(env, activeConfig, instanceId, input.environment);
         return env;
       };
       let models = support.models;
@@ -1591,9 +1598,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // session, so the model is not a separate axis; fullAuto covers the
         // transformEnv-policy supports (opencode). mcpServers are session
         // establishment inputs — they ride session/new and session/load over
-        // the wire — and the harness mints fresh integration bearer tokens
-        // every turn. Most agents apply changes on live load; those that cache
-        // the old MCP clients must resume on a fresh process (see sessionKey).
+        // the wire — and change when a turn's integrations or their grants do
+        // (a thread keeps its integration credentials across turns). Most
+        // agents apply changes on live load; those that cache the old MCP
+        // clients must resume on a fresh process (see sessionKey).
         // The env the spawned child actually receives is part of the
         // contract too, and arrives hashed as envFingerprint for the same
         // reason.

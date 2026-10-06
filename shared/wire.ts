@@ -18,8 +18,8 @@ import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
+import type { PlaceRow } from "./place-view.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
-import type { TighteningRequestCardData } from "./tightening-request.ts";
 import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { RoutineRunCardData } from "./routine-run.ts";
@@ -442,12 +442,18 @@ export interface WireMessage {
     /** error rows: the installed Claude Code is too old for the model, and
      * the UI can offer to update it in place. */
     claudeUpdate?: boolean;
+    /** error rows: the place this turn could not use (shared/place-view.ts). */
+    place?: PlaceRow;
     /** Provider item identity, scoped to the owning turn. */
     itemId?: string;
     /** Whether the harness captured the full redacted result. Private
      * server-local spill paths are not exposed to clients. */
     fullResult?: boolean;
   };
+  /** A bot line a "post" webhook wrote: whoever called the webhook chose
+   * its words. On a Cloud home a conversation holding one is someone else's
+   * for lending and memory (server/cloud-lending.ts reportsFromOthers). */
+  webhookPost?: boolean;
   /** user messages sent INTO a running turn (capabilities.queueing). */
   steered?: boolean;
   /** user messages a peer bot handed to this thread's RUNNING turn through
@@ -523,7 +529,9 @@ export interface WireMessage {
 }
 
 export interface OptionCardData {
-  outboundRequest?: { tool: string; app: string | null };
+  /** calls: one per outbound call the card covers, in subtitle order. Absent
+   * on cards from older computers. */
+  outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
   teamMemoryRequest?: { section: string; entryId: string; kind: string };
   title: string;
   subtitle: string;
@@ -565,8 +573,6 @@ export interface OptionCardData {
   profileRequest?: ProfileRequestCardData;
   /** A durable default-model proposal (propose_model). */
   modelRequest?: ModelRequestCardData;
-  /** A durable authority-tightening proposal (propose_tightening). */
-  tighteningRequest?: TighteningRequestCardData;
   teamSetupRequest?: TeamSetupRequest;
   /** A durable learned-skill proposal. */
   skillRequest?: SkillRequestCardData;
@@ -574,8 +580,11 @@ export interface OptionCardData {
   questionRequest?: QuestionRequestCardData;
 }
 
-/** Which app holds the microphone of a Live call. Self-declared; for display and logs only. */
-export type LiveClient = "desktop" | "ios" | "android";
+/** Which app holds the microphone of a Live call: the desktop app (its own
+ * page or a server's page in it), a web browser, or a phone. Self-declared;
+ * for display and logs only. The phone apps show a value they do not know as
+ * "another device". */
+export type LiveClient = "desktop" | "web" | "ios" | "android";
 export type LiveCallStatus = "connecting" | "live" | "ending" | "ended";
 /** Why a call ended. "signed-out": the sign-in or paired phone that started
  * it was signed out, revoked or unpaired. A client that does not know a
@@ -791,7 +800,10 @@ export type ServerFrame =
   | { kind: "webhook.deleted"; webhookId: string }
   | { kind: "runtime"; event: RuntimeEvent }
   | { kind: "screen"; botId: string; threadId: string; png: string; mime?: string }
-  | { kind: "computer"; botId: string; state: "provisioning" | "waking" }
+  /** A bot's computer is being set up or woken for a turn; the chat shows
+   * one progress line until its first screen frame. `place` names a cloud
+   * computer (absent: a Local VM). */
+  | { kind: "computer"; botId: string; state: "provisioning" | "waking"; place?: "cloud" }
   | { kind: "computer-control"; botId: string; held: boolean; helpReason: string | null }
   | { kind: "bot.deleted"; botId: string }
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }

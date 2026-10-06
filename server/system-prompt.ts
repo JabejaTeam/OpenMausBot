@@ -6,6 +6,7 @@
 // The sentences that both the direct-turn and room-turn paths use live
 // here too, so neither path can drift from the other or from the preview.
 import { soulSystemPrompt } from "./bot-folder.ts";
+import { teammateAvailabilityPrompt, type RosterMember } from "./peer-roster.ts";
 import type { ConnectorToolGrant } from "../shared/wire.ts";
 
 export type PromptPart = { id: string; label: string; text: string };
@@ -19,9 +20,10 @@ export function userProfileSystemPrompt(profile?: { aboutMe?: string }): string 
 /** Sections whose text legitimately differs between two turns of one live
  * conversation: memory, because a bot writes to MEMORY.md mid-conversation,
  * mentions, which describe the message being sent right now, outstanding
- * teammate work, which settles while the person keeps talking, and recent
+ * teammate work, which settles while the person keeps talking, recent
  * work, whose relative time labels are recomputed every turn and whose
- * newest-first list changes as the bot works in other threads.
+ * newest-first list changes as the bot works in other threads, and team
+ * availability, which changes whenever a teammate starts or finishes work.
  *
  * They are reported apart from the rest so a driver that keeps one CLI
  * process per thread can key that process on the stable half. Before this
@@ -30,7 +32,16 @@ export function userProfileSystemPrompt(profile?: { aboutMe?: string }): string 
  * entire conversation at the cache-write rate. Mentions did the same on any
  * turn that tagged a bot, and recent work did it on every turn of an active
  * bot, because its "2h ago" labels drift even when nothing else changed. */
-const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "recent"]);
+const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "recent", "availability"]);
+
+/** The team availability section, defined once for the direct turn, the room
+ * turn and the preview. Its id is what puts it in the volatile half: a call
+ * site that spelled it differently would put it back in the stable half,
+ * where one teammate starting work relaunches the engine. An empty team
+ * gives an empty section. */
+export function teamAvailabilityPart(team: readonly RosterMember[]): PromptPart {
+  return { id: "availability", label: "Team availability", text: teammateAvailabilityPrompt(team) };
+}
 
 export function buildSystemPrompt(
   persona: string,
@@ -52,24 +63,23 @@ export function buildSystemPrompt(
 
 // The "box*" prompt kinds are Boat's historical kind literals; events and
 // persisted surfaces carry them, so only prose was renamed.
-export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "box-agent" | "vps" | "local";
+export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "vps" | "local";
 
 /** One ladder for the computer paragraph, so the settings preview, a direct
  * turn, and a room turn cannot disagree about which paragraph a computer plan
  * earns. Dispatch semantics are canonical: the mounts have already refused a
  * plan the engine cannot run, so the resolved kind alone decides here and no
  * capability gate is repeated. Call sites keep their own input resolution —
- * which computer, which driver — and pass the result in; `vmPrivate` keeps
- * this module pure (it is localVmMode(cfg) === "per-bot" at the call site). */
+ * which computer — and pass the result in; `vmPrivate` keeps this module pure
+ * (it is localVmMode(cfg) === "per-bot" at the call site). */
 export type ComputerPromptKindInput = {
   kind: "vm" | "box" | "vps" | "local" | null;
-  driverKind: string | undefined;
   vmPrivate: boolean;
 };
 
 export function resolveComputerPromptKind(input: ComputerPromptKindInput): ComputerPromptKind | null {
   if (input.kind === "vm") return input.vmPrivate ? "vm-private" : "vm-shared";
-  if (input.kind === "box") return input.driverKind === "boxAgent" ? "box-agent" : "box";
+  if (input.kind === "box") return "box";
   if (input.kind === "vps") return "vps";
   if (input.kind === "local") return "local";
   return null;
@@ -86,20 +96,21 @@ const COMPUTER_PARAGRAPH: Record<ComputerPromptKind, string> = {
   "vm-shared":
     " You have a shared, isolated Cua sandbox: a Linux desktop in a container on this machine. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Run every command with vm_exec, which returns the exit code and the output as text; do not type commands into a terminal window and read screenshots. Create files there with vm_exec too (a shell heredoc or a script it runs); your host file tools cannot reach the VM. To give the user a file you made there (a report, image, audio, video, spreadsheet or slides), call attach_file with its path once it is saved; it reports an error if the file is missing. A path inside the VM cannot be opened from chat, so do not paste one as a link. Use the computer tools for the desktop, accessibility and windows. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully.",
   box: " You control the assigned cloud computer. Inspect it with screenshots; click coordinates refer to the full image. Use the advertised computer tools for desktop actions and shell commands.",
-  "box-agent": "",
   vps:
-    " You have your own self-hosted remote Linux computer through the official Cua tools. This is a VPS, not Boat; using it does not require a Boat API key. Its filesystem is disposable: everything on it is wiped whenever its container is recreated, so keep long-lived work somewhere durable — push it to a remote, or hand the results back in chat — instead of leaving it only on that computer. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and act carefully.",
+    " You have your own self-hosted remote Linux computer through the official Cua tools. This is the user's own VPS; using it does not require a Boat API key. Its filesystem is disposable: everything on it is wiped whenever its container is recreated, so keep long-lived work somewhere durable — push it to a remote, or hand the results back in chat — instead of leaving it only on that computer. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and act carefully.",
   local:
     " You can act on the user's computer through the computer tools. Discover the target app/window and inspect its state first. Prefer window-targeted accessibility actions with background delivery so the user can keep working in another app; do not bring OpenMausBot or another app to the front just to inspect it. Use the dedicated browser tools for browser work when available, keeping the user's intended browser profile/account, and OpenMausBot's configuration/proposal tools for supported bot setup rather than clicking through this app. Full-desktop input, app activation, and foreground delivery can move the real cursor, change focus, or switch desktops: use them only when the user asked for foreground control or agrees after background control reports it cannot perform the action. Do not silently retry a background refusal as foreground input, including through shell scripts, AppleScript/System Events, or another automation tool. If a background action unexpectedly changes focus, report it and stop that route rather than continuing to interrupt the user. Never promise that arbitrary desktop actions can run in the background.",
 };
 
-/** The computer paragraph plus the shared sign-in policy. A boat driven by
- * the boat agent has no paragraph (the agent already lives there) but the
- * sign-in policy still applies. */
+/** The computer paragraph plus the shared sign-in policy. */
 export function computerPrompt(kind: ComputerPromptKind | null): string {
   if (!kind) return "";
   return COMPUTER_PARAGRAPH[kind] + SIGN_IN_PROMPT;
 }
+
+/** Where a Cloud home's bot runs, in the one wording its prompts share: the
+ * bot's own (cloudHomePrompt) and its Live call voice's (server/live-call.ts). */
+export const CLOUD_HOME_PLACE = "the user's My Cloud, their always-on OpenMausBot in the cloud, not on their own computer";
 
 /** Every turn on a Cloud home (server/cloud-home.ts). The bot runs in the
  * cloud, so asked about the person's own computer it says what is true instead
@@ -107,10 +118,10 @@ export function computerPrompt(kind: ComputerPromptKind | null): string {
  * reachable only when they lend it (docs/cloud-pro.md), through the
  * shared-computer tools, so only a turn that has those tools is told to use them. */
 export function cloudHomePrompt(sharedComputerTools: boolean): string {
-  return " You run on the user's OMB Cloud, a server in the cloud, not on their own computer." + (sharedComputerTools
-    ? " If they ask for something on their own Mac or PC, check list_shared_computers: a Mac they lend to their Cloud is reachable through shared_computer, within the folders and apps it allows. If none is lent and online, say so in one sentence: they can turn on Let my Cloud use this Mac under Settings → OMB Cloud in the desktop app on that Mac."
+  return ` You run on ${CLOUD_HOME_PLACE}.` + (sharedComputerTools
+    ? " If they ask for something on their own Mac or PC, check list_shared_computers: a Mac they lend to My Cloud is reachable through shared_computer, within the folders and apps it allows. If none is lent and online, say so in one sentence: they can turn on Let My Cloud use this Mac under Settings → OpenMausBot Cloud in the desktop app on that Mac."
     : " You cannot see or use their Mac or PC, its screen or its files from here. If they ask for something on it, say so in one sentence.")
-    + " Offer what works here: the built-in browser and cloud computers. Never ask them to set up this computer or a Local VM; neither exists here.";
+    + " Offer what works here: the built-in browser and their cloud computer, a desktop in the cloud. Call it their cloud computer, as the app does. Never ask them to set up this computer or a Local VM; neither exists here.";
 }
 
 export const COMPOSIO_PROMPT =
@@ -154,7 +165,7 @@ export const THREADS_PROMPT =
 const PROPOSAL_RESULT_PROMPT =
   " Follow the tool result: with granted Full Access it may report applied immediately; then continue the requested work without asking for another confirmation. If it reports a pending review, end the turn and wait for the in-app decision. Never claim success before an applied result, and report failures honestly. Full Access does not grant another bot broader permissions.";
 export const ROUTINE_PROMPT =
-  " If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. Keep run_on omitted or maus to use the bot's current model and configured computer, including its VPS. A routine's box (legacy cloud) destination runs on the bot's Boat cloud computer, not the configured VPS; choose it only when the user explicitly wants that Boat. Convert calendar requests such as the first or last day of each month or the second Monday to a five-field cron expression with an explicit IANA timezone; use interval for elapsed every-N-minutes work. Never replace a calendar rule with daily AI date checking or an approximate weekly schedule; clarify ambiguous or unsupported requests." + PROPOSAL_RESULT_PROMPT;
+  " If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. Keep run_on omitted or maus to use the bot's current model and configured computer, including its VPS. A routine's box (legacy cloud) destination runs on the bot's cloud computer, not the configured VPS; choose it only when the user explicitly wants the cloud computer. Convert calendar requests such as the first or last day of each month or the second Monday to a five-field cron expression with an explicit IANA timezone; use interval for elapsed every-N-minutes work. Never replace a calendar rule with daily AI date checking or an approximate weekly schedule; clarify ambiguous or unsupported requests." + PROPOSAL_RESULT_PROMPT;
 export const ROUTINE_EXECUTION_PROMPT =
   " Execute this routine now: use available peer tools for required handoffs rather than merely announcing that you will wait; after an accepted delegation, end this turn for automatic resumption, and report a concrete blocker if no handoff is possible.";
 export const LEARN_PROMPT =

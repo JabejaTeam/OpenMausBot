@@ -5,7 +5,7 @@
 // sharing the saved order with the full sidebar.
 import { useRef, useState } from "react";
 import { Box, ChevronDown, Plus, Search, X } from "lucide-react";
-import { useStore, type Bot, type Group } from "@/state/store";
+import { useStore, visibleMessages, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { stateForBot } from "@/lib/mascot";
@@ -26,7 +26,7 @@ import { setOfficeView } from "@/lib/office-view";
 import { InitialsAvatar } from "./Avatar";
 import { SimpleBotAvatar as BotAvatar } from "./SimpleBotAvatar";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
-import { BotThreadList, groupPreview, preview } from "./Sidebar";
+import { BotThreadList, botRowProps, groupPreview, preview } from "./Sidebar";
 import { SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { WorkingDots } from "./WorkingIndicator";
 import { profileInitials } from "./SidebarProfileMenu";
@@ -100,7 +100,7 @@ function BotRow({ bot, query }: { bot: Bot; query: string }) {
             </span>
           }
           name={bot.name}
-          sub={working ? "" : preview(bot)}
+          sub={working ? "" : preview(bot, visibleMessages(bot), state.instances)}
           subNode={working ? <span className="flex h-5 items-center" role="status"><WorkingDots size={3.5} /></span> : undefined}
           onClick={() => dispatch({ type: "select", id: bot.id })}
           padRight
@@ -129,8 +129,8 @@ function BotRow({ bot, query }: { bot: Bot; query: string }) {
         </div>
       </div>
       {open && hasThreadList
-        ? <div className="pl-10"><BotThreadList bot={bot} selected={selected} density="comfortable" query={query} /></div>
-        : <div className="pl-10"><SidebarBotActivity bot={bot} density="comfortable" /></div>}
+        ? <div className="pl-10"><BotThreadList {...botRowProps(state, dispatch, bot, { density: "comfortable", quiet: false, query, onMenu: () => undefined })} selected={selected} /></div>
+        : <div className="pl-10"><SidebarBotActivity bot={bot} density="comfortable" pendingQueued={state.pendingQueued} dispatch={dispatch} /></div>}
     </>
   );
 }
@@ -176,8 +176,8 @@ function HeroBot({ bot, query }: { bot: Bot; query: string }) {
         </div>
       </div>
       {open && hasThreadList
-        ? <BotThreadList bot={bot} selected={selected} density="comfortable" query={query} />
-        : <SidebarBotActivity bot={bot} density="comfortable" />}
+        ? <BotThreadList {...botRowProps(state, dispatch, bot, { density: "comfortable", quiet: false, query, onMenu: () => undefined })} selected={selected} />
+        : <SidebarBotActivity bot={bot} density="comfortable" pendingQueued={state.pendingQueued} dispatch={dispatch} />}
     </div>
   );
 }
@@ -412,7 +412,7 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
                 unread={room.unread}
                 avatar={<RoomAvatar members={state.bots.filter((bot) => room.memberIds.includes(bot.id))} />}
                 name={room.name}
-                sub={groupPreview(room, state.bots)}
+                sub={groupPreview(room, state.bots, state.instances)}
                 onClick={() => select(room.id)}
               />
             ))}

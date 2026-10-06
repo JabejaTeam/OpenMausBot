@@ -5,13 +5,13 @@ import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import { EMPTY_ONBOARDING } from "@/lib/onboarding";
 import { withTourFinished, withTourReset } from "@/lib/guided-tour";
 
-const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], state: {} as any, updater: null as any, streaming: {}, dispatch: null as any }));
+const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], state: {} as any, updater: null as any, dispatch: null as any }));
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(),
   useState: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = typeof initial === "function" ? initial() : initial;
     return [f.values[index], (next: unknown) => { f.values[index] = next; }]; },
   useEffect: (effect: EffectCallback) => { f.effects.push(effect); },
 }));
-vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }), useStreaming: () => ({ streaming: f.streaming }), api: vi.fn().mockResolvedValue({}),
+vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }), api: vi.fn().mockResolvedValue({}),
   CLOUD_LINK_SETTINGS: { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } }));
 vi.mock("@/lib/analytics", () => ({ emailGateDone: () => false }));
 vi.mock("@/lib/updater", () => ({ useUpdaterState: () => f.updater }));
@@ -27,7 +27,7 @@ let push: (value: CloudAccountState) => void;
 const render = () => { f.index = 0; f.effects = []; return renderToStaticMarkup(createElement(ProIntroduction)); };
 const signedOut = { status: "signed-out" } as const;
 beforeEach(async () => {
-  vi.clearAllMocks(); storage = new Map(); f.index = 0; f.values = []; f.updater = null; f.streaming = {}; f.dispatch = vi.fn();
+  vi.clearAllMocks(); storage = new Map(); f.index = 0; f.values = []; f.updater = null; f.dispatch = vi.fn();
   f.state = { connected: true, bots: [], groups: [], config: { onboarding: { ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen: withTourFinished(undefined) } } };
   vi.stubGlobal("localStorage", { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) });
   vi.stubGlobal("window", { ogb: { cloudAccount: { state: () => Promise.resolve(signedOut), onState: (cb: typeof push) => { push = cb; return () => {}; } } } });
@@ -98,6 +98,7 @@ it.each(["appSettingsOpen", "settingsOpen", "newBotOpen", "pluginsOpen", "trigge
 });
 it("waits for onboarding, connection and busy background threads", () => {
   f.state.connected = false; expect(render()).toBe(""); f.state.connected = true;
+  f.state.bots = [{ busy: true }]; expect(render()).toBe("");
   f.state.bots = [{ tasks: [{ busy: true }] }]; expect(render()).toBe(""); f.state.bots = [];
   f.state.config.onboarding = EMPTY_ONBOARDING; expect(render()).toBe("");
 });
@@ -153,10 +154,10 @@ it("names every plan's price and that tax is added at checkout", () => {
 it("in Settings, someone with a plan sees that plan and the way to it, never Get Pro", () => {
   const card = (state: CloudAccountState) => { f.values = [state]; f.index = 0; return renderToStaticMarkup(createElement(ProSettingsCard)); };
   for (const [state, text] of [
-    [plan({ entitlement: paid("max") }), "Max active · verified by OMB Cloud"],
+    [plan({ entitlement: paid("max") }), "Max active · verified by OpenMausBot Cloud"],
     [plan({ entitlement: paid("pro", "inactive") }), "Pro · not active right now"],
     [plan({ purchase: { state: "confirming", tier: "personal" } }), "Personal · payment received"],
-    [{ status: "unavailable", lastPlan: { tier: "personal", active: true } }, "Personal · checking with OMB Cloud…"],
+    [{ status: "unavailable", lastPlan: { tier: "personal", active: true } }, "Personal · checking with OpenMausBot Cloud…"],
     [{ status: "reauth-required", message: "expired", lastPlan: { tier: "max", active: true } }, "Sign in again to use your Cloud on this computer"],
   ] as const) {
     const html = card(state as CloudAccountState);

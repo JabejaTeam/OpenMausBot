@@ -10,7 +10,7 @@ import { createAndroidDeviceController } from "./android-device.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { pasteMenuItem } from "./paste-menu-item.mjs";
-import { attachUpdaterWindow, startUpdater, registerUpdaterIpc } from "./updater.mjs";
+import { attachUpdaterWindow, startUpdater, registerUpdaterIpc, sendUpdaterState } from "./updater.mjs";
 import {
   buildDiagnosticsReport,
   diagnosticsFileName,
@@ -33,7 +33,7 @@ let startupScreen = null;
 let desktopTray = null;
 import { collisionFreeDownloadPath, defaultSaveName, revealDownloadWhenDone, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
-import { appPermissionAllowed, externalWebUrl } from "./app-permissions.mjs";
+import { appPermissionHandlers, externalWebUrl } from "./app-permissions.mjs";
 import {
   ensureManagedComposioCredentials,
   managedComposioAccess,
@@ -81,9 +81,9 @@ import { createComputerSharing, validateSharedFolders } from "./computer-sharing
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDesktopStore } from "./managed-desktop.mjs";
 import { cloudPlanSnapshot, createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
-import { cloudHomeConnectUrl, cloudPlanDisk, isCloudHomeEntry, rememberedCloudHome, withCloudHome } from "./cloud-home.mjs";
+import { cloudHomeConnectUrl, cloudPlanDisk, isCloudHomeEntry, myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin, withCloudHome } from "./cloud-home.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
-import { cloudPageSenderAllowed, createCloudMove, moveFit, parseCloudMoveStatus } from "./cloud-move.mjs";
+import { cloudPageSenderAllowed, createCloudMove, mintOwnerCode, moveBlocked, moveFit, moveRefusal, moveSenderDestination, parseCloudMoveStatus } from "./cloud-move.mjs";
 import { createOrgLibrary } from "./org-library.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
@@ -295,6 +295,16 @@ let managedDesktop = null;
 let cloudAccount = null;
 // Settles once a saved Cloud sign-in is restored and checked (or there is none).
 let cloudAccountStarted = Promise.resolve();
+// True while that restore is under way: a Cloud page asking for the microphone waits for it.
+let cloudAccountRestoring = false;
+// Until it has finished, which Cloud is the person's is only a hint (updaterPageOffered).
+let cloudSignInRestored = false;
+/** Wait for a saved Cloud sign-in to finish restoring (a local read and one
+ * check with OpenMausBot Cloud), at most 5 s: Settings → OpenMausBot Cloud must not take it
+ * for signed out, nor the microphone refuse My Cloud for asking early. */
+function cloudAccountRestored() {
+  return Promise.race([cloudAccountStarted, new Promise(resolve => setTimeout(resolve, 5_000).unref?.())]);
+}
 // The organization library channel: catalog and release bytes for the local runtime only.
 let orgLibrary = null;
 let companyBackupController = null;
@@ -937,6 +947,9 @@ function ensureCompanionAccountService() {
     // Retry capacity/transient setup failures with backoff, and re-provision a
     // reclaimed endpoint behind the same address without a new sign-in.
     autoRecover: true,
+    // The failure code and support reference reach server.log, and with it
+    // the bug-report bundle.
+    log: (line) => slog(line),
   });
   return companionAccountService;
 }
@@ -999,7 +1012,7 @@ function syncPhoneSecretKey(proc) {
 
 function ensureCloudAccount() {
   if (cloudAccount) return cloudAccount;
-  if (!app.isPackaged || desktopRemoteAccess) throw new Error("OMB Cloud sign-in requires the local desktop app.");
+  if (!app.isPackaged || desktopRemoteAccess) throw new Error("OpenMausBot Cloud sign-in requires the local desktop app.");
   cloudAccount = createCloudAccountClient({
     store: createCloudAccountStore({ file: path.join(app.getPath("userData"), "cloud-account.bin"), encryption: {
       available: async () => (await safeStorage.isAsyncEncryptionAvailable()) &&
@@ -1011,6 +1024,9 @@ function ensureCloudAccount() {
     onState: state => {
       rememberCloudHome(state);
       rememberedHome = rememberedCloudHome(rememberedHome, state);
+      // My Cloud's page, refused while the sign-in was being restored, now
+      // hears this app's update (a "Restart to update" it would miss).
+      sendUpdaterState();
       // Signing out, another account or another machine ends lending at once;
       // a renewed sign-in resumes it (computer-sharing.mjs cloudLendingVerdict).
       computerSharing?.cloudChanged();
@@ -1882,7 +1898,8 @@ function navigateMainWindow(url) {
 }
 
 /** The person's Cloud address for their account, kept while a check with
- * OMB Cloud is pending or failed (cloud-home.mjs rememberedCloudHome). */
+ * OpenMausBot Cloud is pending or failed, or the sign-in has ended
+ * (cloud-home.mjs rememberedCloudHome). */
 let rememberedHome = null;
 
 async function switchEnvironment(id) {
@@ -1964,12 +1981,12 @@ async function deliverOrganizationEntry() {
  * My Cloud by itself (CloudAccountSettings). No prompt: a hosted server left
  * for it stays saved under Servers, and the Cloud replaces it anyway. */
 async function openCloudEntry() {
-  if (!app.isPackaged) throw new Error("OMB Cloud requires the installed desktop app.");
-  if (desktopRemoteAccess) throw new Error("This app is connected to another computer. Disconnect it to use OMB Cloud on this computer.");
-  if (!serverReady) throw new Error("This installation is unavailable. Restart the app and open your Cloud again.");
-  // Let a saved sign-in finish restoring (a local read and one check with OMB
-  // Cloud) first: the view must not take it for signed out and start another.
-  await Promise.race([cloudAccountStarted, new Promise(resolve => setTimeout(resolve, 5_000).unref?.())]);
+  if (!app.isPackaged) throw new Error("OpenMausBot Cloud requires the installed desktop app.");
+  if (desktopRemoteAccess) throw new Error("This app is connected to another computer. Disconnect it to use OpenMausBot Cloud on this computer.");
+  if (!serverReady) throw new Error("This installation is unavailable. Restart the app and open My Cloud again.");
+  // Let a saved sign-in finish restoring first: the view must not take it for
+  // signed out and start another.
+  await cloudAccountRestored();
   const active = activeEnvironment(environmentsState);
   const showingCloud = Boolean(active) && active.origin === cloudAccount?.homeTarget()?.origin;
   if (active && !showingCloud) persistEnvironments(withActive(environmentsState, LOCAL_ID));
@@ -1984,13 +2001,17 @@ async function openCloudEntry() {
   return true;
 }
 
-function openWorkspaceSettings(computerId) {
+/** Settings → Servers on this computer's own page; with a saved server's id,
+ * open on its Computer access panel, or (`panel: "copy"`) on its Copy this
+ * computer here panel. */
+function openWorkspaceSettings(computerId, panel = "computer") {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  const id = typeof computerId === "string" ? computerId : null, copy = panel === "copy";
   if (senderIsLocal({ sender: mainWindow.webContents })) {
-    mainWindow.webContents.send("workspaces:open-settings", typeof computerId === "string" ? computerId : null);
+    mainWindow.webContents.send("workspaces:open-settings", id, ...(copy ? ["copy"] : []));
   } else {
     persistEnvironments(withActive(environmentsState, LOCAL_ID));
-    navigateMainWindow(`${rendererOrigin()}/?desktop-settings=workspaces${typeof computerId === "string" ? `&share-computer=${encodeURIComponent(computerId)}` : ""}`);
+    navigateMainWindow(`${rendererOrigin()}/?desktop-settings=workspaces${id ? `&${copy ? "copy-to" : "share-computer"}=${encodeURIComponent(id)}` : ""}`);
   }
 }
 
@@ -2030,7 +2051,7 @@ async function connectHostedWorkspace(input, name) {
 
 /** A verified Cloud session that reports the person's machine lists it under
  * Servers. It never switches to it: this computer stays active until they
- * choose "Connect to my Cloud". Signed out, nothing here runs. */
+ * choose "Open My Cloud". Signed out, nothing here runs. */
 function rememberCloudHome(state) {
   try {
     const next = withCloudHome(environmentsState, state?.status === "connected" ? state.machine : null, () => randomUUID());
@@ -2050,11 +2071,11 @@ function rememberCloudHome(state) {
 async function connectCloudHome(open = null) {
   const client = ensureCloudAccount();
   const target = client.homeTarget();
-  if (!target) throw new Error("Your Cloud is not ready to connect yet.");
+  if (!target) throw new Error("My Cloud is not ready to connect yet.");
   const grant = (await cloudHomeSignedIn(target.origin)) ? null : await client.pairHome();
   let next = withCloudHome(environmentsState, { status: "ready", origin: target.origin }, () => randomUUID());
   const entry = next.environments.find((candidate) => candidate.origin === target.origin);
-  if (!entry) throw new Error("Your Cloud could not be added to Servers.");
+  if (!entry) throw new Error("My Cloud could not be added to Servers.");
   next = withActive(next, entry.id);
   persistEnvironments(next);
   navigateMainWindow(cloudHomeConnectUrl({ origin: target.origin, grant }, Date.now(), open));
@@ -2599,11 +2620,17 @@ ipcMain.handle("desktop-viewer:state-now", localOnly("desktop-viewer:state-now",
   contextId: desktopViewerContextId,
 })));
 
-ipcMain.handle("perm:status", () => ({
+// The session's permission handlers (app-permissions.mjs), set once the app
+// is ready. perm:status asks them, so `pageMic` is the very rule that decides
+// a page's microphone request: a blocked Live call then says whether this app
+// refused the page (a web browser can make the call) or the computer did.
+let appPermissions = null;
+ipcMain.handle("perm:status", (event) => ({
   mic:
     nativeActions.appleMediaPermissions
       ? systemPreferences.getMediaAccessStatus?.("microphone") ?? "unknown"
       : "unsupported",
+  pageMic: appPermissions?.pageMicrophone(event) ?? "refused",
 }));
 ipcMain.handle("perm:request-mic", localOnly("perm:request-mic", async () => {
   if (!nativeActions.appleMediaPermissions) return false;
@@ -2833,27 +2860,26 @@ ipcMain.handle("company-backups:restore", localWorkspaceOnly("company-backups:re
   } finally { companyRestoreCommitting = false; }
 }));
 
-// ── Move to Cloud (electron/cloud-move.mjs, docs/cloud-pro.md) ─────────
-// This computer's workspace to the person's Cloud home, when they choose it
-// in Settings → OMB Cloud or on their empty Cloud's own page. Where it goes
-// and how main signs in there come only from the verified Cloud session:
-// these handlers take no arguments.
+// ── Copy this computer here (electron/cloud-move.mjs, docs/copy-workspace.md) ──
+// This computer's workspace to a server the person owns and added here, their
+// OMB Cloud included: started from Settings → Servers or Settings → OMB Cloud
+// on this computer's own page. Where it goes comes only from main
+// (moveSenderDestination): this computer's own page names a saved server, a
+// server's own page (its card, its Settings → Backups) gets only itself, and
+// only the verified Cloud starts a copy from its own page; any other server's
+// Copy opens this computer's Settings on that server's copy.
 let cloudMove = null;
 const CLOUD_MOVE_LOCAL_ROUTES = /^\/api\/(?:workspace-backup\/(?:status|export|download\/[a-f\d-]{36})|cloud-move\/estimate)$/;
 
 function ensureCloudMove() {
   if (cloudMove) return cloudMove;
-  if (!app.isPackaged || desktopRemoteAccess) throw new Error("Move to Cloud needs the local desktop app on this computer.");
+  if (!app.isPackaged || desktopRemoteAccess) throw new Error("Copying this computer's bots and chats needs the local desktop app on this computer.");
   cloudMove = createCloudMove({
     localRequest: (route, init) => {
-      if (!serverProc || !serverReady || !CLOUD_MOVE_LOCAL_ROUTES.test(route)) throw new Error("This installation changed. Start the move again.");
+      if (!serverProc || !serverReady || !CLOUD_MOVE_LOCAL_ROUTES.test(route)) throw new Error("This installation changed. Start the copy again.");
       return fetch(`http://127.0.0.1:${SERVER_PORT}${route}`, { ...init, redirect: "error", credentials: "omit",
         headers: { ...Object.fromEntries(new Headers(init.headers)), [DESKTOP_MUTATION_HEADER]: desktopMutationToken } });
     },
-    pairHome: () => ensureCloudAccount().pairHome(),
-    // A plan whose disk grows is measured at its largest disk, and grown for the move.
-    cloudDisk: () => cloudPlanDisk(ensureCloudAccount().state()),
-    growCloud: sizeGb => ensureCloudAccount().growDisk(sizeGb),
     tempRoot: path.join(app.getPath("temp"), "openmaus-cloud-move"),
     availableBytes: async directory => { const disk = await fs.promises.statfs(directory); return disk.bavail * disk.bsize; },
     onState: publishCloudMoveState,
@@ -2861,82 +2887,194 @@ function ensureCloudMove() {
   return cloudMove;
 }
 
-/** The local renderer, or the person's own Cloud open in this window. */
+/** The local renderer, or the server a copy goes to while it is open in this window. */
 function publishCloudMoveState(state) {
   const contents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
   if (!contents || desktopRemoteAccess) return;
-  const frame = { sender: contents, senderFrame: contents.mainFrame };
-  const home = cloudAccount?.homeTarget()?.origin, active = activeEnvironment(environmentsState)?.origin;
-  if ((!active && contents.mainFrame.url.startsWith(`${rendererOrigin()}/`)) || cloudPageSenderAllowed(frame, { contents, homeOrigin: home, activeOrigin: active })) {
+  const active = activeEnvironment(environmentsState)?.origin;
+  let frame = null;
+  try { frame = new URL(contents.mainFrame.url).origin; } catch { /* nothing loaded yet */ }
+  if ((!active && contents.mainFrame.url.startsWith(`${rendererOrigin()}/`)) || (active && frame === active && state.destination?.origin === active)) {
     contents.send("cloud-move:state-changed", state);
   }
 }
 
-/** What the Cloud holds, asked with this app's own session there (none yet: null). */
+/** What a server holds, asked with this window's own session there: the
+ * status, or why a copy there cannot start (moveRefusal). */
 async function peekCloudMove(origin) {
   try {
     const response = await session.defaultSession.fetch(`${origin}/api/cloud-move`, { credentials: "include", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(5_000) });
-    if (!response.ok) { await response.body?.cancel().catch(() => {}); return null; }
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      return { status: null, refusal: moveRefusal(response.status, body) };
+    }
     const status = parseCloudMoveStatus(await response.json());
-    return status && { contents: status.contents, empty: status.empty, freeBytes: status.freeBytes, previous: status.previous, heldBytes: status.heldBytes,
-      uploadReceived: status.uploadReceived, volumeBytes: status.volumeBytes };
-  } catch { return null; }
+    return { status: status && { contents: status.contents, empty: status.empty, freeBytes: status.freeBytes, previous: status.previous, heldBytes: status.heldBytes,
+      uploadReceived: status.uploadReceived, volumeBytes: status.volumeBytes, appVersion: status.appVersion, environmentId: status.environmentId }, refusal: status ? null : "unreachable" };
+  } catch { return { status: null, refusal: "unreachable" }; }
 }
 
 const cloudMoveChoicesFile = () => path.join(app.getPath("userData"), "cloud-move.json");
 function cloudMoveDismissed(origin) {
   try { return JSON.parse(fs.readFileSync(cloudMoveChoicesFile(), "utf8"))?.dismissed?.includes(origin) === true; } catch { return false; }
 }
-function dismissCloudMove() {
-  const origin = cloudAccount?.homeTarget()?.origin;
+/** Not now on a server's offer (for good), or Done after a copy there. */
+function dismissCloudMove(origin) {
+  const move = ensureCloudMove();
+  if (!move.running() && move.state().destination?.origin === origin) move.reset();
   if (!origin || cloudMoveDismissed(origin)) return;
   let dismissed = [];
   try { dismissed = JSON.parse(fs.readFileSync(cloudMoveChoicesFile(), "utf8"))?.dismissed ?? []; } catch {}
   fs.writeFileSync(cloudMoveChoicesFile(), JSON.stringify({ dismissed: [...dismissed.filter(entry => typeof entry === "string"), origin].slice(-20) }), { mode: 0o600 });
 }
 
-async function cloudMoveOverview(onCloudPage) {
-  const move = ensureCloudMove(), account = ensureCloudAccount(), target = account.homeTarget();
-  const [local, cloud] = await Promise.all([move.estimate().catch(() => null), target ? peekCloudMove(target.origin) : null]);
-  // Measured as the move will be: at the plan's largest disk only when the
-  // Admin says the disk grows (machine.disk); otherwise today's free space.
-  const fit = local && cloud ? moveFit({ localBytes: local.bytes, freeBytes: cloud.freeBytes, uploadReceived: cloud.uploadReceived, volumeBytes: cloud.volumeBytes, disk: cloudPlanDisk(account.state()) }) : null;
-  // The card on an empty Cloud, once: only when this computer has work to bring, and it can fit.
+/** What Settings and a server's card show about a copy to `dest` (null: this
+ * computer's own page, no destination named). */
+async function cloudMoveOverview(dest, onServerPage) {
+  const move = ensureCloudMove(), state = move.state();
+  // This computer's own page with no server named (its card, its Backups): nothing to offer, nothing to measure.
+  if (!dest) return { ...state, local: null, cloud: null, fit: null, suggest: false, destination: null, blocked: null };
+  const [local, peek] = await Promise.all([move.estimate().catch(() => null), dest.origin ? peekCloudMove(dest.origin) : { status: null, refusal: "unreachable" }]);
+  // A copy to another server is not this one's to show; while it runs, this one waits.
+  const own = !state.destination || state.destination.origin === dest.origin;
+  const cloud = peek.status;
+  // Measured as the copy will be: at the plan's largest disk only on the
+  // Cloud, when the Admin says the disk grows; otherwise today's free space.
+  let disk = null;
+  if (dest.kind === "cloud") { try { disk = dest.disk(); } catch { /* today's free space */ } }
+  const fit = local && cloud ? moveFit({ localBytes: local.bytes, freeBytes: cloud.freeBytes, uploadReceived: cloud.uploadReceived, volumeBytes: cloud.volumeBytes, disk }) : null;
+  const blocked = moveBlocked({ kind: dest.kind, refusal: peek.refusal, local, cloud, busyElsewhere: move.running() && !own });
+  // The card on an empty server, once: only when this computer has work to bring, and it can fit.
   const hasWork = Boolean(local && (local.bots > 1 || local.rooms > 0 || local.chats > 0));
-  const suggest = Boolean(onCloudPage && target && cloud?.empty && hasWork && fit?.fit !== "never" && move.state().phase === "idle" && !cloudMoveDismissed(target.origin));
-  return { ...move.state(), local, cloud, fit, suggest };
+  const view = own ? state : { phase: "idle" };
+  const suggest = Boolean(onServerPage && !blocked && cloud?.empty && hasWork && fit?.fit !== "never" && view.phase === "idle" && !cloudMoveDismissed(dest.origin));
+  // Which machine each is decided `blocked`; the page needs no identifier of this computer.
+  const shown = value => { if (!value) return null; const { environmentId: _, ...rest } = value; return rest; };
+  return { ...view, local: shown(local), cloud: shown(cloud), fit, suggest, destination: { id: dest.id, name: dest.name, origin: dest.origin, kind: dest.kind }, blocked,
+    ...(blocked === "busy_elsewhere" ? { busyWith: state.destination?.name } : {}) };
 }
 
-/** Local Settings, and (for the card) the verified Cloud page in the main window. */
-const cloudMoveSender = (channel, handler, { cloudPage = false, remembered = false } = {}) => (event) => {
+// ── Who asks, and where to: local Settings, and the server open in this window ──
+/** Where a copy goes, and how main proves the owner there (one grant per
+ * destination): the Cloud through its Admin (a pairing window without a
+ * session here, and the plan's disk); any other server with this window's
+ * own owner session there. */
+function destinationFor(entry) {
+  const homeOrigin = cloudAccount?.homeTarget()?.origin ?? null;
+  if (entry.cloud || isCloudHomeEntry(entry, { homeOrigin })) {
+    return { id: entry.id, name: entry.name, origin: entry.origin ?? homeOrigin, kind: "cloud",
+      grant: () => ensureCloudAccount().pairHome(),
+      disk: () => cloudPlanDisk(ensureCloudAccount().state()),
+      grow: sizeGb => ensureCloudAccount().growDisk(sizeGb) };
+  }
+  return { id: entry.id, name: entry.name, origin: entry.origin, kind: "server",
+    grant: () => mintOwnerCode((...args) => session.defaultSession.fetch(...args), entry.origin) };
+}
+/** Who asked, and about which server: this computer's own page (it may name
+ * a saved server's id, or "cloud"), or the server open in this window (it
+ * names nothing). `localOnly`: this computer's own page only. */
+function moveSender(channel, event, id, { localOnly = false } = {}) {
   const contents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
-  if (senderIsLocal(event) && workspaceSenderAllowed(event, contents, environmentsState, rendererOrigin())) return handler(false);
-  // `remembered`: also the Cloud this account last verified, so its Settings
-  // says "checking" or "sign in again on your computer" while the sign-in is
-  // being checked or has ended, never an error.
-  const last = remembered && rememberedHome?.accountId && rememberedHome.accountId === cloudAccount?.state()?.account?.id ? rememberedHome.origin : undefined;
-  if (cloudPage && !desktopRemoteAccess && cloudPageSenderAllowed(event, { contents, homeOrigin: cloudAccount?.homeTarget()?.origin ?? last, activeOrigin: activeEnvironment(environmentsState)?.origin })) return handler(true);
+  const local = senderIsLocal(event) && workspaceSenderAllowed(event, contents, environmentsState, rendererOrigin());
+  if (local || (!localOnly && !desktopRemoteAccess)) {
+    const asked = moveSenderDestination(event, { contents, environments: environmentsState, localOrigin: rendererOrigin(), cloudHomeOrigin: cloudAccount?.homeTarget()?.origin ?? null, id });
+    if (asked && asked.remote === !local) return { remote: asked.remote, dest: asked.entry ? destinationFor(asked.entry) : null };
+  }
   throw new Error(`${channel} is only available in this app's window`);
-};
-// Finished: show the Cloud, with what was moved, in this window.
-const afterCloudMove = async result => {
-  if (result.phase === "done") await connectCloudHome().catch(error => slog(`cloud move: could not open the Cloud (${error?.message ?? error})`));
+}
+const named = dest => { if (!dest) throw new Error("Choose a server to copy this computer's bots and chats to."); return dest; };
+// Finished: show the server, with what was copied, in this window.
+const afterCloudMove = dest => async result => {
+  if (result.phase !== "done") return result;
+  try {
+    if (dest.id === environmentsState.activeId) navigateMainWindow(dest.origin);
+    else if (environmentsState.environments.some(entry => entry.id === dest.id)) await switchEnvironment(dest.id);
+    else if (dest.kind === "cloud") await connectCloudHome();
+  } catch (error) { slog(`workspace copy: could not open ${dest.name} (${error?.message ?? error})`); }
   return result;
 };
-ipcMain.handle("cloud-move:state", cloudMoveSender("cloud-move:state", onCloudPage => cloudMoveOverview(onCloudPage), { cloudPage: true }));
-ipcMain.handle("cloud-move:start", cloudMoveSender("cloud-move:start", () => ensureCloudMove().move().then(afterCloudMove), { cloudPage: true }));
-ipcMain.handle("cloud-move:cancel", cloudMoveSender("cloud-move:cancel", () => ensureCloudMove().cancel(), { cloudPage: true }));
-ipcMain.handle("cloud-move:dismiss", cloudMoveSender("cloud-move:dismiss", onCloudPage => { dismissCloudMove(); return cloudMoveOverview(onCloudPage); }, { cloudPage: true }));
-ipcMain.handle("cloud-move:restore-previous", cloudMoveSender("cloud-move:restore-previous", () => ensureCloudMove().restorePrevious().then(afterCloudMove)));
+ipcMain.handle("cloud-move:state", (event, id) => { const asked = moveSender("cloud-move:state", event, id); return cloudMoveOverview(asked.dest, asked.remote); });
+// Everything a server says about itself (admin session, empty, version) is
+// its own word, so a server's own page cannot send this computer's work to
+// it. Only the Cloud this app verified through the Admin starts its copy from
+// its own page, and only while it is empty (requireEmpty). Any other server's
+// Copy opens this computer's Settings → Servers on that server's copy, where
+// the person starts it. Replacing work, and Swap back, stay there too.
+ipcMain.handle("cloud-move:start", (event, id) => {
+  const asked = moveSender("cloud-move:start", event, id), dest = named(asked.dest);
+  if (asked.remote) {
+    const contents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
+    const verifiedCloud = dest.kind === "cloud" && !desktopRemoteAccess &&
+      cloudPageSenderAllowed(event, { contents, homeOrigin: cloudAccount?.homeTarget()?.origin ?? null, activeOrigin: activeEnvironment(environmentsState)?.origin });
+    if (!verifiedCloud) { openWorkspaceSettings(dest.id, "copy"); return { phase: "idle" }; }
+  }
+  return ensureCloudMove().move(dest, { requireEmpty: asked.remote }).then(afterCloudMove(dest));
+});
+// A server's page stops only a copy to itself.
+ipcMain.handle("cloud-move:cancel", (event) => {
+  const asked = moveSender("cloud-move:cancel", event, undefined), move = ensureCloudMove();
+  return asked.remote && move.state().destination?.origin !== asked.dest?.origin ? move.state() : move.cancel();
+});
+ipcMain.handle("cloud-move:dismiss", (event, id) => {
+  const asked = moveSender("cloud-move:dismiss", event, id);
+  if (asked.dest) dismissCloudMove(asked.dest.origin);
+  return cloudMoveOverview(asked.dest, asked.remote);
+});
+ipcMain.handle("cloud-move:restore-previous", (event, id) => {
+  const dest = named(moveSender("cloud-move:restore-previous", event, id, { localOnly: true }).dest);
+  return ensureCloudMove().restorePrevious(dest).then(afterCloudMove(dest));
+});
+/** The person's own Cloud, by the one rule (cloud-home.mjs myCloudOrigin):
+ * its page in the main window gets the channels below and the microphone
+ * (appPermissionHandlers). While the sign-in is being checked or has ended it
+ * is still the Cloud this account last verified, so its Settings says
+ * "checking" or "sign in again on your computer", never an error, and a Live
+ * call keeps the microphone. */
+function myCloud() {
+  return myCloudOrigin({ account: cloudAccount, remembered: rememberedHome, remoteAccess: desktopRemoteAccess });
+}
+/** Which page in the main window asks: this computer's own ("local"), the
+ * person's own Cloud's by the one rule above ("cloud"), or neither (null). */
+const cloudPageAsking = (event) => {
+  const contents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
+  if (senderIsLocal(event) && workspaceSenderAllowed(event, contents, environmentsState, rendererOrigin())) return "local";
+  if (cloudPageSenderAllowed(event, { contents, homeOrigin: myCloud(), activeOrigin: activeEnvironment(environmentsState)?.origin })) return "cloud";
+  return null;
+};
+/** Local Settings, and the verified Cloud page in the main window: the Cloud's own channels. */
+const cloudPageSender = (channel, handler) => (event) => {
+  const asking = cloudPageAsking(event);
+  if (!asking) throw new Error(`${channel} is only available in this app's window`);
+  return handler(asking === "cloud");
+};
+// This app's updates: this computer's page and the person's own Cloud page
+// (the one rule its Settings → Plan and the microphone use), so someone who
+// stays on My Cloud still sees "Restart to update". Any other server's page
+// gets nothing.
+const updaterPageAllowed = event => cloudPageAsking(event) !== null;
+// The preload asks once, as a page loads, whether to give it the updater at
+// all. Pages built before main answered My Cloud read the bridge alone as
+// "You're up to date", so it goes only to a page main answers, or will: while
+// the saved sign-in is still being restored at launch, the saved "My Cloud"
+// server's page. updaterPageAllowed still decides every update message.
+const updaterPageOffered = event => {
+  if (updaterPageAllowed(event)) return true;
+  if (desktopRemoteAccess || cloudSignInRestored) return false;
+  const contents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
+  return cloudPageSenderAllowed(event, { contents, homeOrigin: savedCloudHomeOrigin(environmentsState), activeOrigin: activeEnvironment(environmentsState)?.origin });
+};
+ipcMain.on("update:offered", event => {
+  try { event.returnValue = updaterPageOffered(event) === true; } catch { event.returnValue = false; }
+});
 // The Cloud's setup checklist: "Let your Cloud use this Mac" shows the lending
 // switch, as the menu-bar item's Lending settings… does. Nothing is lent here.
-ipcMain.handle("cloud-lending:open", cloudMoveSender("cloud-lending:open", () => openLendingSettings(), { cloudPage: true }));
+ipcMain.handle("cloud-lending:open", cloudPageSender("cloud-lending:open", () => openLendingSettings()));
 // Settings on the person's own Cloud: the plan, read only (no account or
 // credential), Manage in the browser, and back to this computer.
-ipcMain.handle("cloud-plan:state", cloudMoveSender("cloud-plan:state", () => cloudPlanSnapshot(cloudAccount?.state()), { cloudPage: true, remembered: true }));
-ipcMain.handle("cloud-plan:manage", cloudMoveSender("cloud-plan:manage", async () => { await ensureCloudAccount().openDashboard(); }, { cloudPage: true, remembered: true }));
-ipcMain.handle("cloud-plan:local", cloudMoveSender("cloud-plan:local", () => workspaceMenuAction(() => switchEnvironment(LOCAL_ID)), { cloudPage: true, remembered: true }));
-// ── end Move to Cloud ──
+ipcMain.handle("cloud-plan:state", cloudPageSender("cloud-plan:state", () => cloudPlanSnapshot(cloudAccount?.state())));
+ipcMain.handle("cloud-plan:manage", cloudPageSender("cloud-plan:manage", async () => { await ensureCloudAccount().openDashboard(); }));
+ipcMain.handle("cloud-plan:local", cloudPageSender("cloud-plan:local", () => workspaceMenuAction(() => switchEnvironment(LOCAL_ID))));
+// ── end Copy this computer here ──
 
 const savedWorkspace = id => {
   const env = environmentsState.environments.find(entry => entry.id === id);
@@ -2995,13 +3133,13 @@ async function lendingSnapshot() {
 }
 const lendingEnv = () => {
   const env = cloudLendingEnvironment();
-  if (!env) throw new Error("Connect to your Cloud first.");
+  if (!env) throw new Error("Open My Cloud first.");
   return env;
 };
 ipcMain.handle("lending:state", localWorkspaceOnly("lending:state", () => lendingSnapshot()));
 ipcMain.handle("lending:folder", localWorkspaceOnly("lending:folder", async () => {
   lendingEnv();
-  const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder your Cloud can use", properties: ["openDirectory"] });
+  const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder My Cloud can use", properties: ["openDirectory"] });
   if (picked.canceled || !picked.filePaths[0]) return null;
   return (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0];
 }));
@@ -3307,7 +3445,7 @@ app.whenReady().then(async () => {
   }
   registerCuaIpc();
   androidDevice.registerIpc(ipcMain);
-  registerUpdaterIpc();
+  registerUpdaterIpc({ pageAllowed: updaterPageAllowed });
   // Start the CUA daemon before the window so the harness can pick up the
   // connection descriptor on first render. Never blocks window creation on
   // failure — computer use degrades to "unavailable", the rest still works.
@@ -3338,7 +3476,11 @@ app.whenReady().then(async () => {
   if (desktopShutdownStarted) return;
   if (app.isPackaged && !desktopRemoteAccess) void ensureManagedDesktop().start().then(() => companyBackupSchedule.start()).catch(() => {});
   // Fresh local use never makes a Cloud request; start only restores an existing grant.
-  if (app.isPackaged && !desktopRemoteAccess) cloudAccountStarted = ensureCloudAccount().start().catch(() => {});
+  if (app.isPackaged && !desktopRemoteAccess) {
+    cloudAccountRestoring = true;
+    cloudAccountStarted = ensureCloudAccount().start().catch(() => {}).finally(() => { cloudAccountRestoring = false; });
+  }
+  void cloudAccountStarted.then(() => { cloudSignInRestored = true; });
   // The companion the user left on comes back without anyone finding the
   // toggle again — one attempt, after the harness port is settled, with the
   // exact options the IPC handler uses. A failure surfaces in companionState
@@ -3353,15 +3495,18 @@ app.whenReady().then(async () => {
   setLocalOrigin(rendererOrigin());
   // Device permissions (microphone, notifications, clipboard) are for the
   // local UI only; privileged capabilities (camera, geolocation, USB, MIDI,
-  // serial) stay off. Client mode's loopback relay is the local UI.
-  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
-    const requesting = details?.requestingUrl ?? contents?.getURL?.() ?? "";
-    callback(appPermissionAllowed(permission, requesting, rendererOrigin(), details));
+  // serial) stay off. Client mode's loopback relay is the local UI. The
+  // person's own Cloud, open in this window, also gets the microphone (only
+  // that) for a Live call: it is theirs alone. No other server does. A call
+  // placed while the saved sign-in is still restoring waits for it.
+  appPermissions = appPermissionHandlers({
+    rendererOrigin,
+    mainContents: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null),
+    cloudHomeOrigin: myCloud,
+    cloudHomeRestoring: () => cloudAccountRestoring ? cloudAccountRestored() : null,
   });
-  session.defaultSession.setPermissionCheckHandler((contents, permission, requestingOrigin, details) => {
-    const requesting = requestingOrigin || contents?.getURL?.() || "";
-    return appPermissionAllowed(permission, requesting, rendererOrigin(), details);
-  });
+  session.defaultSession.setPermissionRequestHandler(appPermissions.request);
+  session.defaultSession.setPermissionCheckHandler(appPermissions.check);
   environmentsState = readEnvironments();
   // Maintainer grants never start while computer sharing is off: no poll
   // loop, no registration, no grant replay from disk. Lending to the person's
@@ -3407,8 +3552,8 @@ app.whenReady().then(async () => {
       return credentials;
     }).finally(syncManagedComposioCredentials);
   }
-  // in-app auto-update (packaged only) — checks GitHub releases, downloads on
-  // the user's click, installs on "Restart to update"
+  // in-app auto-update (packaged only) — checks GitHub releases and downloads
+  // by itself; only "Restart to update", the person's click, installs
   startUpdater();
   refreshApplicationMenu();
   app.on("activate", () => {

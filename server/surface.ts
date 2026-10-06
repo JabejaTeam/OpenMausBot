@@ -9,8 +9,10 @@
 /** A place a bot can act. `cloud` covers both the Boat and VPS backends —
  * from the person's seat they are the same "cloud computer" panel. */
 import type { Surface } from "../shared/wire.ts";
-import { usesCloudComputer, type ProviderAdapter } from "./contracts.ts";
-export type { Surface };
+import { canWorkOnCloud, type CloudEngine } from "../shared/cloud-computer.ts";
+import { canUseMcpServer } from "../shared/tool-scope.ts";
+import { placeRowText, type PlaceRow, type PlaceSource } from "../shared/place-view.ts";
+export type { Surface, PlaceSource };
 
 /** The bot's "Works on" setting; undefined = Auto. */
 export type Destination = Surface | "off" | undefined;
@@ -30,8 +32,6 @@ export interface SurfacePlan {
   browser: boolean;
   /** The surface this Auto turn was held to by the task's pin, or null. */
   pinned: Surface | null;
-  /** Reserved for a deliberate migration; unavailable targets retain their pin. */
-  clearPin: boolean;
   /** One prompt sentence when the chosen destination cannot be honoured. */
   note: string;
 }
@@ -85,102 +85,67 @@ export function resolveSurface(input: {
   // way; the dispatch was the odd one out. A bot that should keep the browser
   // and nothing else has its own destination: Browser.
   if (destination === "off") {
-    return { computer: "off", browser: false, pinned: null, clearPin: false, note: OFF_NOTE };
+    return { computer: "off", browser: false, pinned: null, note: OFF_NOTE };
   }
   const pin = input.pinnedSurface ?? null;
   if (pin === "browser") {
-    if (browserOn) return { computer: "off", browser: true, pinned: "browser", clearPin: false, note: "" };
+    if (browserOn) return { computer: "off", browser: true, pinned: "browser", note: "" };
     // A missing browser is not permission to act on the host instead. Keep
     // the chosen place so a retry or unrelated provider failure cannot move
     // the task to a different signed-in computer.
-    return { computer: "off", browser: false, pinned: pin, clearPin: false,
+    return { computer: "off", browser: false, pinned: pin,
       note: " This conversation is pinned to the built-in browser, but its tools are unavailable this turn. No computer is mounted instead. Do not claim to have used it; a different place must be selected before acting there." };
   }
-  if (pin) return { computer: pin, browser: false, pinned: pin, clearPin: false, note: "" };
+  if (pin) return { computer: pin, browser: false, pinned: pin, note: "" };
   if (destination === "browser") {
     return browserOn
-      ? { computer: "off", browser: true, pinned: null, clearPin: false, note: "" }
-      : { computer: "off", browser: false, pinned: null, clearPin: false, note: NO_BROWSER_NOTE };
+      ? { computer: "off", browser: true, pinned: null, note: "" }
+      : { computer: "off", browser: false, pinned: null, note: NO_BROWSER_NOTE };
   }
   if (destination !== undefined) {
-    return { computer: destination, browser: false, pinned: null, clearPin: false, note: "" };
+    return { computer: destination, browser: false, pinned: null, note: "" };
   }
-  return { computer: undefined, browser: browserOn, pinned: null, clearPin: false, note: "" };
+  return { computer: undefined, browser: browserOn, pinned: null, note: "" };
 }
 
-/** Where a turn's place came from: the one control a person changes when that
- * place cannot be used. Auto (no choice anywhere) and a team's shared
- * computer are not wrapped; their failures already say what to do. */
-export type PlaceSource = "pin" | "auto-pin" | "works-on" | "routine";
-
-/** The next action per source: the full sentence after a failed attach, and
- * the clause after "Choose another model, or" when the engine is the cause. */
-const PLACE_ACTION: Record<PlaceSource, { sentence: string; clause: string }> = {
-  pin: {
-    sentence: "Clear this conversation's place in the composer to continue.",
-    clause: "clear this conversation's place in the composer",
-  },
-  // The dispatch clears an Auto-recorded pin that failed, so the next
-  // message runs on Auto: that pin was the machine's memory, not a choice.
-  "auto-pin": {
-    sentence: "This conversation is back on Auto; send your message again.",
-    clause: "send your message again; this conversation is back on Auto",
-  },
-  "works-on": {
-    sentence: "Set Works on to Auto in this bot's settings to continue.",
-    clause: "set Works on to Auto",
-  },
-  routine: {
-    sentence: "Change where this routine runs.",
-    clause: "change where this routine runs",
-  },
-};
-
-/** The one rule for which engines can work on a cloud computer (Hosted
- * desktop on Boat, or a self-hosted VPS): an engine with computer tools gets
- * it as one more stdio computer server, and the Computer engine runs on its
- * Boat. Checked before anything is provisioned, so a turn that cannot run
- * never creates or wakes a machine. */
-export function cloudPlaceDriverError(
-  capabilities: Pick<ProviderAdapter["capabilities"], "computerMcp" | "remoteAgent">,
-  backend: "box" | "vps",
-  source: PlaceSource = "works-on",
-): string | null {
-  const next = `Choose another model, or ${PLACE_ACTION[source].clause}.`;
-  if (!usesCloudComputer(capabilities)) return `This model can't use a computer. ${next}`;
-  if (backend === "vps" && capabilities.remoteAgent === true) return `The Computer engine runs on Boat and can't use a self-hosted VPS. ${next}`;
-  return null;
-}
-export const CLOUD_PLACE_DRIVER_ERROR = cloudPlaceDriverError({}, "box")!;
-
-/** One line, cause then next action. A bot thread's transcript row keeps
- * 160 characters, so the cause is shortened there, never the action; the
- * cause keeps its own words otherwise. */
-export function placeFailureMessage(cause: string, source: PlaceSource, limit = 160): string {
-  const action = PLACE_ACTION[source].sentence;
-  const body = cause.trim().replace(/[\s.]+$/, "");
-  const room = limit - action.length - 2;
-  if (body.length <= room) return `${body}. ${action}`;
-  return `${body.slice(0, Math.max(0, room - 1)).trimEnd()}… ${action}`;
+/** Why this engine can't work on the cloud computer, as a failed place, or
+ * null when it can (shared/cloud-computer.ts holds the rule). Checked before
+ * anything is provisioned, so a turn that cannot run never creates or wakes
+ * a machine. */
+export function cloudPlaceRefusal(engine: CloudEngine & { name: string }, source: PlaceSource, bot: string): PlaceUnavailableError | null {
+  if (canWorkOnCloud(engine)) return null;
+  return placeUnavailable("cloud", { state: "cc-cannot", params: { bot, model: engine.name }, source });
 }
 
-/** A place the turn was told to use could not be used. Carries the place and
- * where the choice came from, so the dispatch shows the one next action and
- * clears a failed Auto-recorded pin: a failed place never sticks. */
+/** Why this bot's Tool selection keeps it off a computer, as a failed place,
+ * or null: one line and the one setting that changes it, the same whatever
+ * chose the place (a turn's refusal and select_computer's reason alike).
+ * Engines reach every desktop through the "computer" MCP server, so a
+ * selection without it has nothing to work with there. Checked with the
+ * engine rule, before anything is created or woken. */
+export function computerToolsRefusal(toolScope: unknown, source: PlaceSource, bot: string): PlaceUnavailableError | null {
+  if (canUseMcpServer(toolScope, "computer")) return null;
+  return placeUnavailable("cloud", { state: "cc-tools-off", params: { bot }, source });
+}
+
+/** A place the turn was told to use could not be used. Its message is the
+ * row's English words: one line and the one next action as a sentence
+ * (shared/place-view.ts), uncut. `row` lets the app word it again in the
+ * reader's language, and `place` lets the dispatch clear a failed
+ * Auto-recorded pin to it, so a failed place never sticks. */
 export class PlaceUnavailableError extends Error {
   readonly place: Surface;
-  readonly source: PlaceSource;
-  constructor(place: Surface, source: PlaceSource, message: string) {
-    super(message);
+  readonly row: PlaceRow;
+  constructor(place: Surface, row: PlaceRow, cloudHome = false) {
+    super(placeRowText(row, cloudHome ? "my-cloud" : undefined));
     this.name = "PlaceUnavailableError";
     this.place = place;
-    this.source = source;
+    this.row = row;
   }
 }
 
-/** A failed attach: the attach's own words as the cause, plus the action. */
-export function placeUnavailable(place: Surface, source: PlaceSource, cause: string, limit = 160): PlaceUnavailableError {
-  return new PlaceUnavailableError(place, source, placeFailureMessage(cause, source, limit));
+export function placeUnavailable(place: Surface, row: PlaceRow, cloudHome = false): PlaceUnavailableError {
+  return new PlaceUnavailableError(place, row, cloudHome);
 }
 
 /** How the prompt and the app name a surface. Deliberately the same words

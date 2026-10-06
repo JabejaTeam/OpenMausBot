@@ -2,14 +2,14 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { StoreProvider, type Bot } from "@/state/store";
+import { initialState, type Bot } from "@/state/store";
 
 vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({}),
 }));
 
 import { ConfirmDialogCard } from "./ConfirmDialog";
-import { BotDeleteMenuItem, BotListItem, botConfirmCopy, currentArchivableBot } from "./Sidebar";
+import { BotDeleteMenuItem, BotListItem, botConfirmCopy, botRowProps, currentArchivableBot } from "./Sidebar";
 import { endCall } from "@/lib/call";
 import { configureLiveMedia, resetLiveMedia, startLiveCall } from "@/lib/live-call-media";
 
@@ -28,16 +28,7 @@ const bot = (overrides: Partial<Bot> = {}): Bot => ({
 });
 
 function renderRow(candidate: Bot, quiet = false, density: "comfortable" | "icons" = "comfortable") {
-  return renderToStaticMarkup(createElement(
-    StoreProvider,
-    null,
-    createElement(BotListItem, {
-      bot: candidate,
-      density,
-      quiet,
-      onMenu: vi.fn(),
-    }),
-  ));
+  return renderToStaticMarkup(createElement(BotListItem, botRowProps(initialState, vi.fn(), candidate, { density, quiet, query: "", onMenu: vi.fn() })));
 }
 
 afterEach(() => {
@@ -88,6 +79,19 @@ describe("BotListItem", () => {
     }));
     expect(markup).toContain("Created notes.txt with three lines.");
     expect(markup).not.toContain("[digest]");
+  });
+
+  // A failed turn's row is stored as "error: …"; the preview reads like the
+  // chat row (src/lib/failed-turn.ts), not like a log line.
+  it("previews a failed turn without its error marker", () => {
+    const markup = renderRow(bot({
+      messages: [
+        { id: "u1", role: "user", kind: "text", text: "check the site", at: 1 },
+        { id: "e1", role: "bot", kind: "activity", at: 2, tool: { name: "error: This computer isn't a place on your OMB Cloud: its bots run in the cloud.", ok: false } },
+      ] as Bot["messages"],
+    }));
+    expect(markup).toContain("This computer isn&#x27;t a place on your OMB Cloud: its bots run in the cloud.");
+    expect(markup).not.toContain("error:");
   });
 
   // A turn can end on the approval card itself: Stop while it is open, or a

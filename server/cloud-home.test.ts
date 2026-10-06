@@ -4,11 +4,12 @@ import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
 import { afterEach, expect, it } from "vitest";
 import {
-  CLOUD_BROWSER_SIGN_IN_MAX_TTL_S, CLOUD_HOME_MARKER, CLOUD_HOME_RESTART_EXIT_CODE, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_MAX_TTL_S, CLOUD_PAIRING_NONCE_MS, CLOUD_PAIRING_SKEW_S, cloudHomeConfiguration, cloudHomeConfigured,
-  boatNotConfiguredMessage, cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
+  CLOUD_BROWSER_SIGN_IN_MAX_TTL_S, CLOUD_HOME_MARKER, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_MAX_TTL_S, CLOUD_PAIRING_NONCE_MS, CLOUD_PAIRING_SKEW_S, cloudHomeConfiguration, cloudHomeConfigured,
+  cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
   withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
-import { cloudHomeChildEnvironments, codeTrustProblem, passwdIds, serverExitAction, spawnWithSecrets } from "./cloud-home-start.ts";
+import { cloudHomeChildEnvironments, codeTrustProblem, passwdIds, spawnWithSecrets } from "./cloud-home-start.ts";
+import { RESTART_EXIT_CODE, restartPolicy } from "./restart.ts";
 import { hostedModelPolicy } from "./hosted-models.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
@@ -105,19 +106,13 @@ it("offers the built-in browser and cloud computers, never this computer or a Lo
 
 it("refuses the places it never offers with what is true there, not a setup step", () => {
   const local = cloudHomePlaceRefusal("local")!, vm = cloudHomePlaceRefusal("vm")!;
-  expect(local).toBe("This computer isn't a place on your OMB Cloud: its bots run in the cloud. Set Works on to Auto, Cloud or Browser, or lend your Mac under Settings → OMB Cloud.");
-  expect(vm).toBe("Bots on your OMB Cloud can't use a Local VM: the cloud machine has no container runtime. Set Works on to Auto, Cloud or Browser.");
+  expect(local).toBe("This computer isn't a place on My Cloud. Set Works on to Auto, Cloud computer or Browser, or lend your Mac under Settings → OpenMausBot Cloud.");
+  expect(vm).toBe("Bots on My Cloud can't use a Local VM. Set Works on to Auto, Cloud computer or Browser.");
   for (const text of [local, vm]) {
     expect(text).not.toMatch(/configure|Computer panel|install|set (?:it|one) up/i);
     // A failed turn shows the first 160 characters of its error.
     expect(text.length).toBeLessThanOrEqual(160);
   }
-});
-
-it("suggests the browser, not a Local VM, when Cloud has no Boat account on a Cloud home", () => {
-  expect(boatNotConfiguredMessage(true)).toBe("Cloud Boat is not configured — add a Boat API key or choose Browser");
-  // Every other server keeps its words.
-  expect(boatNotConfiguredMessage(false)).toBe("Cloud Boat is not configured — add a Boat API key or choose Local VM");
 });
 
 // ── the Admin's signed pairing request ───────────────────────────────────────
@@ -214,7 +209,7 @@ it("keeps every window single use and short lived, capping what the Admin asks f
   expect(f.exchange(long.body.code as string).ok).toBe(false);
   const plain = f.mint(f.sign("{}"));
   expect(plain.body.expiresAt).toBe(f.now() + 300_000);
-  expect(f.exchange(plain.body.code as string)).toMatchObject({ ok: true, session: { label: "OMB Cloud" } });
+  expect(f.exchange(plain.body.code as string)).toMatchObject({ ok: true, session: { label: "OpenMausBot Cloud" } });
 });
 
 it("opens a browser sign-in only a browser redeems, by credential alone, for at most two minutes", () => {
@@ -369,13 +364,15 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(fly).not.toContain("OMB_HOSTED_");
 });
 
-it("starts the server again only when it asks to after a restore, and only a few times in a row", () => {
-  expect(serverExitAction(CLOUD_HOME_RESTART_EXIT_CODE, false, 0)).toBe("restart");
-  expect(serverExitAction(CLOUD_HOME_RESTART_EXIT_CODE, false, 4)).toBe("restart");
-  for (const code of [0, 1, null]) expect(serverExitAction(code, false, 0)).toBe("stop");
+it("the Cloud launcher starts the server again only when it asks to after a restore, and only a few times in a row", () => {
+  const launcher = readFileSync(join(import.meta.dirname, "cloud-home-start.ts"), "utf8");
+  expect(launcher).toContain("const policy = restartPolicy();");
+  expect(launcher).toContain("if (!policy.again(code, stopping)) return false;");
+  for (const code of [0, 1, null]) expect(restartPolicy().again(code)).toBe(false);
   // Stopping for good (Fly asked, or the edge died), or restarting in a loop.
-  expect(serverExitAction(CLOUD_HOME_RESTART_EXIT_CODE, true, 0)).toBe("stop");
-  expect(serverExitAction(CLOUD_HOME_RESTART_EXIT_CODE, false, 5)).toBe("stop");
+  expect(restartPolicy().again(RESTART_EXIT_CODE, true)).toBe(false);
+  const policy = restartPolicy(() => 0);
+  expect([1, 2, 3, 4, 5, 6].map(() => policy.again(RESTART_EXIT_CODE, false))).toEqual([true, true, true, true, true, false]);
 });
 
 it("records the first finished bot turn once, on a Cloud home only, and a moved workspace never brings its own", () => {
@@ -388,7 +385,7 @@ it("records the first finished bot turn once, on a Cloud home only, and a moved 
   expect(firstCloudTurnPatch({ ...turn, recorded: "2026-09-29T08:00:00.000Z" })).toBeNull();
   expect(firstCloudTurnPatch({ ...turn, ok: false })).toBeNull();
   expect(firstCloudTurnPatch({ ...turn, known: false })).toBeNull();
-  // Move to Cloud restores a Mac's settings onto the Cloud; the onboarding
+  // Copy to My Cloud restores a Mac's settings onto the Cloud; the onboarding
   // record is not among them, so the Cloud's own answer survives, and a Mac's
   // turns never tick the Cloud's step.
   const mac = { language: "en", onboarding: { completedAt: "2026-09-01T00:00:00.000Z", version: 1, firstTurnAt: "2026-08-01T00:00:00.000Z" } };

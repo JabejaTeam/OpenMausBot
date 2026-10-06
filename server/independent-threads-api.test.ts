@@ -451,10 +451,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     evidence.push({ groupDefaultPreservedUntilStop: true, groupId: group.id, selectedTaskId: threadId });
   }, 30_000);
 
-  // Jabeja fork (5ef18431): a message for a thread whose project folder is
-  // held by a sibling waits in the queue instead of failing, and runs once
-  // the owner stops.
-  it("queues a second engine in the same selected project folder until its owner stops", async () => {
+  it("runs a second engine of the same bot in the selected project folder at the same time", async () => {
     const created = await tool("create_bot", { name: "Shared project fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;
     const taskA = created.bot.activeTaskId;
@@ -466,18 +463,18 @@ describe("independent bot tasks through the isolated control surface", () => {
     const second = await tool("create_task", { target_type: "bot", target_id: botId, title: "Project sibling" });
     const taskB = second.task.taskId;
     await control(["set-model", "--bot", botId, "--task", taskB, "--instance", "claude", "--model", models[1]]);
-    await control(["send", "--bot", botId, "--task", taskB, "--text", "PROJECT_B_CONFLICT"]);
-    const blocked = await control(["wait", "--bot", botId, "--task", taskB, "--timeout", "10"]);
-    expect(blocked.status).not.toBe("failed");
-    expect(existsSync(modelFile(models[1], "json"))).toBe(false);
-    expect((await botState(botId)).tasks.find((task: any) => task.taskId === taskA)?.busy).toBe(true);
-
+    await control(["send", "--bot", botId, "--task", taskB, "--text", "PROJECT_B_PARALLEL"]);
+    // Like two Claude Code sessions open in one repo: the second engine starts
+    // in the same folder while the first still works there. The per-turn
+    // snapshot queues per folder on its own (server/checkpoints.ts).
+    expect((await dump(models[1])).env.OMB_FIXTURE_CWD).toBe(realpathSync(cwd));
+    const both = await botState(botId);
+    expect(both.tasks.find((task: any) => task.taskId === taskA)?.busy).toBe(true);
+    expect(both.tasks.find((task: any) => task.taskId === taskB)?.busy).toBe(true);
+    expect(JSON.stringify((await control(["messages", "--bot", botId, "--task", taskB])).messages)).not.toContain("project folder");
     await control(["interrupt", "--bot", botId, "--task", taskA]);
-    await control(["wait", "--bot", botId, "--task", taskA, "--timeout", "10"]);
-    const owned = await dump(models[1]);
-    expect(owned.env.OMB_FIXTURE_CWD).toBe(realpathSync(cwd));
-    expect(JSON.stringify(owned)).toContain("PROJECT_B_CONFLICT");
     await control(["interrupt", "--bot", botId, "--task", taskB]);
+    evidence.push({ parallelThreadsInOneProjectFolder: true, botId, taskA, taskB });
   }, 45_000);
 
   it.skipIf(process.platform !== "darwin")("claims the shared computer only on first use and keeps a sibling stop from releasing it", async () => {

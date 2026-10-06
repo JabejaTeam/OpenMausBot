@@ -163,8 +163,8 @@ export interface SendTurnInput {
   /** Bot persona (name/title/description) as a system prompt. */
   system?: string;
   /** `system` split at the sections that legitimately change mid-conversation
-   * (memory, mentions, outstanding teammate work, recent work): `systemStable` is everything else, `systemVolatile` is
-   * those sections' text. A driver that keeps one CLI process per thread keys
+   * (the sections in VOLATILE_SECTIONS, system-prompt.ts): `systemStable` is
+   * everything else, `systemVolatile` is those sections' text. A driver that keeps one CLI process per thread keys
    * that process on the stable half, so a memory edit no longer respawns the
    * session and makes the provider re-cache the entire prompt; the changed half
    * is delivered inside the next turn instead. Drivers that rebuild their
@@ -183,16 +183,9 @@ export interface SendTurnInput {
      * bridge harness-controlled lets it turn connection requests into trusted
      * chat cards consistently across provider CLIs. */
     composio?: { command: string; args: string[]; env: Record<string, string> };
-    /** The Boat the Computer engine (remoteAgent) runs its turn on. Every
-     * other engine reaches a cloud computer through `localComputer`, as one
-     * more stdio computer server the harness serves. */
-    computer?: {
-      // kind "box" and field boxId keep their historical names (wire contract).
-      kind?: "box";
-      boxId: string;
-    };
     /** Direct stdio connection to a computer MCP server: Cua Driver (host,
      * sandbox, or VPS) or the harness's own cloud computer server (a Boat).
+     * Every engine reaches every computer this way, on its own model.
      * `scope` is set only for the user's host desktop; isolated and
      * remote computers intentionally omit it so host-only approval rules
      * cannot change their semantics. */
@@ -275,13 +268,6 @@ export interface ProviderAdapter {
      * told it has a computer whose tools its driver cannot mount — it
      * burns turns hunting for tools that aren't there. */
     computerMcp?: boolean;
-    /** True when the whole turn executes on the cloud computer (the Boat native
-     * agent — POST /boxes/{id}/prompt) instead of in the host harness. Such a
-     * driver claims the boat exclusively, cannot use host or Local VM surfaces,
-     * and every tool call acts on that machine's screen (screen pollers start
-     * with screenIsTheWork). Implies a cloud-computer turn even though the
-     * driver mounts no computer tools. */
-    remoteAgent?: boolean;
     /** True when the driver mounts turn.integrations.composio (the user's
      * connected apps). Same rule again: a key in the config says the user
      * HAS those connections, not that this driver can reach them. */
@@ -588,16 +574,6 @@ export interface ProviderDriver<Config = unknown> {
 }
 
 export type AnyProviderDriver = ProviderDriver<any>;
-
-/** True when this driver's turn can run against a cloud computer — natively
- * (remoteAgent) or through its computer tools (computerMcp), where the cloud
- * computer is one more stdio server. The one rule for Hosted desktop: every
- * cloud attach path refuses an engine without it before anything is
- * provisioned (cloudPlaceDriverError). Derived, so no driver can declare it
- * out of step with the two fields it reads. */
-export function usesCloudComputer(capabilities: Pick<ProviderAdapter["capabilities"], "remoteAgent" | "computerMcp">): boolean {
-  return capabilities.remoteAgent === true || capabilities.computerMcp === true;
-}
 
 let eventCounter = 0;
 export const newEventId = () => `ev-${Date.now().toString(36)}-${(eventCounter++).toString(36)}`;

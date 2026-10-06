@@ -276,6 +276,7 @@ const dumpEnv = Object.fromEntries(
     "KIMI_MODEL_DISPLAY_NAME",
     "TEST_TURN_MODEL",
     "MY_AGENT_TOKEN",
+    "VENICE_API_KEY",
     "GEMINI_HOME",
     "AGY_ACP_FORCE_FILE_STORAGE",
     "ANTIGRAVITY_HARNESS_PATH",
@@ -667,7 +668,9 @@ function handle(msg: any) {
         break;
       }
       const cachedLiveLoad = process.env.FAKE_ACP_CACHED_LIVE_LOAD === "1" && liveSession === msg.params?.sessionId;
-      if (mode === "safe-agent-reads" && !cachedLiveLoad) {
+      // like a real agent that reconnects its MCP servers on load, so a
+      // later turn on this process carries that turn's own token
+      if ((mode === "safe-agent-reads" || mode === "chief-delegate") && !cachedLiveLoad) {
         agentsMcp = (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
       }
       if (process.env.FAKE_ACP_DUMP) {
@@ -876,7 +879,7 @@ function handle(msg: any) {
       if (mode === "unkeyed-tool") {
         // An agent that violates the ACP spec by omitting toolCallId: the
         // turn's lifecycle pair must still carry one stable id so consumers
-        // can pair the start with its completion (#1653 computer-call fence).
+        // can pair the start with its completion.
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", title: "run", rawInput: { command: "echo done" } } } });
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "done" } } } });
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "done" } } } });

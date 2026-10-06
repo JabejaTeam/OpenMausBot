@@ -289,8 +289,8 @@ export interface RoutineManagerOptions {
   emit?: (payload: Record<string, unknown>) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
   goalState?: (groupId: string, coordinatorBotId: string) => "ready" | "busy" | "missing";
-  /** A task for one run of `routineId` (it may name who the run is for). */
-  createTask: (botId: string, title: string, activate?: boolean, routineId?: string) => { threadId: string } | null;
+  /** A task for one run (it may name who the run is for). */
+  createTask: (botId: string, title: string, activate?: boolean, run?: RoutineRun) => { threadId: string } | null;
   /** When set, run this bot's routine in that existing conversation instead of
    * a new hidden task. Room goals never use it. */
   joinConversation?: (run: RoutineRun) => string | null;
@@ -322,7 +322,7 @@ export interface RoutineManagerOptions {
     onDispatchError: (message: string) => void,
     createdFor?: string,
   ) => Promise<void>;
-  interruptTurn?: (botId: string, threadId: string, runOn: RoutineRunOn) => Promise<void>;
+  interruptTurn?: (botId: string, threadId: string) => Promise<void>;
   interruptGoal?: (
     groupId: string,
     threadId: string,
@@ -645,7 +645,10 @@ function loadSchedule(value: unknown, after: number): RoutineSchedule | null {
   }
 }
 
-function intervalHasRestrictions(schedule: RoutineIntervalSchedule): boolean {
+/** Whether an interval only runs on some weekdays, in a window or until an end. */
+export function intervalHasRestrictions(
+  schedule: Pick<RoutineIntervalSchedule, "weekdays" | "window" | "endsAt">,
+): boolean {
   return schedule.weekdays !== undefined || schedule.window !== undefined || schedule.endsAt !== undefined;
 }
 
@@ -1229,7 +1232,7 @@ export class RoutineManager {
         if (run.target === "room-goal" && run.groupId) {
           void this.options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
         } else {
-          void this.options.interruptTurn?.(run.botId, run.threadId, run.runOn ?? "maus").catch(() => {});
+          void this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
         }
       }
       changed = true;
@@ -1424,7 +1427,7 @@ export class RoutineManager {
       if (run.target === "room-goal" && run.groupId) {
         await this.options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
       } else {
-        await this.options.interruptTurn?.(run.botId, run.threadId, run.runOn ?? "maus").catch(() => {});
+        await this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
       }
     }
     queueMicrotask(() => void this.tick());
@@ -1498,7 +1501,7 @@ export class RoutineManager {
             detail,
           }).catch(() => {});
         } else {
-          await this.options.interruptTurn?.(run.botId, threadId, run.runOn ?? "maus").catch(() => {});
+          await this.options.interruptTurn?.(run.botId, threadId).catch(() => {});
         }
       }
       const dueRoutines = this.routines.filter(
@@ -1631,7 +1634,7 @@ export class RoutineManager {
           ? run.groupId
             ? this.options.createGoalTask?.(run.groupId, title) ?? null
             : null
-          : this.options.createTask(run.botId, title, run.triggerSource === "webhook", run.routineId);
+          : this.options.createTask(run.botId, title, run.triggerSource === "webhook", run);
         if (!task) {
           this.failRun(run, run.target === "room-goal"
             ? "Could not create a room task for this goal"

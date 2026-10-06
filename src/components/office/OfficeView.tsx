@@ -19,7 +19,7 @@ import { delegationLinks } from "@/lib/office-delegations";
 import { setOfficeView } from "@/lib/office-view";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { ChatView } from "../ChatView";
-import { BotThreadList } from "../Sidebar";
+import { BotThreadList, botRowProps } from "../Sidebar";
 import { sidebarBotActivityTasks } from "../SidebarBotActivity";
 import type { OfficeBotLook, OfficeScene, OfficeTheme } from "./office-scene";
 import { OfficeStatusRail, StatusSymbol } from "./OfficeStatusRail";
@@ -65,6 +65,7 @@ const THREAD_COLUMN_KEY = "omb-office-thread-column";
 /** The bot's threads as Messages lists conversations: a search field and a
  * compose button on top, then every thread in one scrolling list. */
 function OfficeThreads({ bot, onNew }: { bot: Bot; onNew: () => void }) {
+  const { state, dispatch } = useStore();
   const [query, setQuery] = useState("");
   return (
     <>
@@ -90,7 +91,7 @@ function OfficeThreads({ bot, onNew }: { bot: Bot; onNew: () => void }) {
           <SquarePen size={16} />
         </button>
       </div>
-      <BotThreadList bot={bot} selected density="comfortable" query={query} everything />
+      <BotThreadList {...botRowProps(state, dispatch, bot, { density: "comfortable", quiet: false, query, onMenu: () => undefined })} selected everything />
     </>
   );
 }

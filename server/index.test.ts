@@ -454,9 +454,9 @@ beforeAll(async () => {
         // tests exercise the trusted desktop boundary, while an intentionally
         // missing CLI keeps it out of the default available-model selection.
         codex: { driver: "codex", displayName: "Fixture Codex", config: { cli: join(home, "missing-codex") } },
-        // the engine that runs a turn on the bot's cloud computer (the app
-        // registers it by default); it talks only to the Boat stub
-        computer: { driver: "boxAgent", displayName: "Computer" },
+        // A live engine without computer tools (no key, so never available):
+        // places that need a computer refuse it before anything is mounted.
+        plainApi: { driver: "openai-compat", displayName: "Fixture plain model", config: { tools: false } },
       },
     }),
   );
@@ -926,6 +926,23 @@ beforeAll(async () => {
               { name: "gmail_send_email", description: "bad case" },
               { name: "PLATFORM", description: "no service" },
             ],
+          },
+        }));
+      }
+      // Google's answer when the connection lacks a permission the action
+      // needs, as Composio relays it (MOCA-273).
+      const calledTool = body && typeof body === "object" ? ((body as { params?: { name?: unknown } }).params?.name) : undefined;
+      if (calledTool === "GMAIL_CREATE_FILTER") {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          jsonrpc: "2.0",
+          id: requestId,
+          result: {
+            content: [{ type: "text", text: JSON.stringify({
+              successful: false,
+              error: "403 Forbidden: {\"error\":{\"code\":403,\"message\":\"Request had insufficient authentication scopes.\",\"status\":\"PERMISSION_DENIED\",\"details\":[{\"reason\":\"ACCESS_TOKEN_SCOPE_INSUFFICIENT\",\"domain\":\"googleapis.com\"}]}}",
+            }) }],
+            isError: true,
           },
         }));
       }
@@ -2978,7 +2995,12 @@ describe("harness HTTP API", () => {
     const stream = await openSse(`${BASE}/api/events`);
     try {
       writeFileSync(failureMarker, "fail");
-      expect((await api("POST", "/api/browser-engine/install")).status).toBe(202);
+      for (const headers of [{ "content-type": "application/x-www-form-urlencoded" }, { "content-type": "text/plain" }, { "content-type": "application/jsonp" }, undefined]) {
+        const refused = await fetch(`${BASE}/api/browser-engine/install`, { method: "POST", headers, body: headers ? "x=1" : undefined });
+        expect(refused.status).toBe(415);
+      }
+      expect(stream.frames.some((frame) => frame.kind === "config" && frame.browserEngine?.installing === true)).toBe(false);
+      expect((await api("POST", "/api/browser-engine/install", {})).status).toBe(202);
       const start = await stream.until((frame) => frame.kind === "config" && frame.browserEngine?.installing === true);
       expect(start.browserEngine).toMatchObject({ kind: "engine", installing: true });
       expect(start.browserEngine).not.toHaveProperty("installError");
@@ -2987,7 +3009,7 @@ describe("harness HTTP API", () => {
       expect(failed.browserEngine.installing).not.toBe(true);
       rmSync(failureMarker);
       stream.frames.splice(0);
-      expect((await api("POST", "/api/browser-engine/install")).status).toBe(202);
+      expect((await api("POST", "/api/browser-engine/install", {})).status).toBe(202);
       const retry = await stream.until((frame) => frame.kind === "config" && frame.browserEngine?.installing === true);
       expect(retry.browserEngine).not.toHaveProperty("installError");
       await stream.until((frame) => frame.kind === "config" && frame.browserEngine?.kind === "engine" && !frame.browserEngine.installing && !frame.browserEngine.installError);
@@ -3087,72 +3109,26 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("refuses a Works-on This Computer turn for the box-native engine", async () => {
-    let botId: string | undefined;
-    try {
-      // The Computer engine executes on its cloud machine, so an explicit
-      // host-desktop destination is refused before anything is mounted.
-      const bot = (await api("POST", "/api/bots", {
-        name: "Local refusal",
-        modelSelection: { instanceId: "computer", model: "claude-fable-5" },
-      })).body.bot;
-      botId = bot.id;
-      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "local" })).status).toBe(200);
-      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "work on this desktop" })).status).toBe(202);
-      await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=20")).body.bots.find(
-        (candidate: { id: string }) => candidate.id === bot.id,
-      )), { timeout: 5_000 }).toMatch(/the Computer engine works on the cloud computer/);
-    } finally {
-      if (botId) await api("POST", `/api/bots/${botId}/interrupt`, {}).catch(() => undefined);
-      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
-    }
-  });
-
-  it("refuses a room Works-on This Computer turn for the box-native engine", async () => {
-    let roomId: string | undefined;
-    let botId: string | undefined;
-    try {
-      const member = (await api("POST", "/api/bots", {
-        name: "Room local refusal",
-        modelSelection: { instanceId: "computer", model: "claude-fable-5" },
-      })).body.bot;
-      botId = member.id;
-      expect((await api("PATCH", `/api/bots/${member.id}`, { computer: "local" })).status).toBe(200);
-      const room = (await api("POST", "/api/groups", {
-        name: "Boat-native host refusal",
-        memberIds: [member.id],
-        setup: { bulletin: "", defaultResponder: { kind: "member", botId: member.id } },
-      })).body.group;
-      roomId = room.id;
-      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "work on this desktop" })).status).toBe(202);
-      await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body),
-        { timeout: 5_000 }).toMatch(/the Computer engine works on the cloud computer/);
-    } finally {
-      if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
-      if (roomId) await api("DELETE", `/api/groups/${roomId}`).catch(() => undefined);
-      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
-    }
-  });
-
-  it("refuses a room Works-on Local VM turn for the box-native engine", async () => {
+  it("refuses a room Works-on Local VM turn for an engine without computer tools", async () => {
     let roomId: string | undefined;
     let botId: string | undefined;
     try {
       const member = (await api("POST", "/api/bots", {
         name: "Room VM refusal",
-        modelSelection: { instanceId: "computer", model: "claude-fable-5" },
+        modelSelection: { instanceId: "plainApi", model: "fixture-plain-model" },
       })).body.bot;
       botId = member.id;
       expect((await api("PATCH", `/api/bots/${member.id}`, { computer: "vm" })).status).toBe(200);
       const room = (await api("POST", "/api/groups", {
-        name: "Boat-native VM refusal",
+        name: "Plain model VM refusal",
         memberIds: [member.id],
         setup: { bulletin: "", defaultResponder: { kind: "member", botId: member.id } },
       })).body.group;
       roomId = room.id;
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "work in the virtual machine" })).status).toBe(202);
       await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body),
-        { timeout: 5_000 }).toMatch(/this model cannot use the Local VM.*Set Works on to Auto in this bot's settings to continue/);
+        { timeout: 5_000 }).toMatch(/fixture-plain-model can't use a Local VM\. Choose a model that can, such as Claude or ChatGPT\. Choose another model in Room VM refusal's settings\./);
+      expect(JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body)).not.toContain("Works on to Auto");
     } finally {
       if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
       if (roomId) await api("DELETE", `/api/groups/${roomId}`).catch(() => undefined);
@@ -3432,7 +3408,7 @@ describe("harness HTTP API", () => {
       expect((await api("POST", `/api/bots/${botIds[0]}/messages`, { text: "do not create a replacement" })).status).toBe(202);
       await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.bots.find(
         (bot: { id: string }) => bot.id === botIds[0],
-      )), { timeout: 5_000 }).toMatch(/team's Boat computer is missing/);
+      )), { timeout: 5_000 }).toMatch(/team's cloud computer is missing/);
       await idle(botIds[0]);
       expect(existsSync(fakeClaudeDump)).toBe(false);
       expect(boatRouteCalls.filter(call => call.method === "POST" && call.path === "/boxes")).toHaveLength(createCount);
@@ -3567,7 +3543,6 @@ describe("harness HTTP API", () => {
     writeFileSync(join(isolatedData, "config.json"), JSON.stringify({
       instances: {
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
-        computer: { driver: "boxAgent", displayName: "Computer" },
       },
     }));
     let isolatedStderr = "";
@@ -3810,7 +3785,6 @@ describe("harness HTTP API", () => {
           },
           config: { cli: FAKE_CLAUDE_CLI },
         },
-        computer: { driver: "boxAgent", displayName: "Computer" },
       },
     }));
     let isolatedStderr = "";
@@ -7193,11 +7167,11 @@ describe("harness HTTP API", () => {
 
   it("pins provider approval support at the bot settings gate", async () => {
     const bot = (await api("POST", "/api/bots", {
-      modelSelection: { instanceId: "computer", model: "claude-fable-5" },
+      modelSelection: { instanceId: "ghost", model: "fixture-ghost-model" },
     })).body.bot;
     try {
-      // The Boat-native agent has no Full mapping, so the bot-level PATCH
-      // must refuse Full before the trusted-desktop transition.
+      // An engine without a Full mapping: the bot-level PATCH must refuse
+      // Full before the trusted-desktop transition.
       const refused = await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "full" });
       expect(refused.status).toBe(400);
       expect(refused.body.error).toMatch(/does not support the selected approval level, or changing providers requires choosing Ask first/);
@@ -7702,14 +7676,13 @@ describe("harness HTTP API", () => {
       boatPromptBodies.length = 0;
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Describe your available computer tools" })).status).toBe(202);
-      // Auto reuses the bot's Boat that is already running, as one more
-      // computer server on its own engine: never created, never Boat's runner.
+      // Auto never reaches the Boat for an engine that uses it as a computer,
+      // even one that is already running: not read, not mounted, not created.
       type Dump = { argv: string[]; mcpConfig: { mcpServers: Record<string, { args?: string[] }> }; systemPrompt: string };
       const local = await readJsonFileWhenReady<Dump>(fakeClaudeDump);
-      expect(local.mcpConfig.mcpServers.computer?.args).toEqual([expect.stringMatching(/harness-mcp-proxy\.(?:ts|js)$/), "computer"]);
-      expect(local.systemPrompt).toContain("You control the assigned cloud computer");
+      expect(local.mcpConfig.mcpServers.computer).toBeUndefined();
       expect(boatPromptBodies).toHaveLength(0);
-      expect(boatRouteCalls.some(call => call.method === "POST" && call.path === "/boxes")).toBe(false);
+      expect(boatRouteCalls).toEqual([]);
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle();
 
       // A Local VM pin must win even when the bot default says Cloud. The
@@ -7871,6 +7844,79 @@ describe("harness HTTP API", () => {
     expect(removed).toEqual({ status: 200, body: { servers: [] } });
     const after = await api("GET", "/api/mcp/servers");
     expect(after).toEqual({ status: 200, body: { servers: [] } });
+  });
+
+  it("lets a bot file an MCP server only as a disabled row", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+    const secret = "bot-filed-secret-that-must-never-render";
+    const headerSecret = "bot-header-secret-that-must-never-render";
+    const oauthSecret = "bot-oauth-secret-that-must-never-render";
+    const configFile = join(home, ".openmausbot", "config.json");
+    const fileServer = (body: unknown) => fetch(`${BASE}/api/internal/mcp-servers`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    try {
+      const filed = await fileServer({ name: "botnotes", command: "npx", args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: secret } });
+      const filedBody = await filed.json();
+      expect(filed.status).toBe(201);
+      expect(filedBody).toEqual({
+        name: "botnotes", enabled: false, transport: "command", target: "npx",
+        envKeys: ["NOTES_TOKEN"], headerKeys: [],
+      });
+      expect(JSON.stringify(filedBody)).not.toContain(secret);
+      const disk = JSON.parse(readFileSync(configFile, "utf8"));
+      expect(disk.mcpServers.botnotes).toEqual({
+        command: "npx", args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: secret }, enabled: false,
+      });
+
+      const switched = await fileServer({ name: "botother", command: "npx", enabled: true });
+      expect(switched.status).toBe(400);
+      expect(await switched.json()).toMatchObject({ error: expect.stringMatching(/on\/off switch/) });
+      expect(JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botother).toBeUndefined();
+      expect(JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botnotes.env.NOTES_TOKEN).toBe(secret);
+
+      const again = await fileServer({ name: "botnotes", command: "other-command" });
+      expect(again.status).toBe(409);
+      expect(JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botnotes.command).toBe("npx");
+
+      const remote = await fileServer({
+        name: "botdocs",
+        url: "https://docs.example/mcp",
+        type: "sse",
+        headers: { Authorization: headerSecret },
+        oauth: { clientId: "corp-app", clientSecret: oauthSecret },
+      });
+      const remoteBody = await remote.json();
+      expect(remote.status).toBe(201);
+      expect(remoteBody).toEqual({
+        name: "botdocs", enabled: false, transport: "sse", target: "https://docs.example/mcp",
+        envKeys: [], headerKeys: ["Authorization"],
+      });
+      const remoteText = JSON.stringify(remoteBody);
+      expect(remoteText).not.toContain(headerSecret);
+      expect(remoteText).not.toContain(oauthSecret);
+      const savedRemote = JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botdocs;
+      expect(savedRemote).toEqual({
+        type: "sse", url: "https://docs.example/mcp", headers: { Authorization: headerSecret },
+        oauth: { clientId: "corp-app", clientSecret: oauthSecret }, enabled: false,
+      });
+
+      const listed = await api("GET", "/api/mcp/servers");
+      expect(listed.body.servers).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "botnotes", enabled: false, envKeys: ["NOTES_TOKEN"] }),
+        expect.objectContaining({ name: "botdocs", enabled: false, headerKeys: ["Authorization"] }),
+      ]));
+      expect(JSON.stringify(listed.body)).not.toContain(secret);
+      expect(JSON.stringify(listed.body)).not.toContain(headerSecret);
+      expect(JSON.stringify(listed.body)).not.toContain(oauthSecret);
+    } finally {
+      await api("DELETE", "/api/mcp/servers/botnotes").catch(() => undefined);
+      await api("DELETE", "/api/mcp/servers/botdocs").catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+    }
   });
 
   it("manages and probes a url MCP server, and the Claude Code servers switch", async () => {
@@ -9834,7 +9880,8 @@ describe("harness HTTP API", () => {
       });
       expect(unavailableCloud.status).toBe(409);
       expect(await unavailableCloud.json()).toMatchObject({
-        error: expect.stringMatching(/Boat API key|Cloud VM runner/i),
+        // The same words a failed cloud turn's row uses (shared/place-view.ts).
+        error: expect.stringMatching(/^A cloud computer here needs your own Boat key, a paid service\. Add a Boat key in Settings → API keys\./),
       });
 
       const proposed = await fetch(`${BASE}/api/internal/routine-requests`, {
@@ -10417,159 +10464,6 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("keeps a proposed tightening inert until confirmed, fails closed when loosened, and never leaks the receipt", async () => {
-    const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;
-    try {
-      // Start from Auto with one standing grant, so tightening to Edits is a
-      // real reduction and the loosened-since path stays reachable.
-      await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto", alwaysAllow: ["Bash"] });
-      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
-      const internalHeaders = {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-      };
-
-      // Escalation is refused before any card exists.
-      const escalation = await fetch(`${BASE}/api/internal/tightening-requests`, {
-        method: "POST",
-        headers: internalHeaders,
-        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, intents: { approvalMode: "full" }, reason: "not allowed" }),
-      });
-      expect(escalation.status).toBe(400);
-
-      const proposal = await fetch(`${BASE}/api/internal/tightening-requests`, {
-        method: "POST",
-        headers: internalHeaders,
-        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, intents: { alwaysAllow: ["Bash"] }, reason: "incident lockdown" }),
-      });
-      expect(proposal.status).toBe(201);
-      const proposed = z.object({ requestId: z.string() }).passthrough().parse(await proposal.json());
-      const state = (await api("GET", "/api/bots")).body;
-      const wireScout = state.bots.find((candidate: { id: string }) => candidate.id === bot.id);
-      const card = wireScout
-        ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === proposed.requestId);
-      expect(card?.card).toMatchObject({
-        tool: "tighten_permissions",
-        tighteningRequest: { botId: bot.id, targetBotId: bot.id, intents: { alwaysAllow: ["Bash"] } },
-      });
-      expect(wireScout?.approvalMode).toBe("auto");
-      expect(wireScout?.alwaysAllow).toEqual(["Bash"]);
-      // One card data drives every surface: the generic card renders the
-      // subtitle copy on desktop and mobile alike, and the payload carries
-      // the before snapshot and intents verbatim for richer renderers.
-      expect(card?.card?.subtitle).toContain("Always-allow grants: 1 → 0 — removed: Bash");
-      expect(card?.card?.subtitle).toContain("This reduces Scout's authority, and the reverse cannot be proposed back.");
-
-      // A human adds a new standing grant while the card sits open: the
-      // confirmation must fail closed rather than apply the stale card.
-      await api("PATCH", `/api/bots/${bot.id}`, { alwaysAllow: ["Bash", "WebSearch"] });
-      const stale = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" });
-      expect(stale.status).toBe(409);
-
-      // A fresh card against the live state applies on confirm.
-      const againResponse = await fetch(`${BASE}/api/internal/tightening-requests`, {
-        method: "POST",
-        headers: internalHeaders,
-        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, intents: { approvalMode: "edits" }, reason: "incident lockdown" }),
-      });
-      const again = z.object({ requestId: z.string() }).passthrough().parse(await againResponse.json());
-      const ok = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: again.requestId, behavior: "allow" });
-      expect(ok.body).toMatchObject({ ok: true, outcome: "allowed-once", tighteningFields: ["approvalMode"] });
-      const after = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
-      expect(after.approvalMode).toBe("edits");
-      expect(after.autoApprove).toBe(false);
-      // The durable receipt exists server-side but never crosses the wire.
-      expect(after).not.toHaveProperty("lastTighteningRequestId");
-
-      // History rows: the proposing bot is the actor, the card id is the
-      // via, in the same History section manual edits write to.
-      const history = await api("GET", `/api/bots/${bot.id}/history`);
-      expect(history.status).toBe(200);
-      const tightened = history.body.rows.filter((r: any) => r.field === "approvalMode");
-      expect(tightened).toHaveLength(1);
-      expect(tightened[0]).toMatchObject({ actor: "bot", via: expect.stringMatching(/^card:/), before: "auto", after: "edits" });
-
-      // decisions audit
-      await expect.poll(async () => {
-        const decisions = (await api("GET", "/api/decisions")).body.decisions;
-        return decisions.filter((d: any) => d.requestId === again.requestId).map((d: any) => `${d.decision}:${d.source}`).sort();
-      }).toEqual(["card-shown:tightening", "user-approved:user"]);
-    } finally {
-      await api("POST", `/api/bots/${bot.id}/interrupt`);
-      await api("DELETE", `/api/bots/${bot.id}`);
-    }
-  });
-
-  it("tightens an assigned library skill for one bot without disabling its teammates", async () => {
-    const name = `tightening-${randomUUID().slice(0, 8)}`;
-    const first = (await api("POST", "/api/bots", { name: "Tightening skill owner" })).body.bot;
-    const peer = (await api("POST", "/api/bots", { name: "Tightening skill peer" })).body.bot;
-    try {
-      expect((await api("PATCH", "/api/config", { features: { skillsLibrary: true } })).status).toBe(200);
-      const text = `---\nname: ${name}\ndescription: Synthetic tightening fixture.\n---\n\nReview the synthetic fixture only.\n`;
-      expect((await api("POST", "/api/skills-library", { text })).status).toBe(201);
-      expect((await api("PATCH", `/api/skills-library/${name}`, { enabled: true })).status).toBe(200);
-      for (const bot of [first, peer]) {
-        expect((await api("PUT", `/api/bots/${bot.id}/skills-library`, { skills: [name] })).status).toBe(200);
-      }
-      const token = await mintTestCapability(BASE, first.id, first.threadId);
-      const proposal = await fetch(`${BASE}/api/internal/tightening-requests`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ fromBotId: first.id, fromThreadId: first.threadId, intents: { skills: [name] }, reason: "No longer needed here" }),
-      });
-      expect(proposal.status).toBe(201);
-      const proposed = await proposal.json() as { requestId: string };
-      expect((await api("GET", `/api/bots/${first.id}/skills`)).body.assignedSkills).toEqual([name]);
-      const allowed = await api("POST", `/api/threads/${first.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" });
-      expect(allowed).toMatchObject({ status: 200, body: { ok: true, tighteningFields: ["skills"] } });
-      expect((await api("GET", `/api/bots/${first.id}/skills`)).body.assignedSkills).toEqual([]);
-      const other = await api("GET", `/api/bots/${peer.id}/skills`);
-      expect(other.body.assignedSkills).toEqual([name]);
-      expect(other.body.skills).toContainEqual(expect.objectContaining({ name, enabled: true, origin: "library" }));
-      expect((await api("GET", "/api/skills-library")).body.skills).toContainEqual(expect.objectContaining({ name, enabled: true }));
-      const persisted = JSON.parse(readFileSync(join(home, ".openmausbot", "bots.json"), "utf8"));
-      expect(persisted.find((bot: any) => bot.id === first.id).assignedSkills).toEqual([]);
-      expect(persisted.find((bot: any) => bot.id === peer.id).assignedSkills).toEqual([name]);
-      expect((await api("POST", `/api/threads/${first.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" })).status).toBe(200);
-    } finally {
-      await api("PATCH", "/api/config", { features: { skillsLibrary: false } });
-      for (const bot of [first, peer]) await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
-    }
-  });
-
-  it("counts tightening cards against the shared proposal budget", async () => {
-    const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;
-    try {
-      // A standing grant keeps every tightening proposal a real reduction,
-      // so eight cards can pile up without touching live authority.
-      await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto", alwaysAllow: ["Bash"] });
-      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
-      const internalHeaders = {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-      };
-      const proposeTightening = () =>
-        fetch(`${BASE}/api/internal/tightening-requests`, {
-          method: "POST",
-          headers: internalHeaders,
-          body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, intents: { alwaysAllow: ["Bash"] }, reason: "incident lockdown" }),
-        });
-
-      // Tightening cards consume the same per-thread budget as the other
-      // proposal kinds; eight open cards fill it.
-      for (let index = 0; index < 8; index += 1) {
-        expect((await proposeTightening()).status).toBe(201);
-      }
-      const ninth = await proposeTightening();
-      expect(ninth.status).toBe(429);
-      expect(await ninth.json()).toMatchObject({ error: "confirm or cancel an existing proposal first" });
-    } finally {
-      await api("POST", `/api/bots/${bot.id}/interrupt`);
-      await api("DELETE", `/api/bots/${bot.id}`);
-    }
-  });
-
   it("only lets a section's Chief of Staff propose (and hold) a change to another bot's profile", async () => {
     const a = (await api("POST", "/api/bots", { name: "Ari" })).body.bot;
     const b = (await api("POST", "/api/bots", { name: "Bo" })).body.bot;
@@ -10994,7 +10888,7 @@ describe("harness HTTP API", () => {
     });
     expect(saved.status).toBe(200);
     expect(saved.body.composio).toEqual({ configured: true, mode: "self-hosted" });
-    expect(saved.body.opencodeGo).toEqual({ configured: true });
+    expect(saved.body.opencodeGo).toEqual({ configured: true, providerKeys: [] });
     expect(saved.body.profile).toEqual({ name: "External Store", email: "", aboutMe: "" });
     expect(JSON.stringify(saved.body)).not.toContain("ak_good");
 
@@ -11073,6 +10967,52 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("retries abandoned connector OAuth through Settings and in-chat cards without replacing an active account", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    connectorAccounts = [
+      { id: "ca_abandoned", alias: "original", status: "INITIALIZING", toolkit: { slug: "slack" } },
+      { id: "ca_expired", alias: "expired", status: "EXPIRED", toolkit: { slug: "slack" } },
+    ];
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const response = await fetch(`${BASE}/api/internal/connectors/request`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, resumeKey: "retry-oauth-fixture", items: [{ slug: "slack" }] }),
+      });
+      expect(response.status).toBe(200);
+      const { messageIds } = await response.json() as { messageIds: string[] };
+      const card = `/api/bots/${bot.id}/connector-cards/${messageIds[0]}/authorize`;
+      const paths = ["/api/connectors/slack/authorize", card, card];
+      const before = connectorLinkRequests.length;
+      for (const path of paths) {
+        const linked = await api("POST", path, { threadId: bot.threadId });
+        expect(linked.status).toBe(200);
+        expect(linked.body.url).toBe("https://connect.composio.dev/fixture-only");
+      }
+      const requests = connectorLinkRequests.slice(before);
+      expect(requests).toHaveLength(3);
+      for (const request of requests) expect(request).toEqual({ toolkit: "slack", alias: expect.stringMatching(/^omb-retry-[0-9a-f-]{36}$/) });
+      expect(new Set(requests.map((request) => request.alias)).size).toBe(3);
+      expect(connectorAccounts.map((account) => account.alias)).toEqual(["original", "expired"]);
+
+      connectorAccounts.push({ id: "ca_active", alias: "work", status: "ACTIVE", toolkit: { slug: "slack" } });
+      for (const path of paths.slice(0, 2)) {
+        const refused = await api("POST", path, { threadId: bot.threadId });
+        expect(refused.status).toBe(400);
+        expect(refused.body.error).toMatch(/add an account alias/i);
+      }
+      expect(connectorLinkRequests).toHaveLength(before + 3);
+      expect((await api("POST", card, { threadId: "wrong-thread" })).status).toBe(404);
+      expect(connectorLinkRequests).toHaveLength(before + 3);
+    } finally {
+      connectorAccounts = [];
+      await api("DELETE", `/api/bots/${bot.id}`);
+      await api("PUT", "/api/config", { composio: { apiKey: "" } });
+    }
+  });
+
   it("does not relay a slow connector request after Connected Apps is disabled", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     let held: Awaited<ReturnType<typeof delayedJsonBody>> | undefined;
@@ -11107,6 +11047,35 @@ describe("harness HTTP API", () => {
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
   };
+
+  it("explains a missing Google permission instead of passing the bare 403 to the bot", async () => {
+    // MOCA-273: GMAIL_CREATE_FILTER needs gmail.settings.basic, which the
+    // default Composio Gmail connection never asks for. Reconnecting cannot
+    // fix it, so the bot must learn what can, and stop retrying.
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { composio: true })).status).toBe(200);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const response = await fetch(`${BASE}/api/internal/connectors/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 21, method: "tools/call", params: { name: "GMAIL_CREATE_FILTER", arguments: {} } }),
+      });
+      expect(response.status).toBe(200);
+      const body = await response.json() as { result: { content: Array<{ text: string }>; isError?: boolean } };
+      const texts = body.result.content.map((item) => item.text);
+      // Google's own error is still there, untouched.
+      expect(texts[0]).toContain("ACCESS_TOKEN_SCOPE_INSUFFICIENT");
+      expect(body.result.isError).toBe(true);
+      const hint = texts.slice(1).join("\n");
+      expect(hint).toContain("https://www.googleapis.com/auth/gmail.settings.basic");
+      expect(hint).toContain("Reconnecting");
+      expect(hint).toContain("Do not retry");
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
 
   it("enforces per-bot connector tool grants on relayed tool calls", async () => {
     // Clear any project key an earlier test left behind, so the relay uses
@@ -11471,11 +11440,11 @@ describe("harness HTTP API", () => {
   it("stores OpenCode Go credentials as a configured-only status", async () => {
     const put = await api("PUT", "/api/config", { opencodeGo: { apiKey: "opencode-secret" } });
     expect(put.status).toBe(200);
-    expect(put.body.opencodeGo).toEqual({ configured: true });
+    expect(put.body.opencodeGo).toEqual({ configured: true, providerKeys: [] });
     expect(JSON.stringify(put.body)).not.toContain("opencode-secret");
 
     const after = await api("GET", "/api/config");
-    expect(after.body.opencodeGo).toEqual({ configured: true });
+    expect(after.body.opencodeGo).toEqual({ configured: true, providerKeys: [] });
     expect(JSON.stringify(after.body)).not.toContain("opencode-secret");
   });
 
@@ -11635,24 +11604,10 @@ describe("section context API", () => {
   });
 });
 
-// The memory routes expose plain files in the bot's workspace. The
-// traversal cases matter more than the happy path here: a topic name in a
-// URL is hostile-adjacent input, and the only defensible answer to "../"
-// in any coat of encoding is a rejection before the filesystem is touched.
+// The memory routes expose plain files in the bot's workspace. Which paths
+// they can reach is decided in one place, parseMemoryPath (memory-store.ts),
+// and its tests carry the traversal cases.
 describe("bot memory API", () => {
-  /** raw-path GET: fetch() normalizes "../" segments away client-side, and
-   * the traversal tests need the wire to carry exactly the bytes shown */
-  const rawGet = (rawPath: string): Promise<{ status: number; text: string }> =>
-    new Promise((resolve, reject) => {
-      const req = request({ hostname: "127.0.0.1", port: PORT, path: rawPath }, (res) => {
-        let text = "";
-        res.on("data", (c) => (text += c));
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, text }));
-      });
-      req.on("error", reject);
-      req.end();
-    });
-
   const workspaceOf = (botId: string) => join(home, ".openmausbot", "workspaces", botId);
 
   it("lets a bot attach a file it made, and serves it only through that message", async () => {
@@ -12159,7 +12114,7 @@ describe("bot memory API", () => {
     }
   });
 
-  it("lists memory/ topic files and serves one by (possibly encoded) name", async () => {
+  it("lists memory/ topic files", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     try {
       const memDir = join(workspaceOf(bot.id), "memory");
@@ -12173,46 +12128,6 @@ describe("bot memory API", () => {
         ["deploys.md", 21],
         ["my notes.md", 6],
       ]);
-
-      const topic = await api("GET", `/api/bots/${bot.id}/memory/topics/deploys.md`);
-      expect(topic.status).toBe(200);
-      expect(topic.body).toEqual({ name: "deploys.md", text: "- deploy = pnpm ship\n" });
-      // a UI-sent name arrives percent-encoded and must resolve to the same file
-      expect((await api("GET", `/api/bots/${bot.id}/memory/topics/my%20notes.md`)).body.text).toBe("spaced");
-      expect((await api("GET", `/api/bots/${bot.id}/memory/topics/missing.md`)).status).toBe(404);
-      expect((await api("GET", "/api/bots/does-not-exist/memory/topics/deploys.md")).status).toBe(404);
-    } finally {
-      await api("DELETE", `/api/bots/${bot.id}`);
-    }
-  });
-
-  it("refuses every coat of path traversal without reading the target", async () => {
-    const bot = (await api("POST", "/api/bots")).body.bot;
-    try {
-      // plant real files where a traversal would land, so a hole would show
-      // as leaked content and not depend on what happens to exist
-      mkdirSync(workspaceOf(bot.id), { recursive: true });
-      writeFileSync(join(workspaceOf(bot.id), "MEMORY.md"), "TOP-SECRET-MARKER memory");
-      writeFileSync(join(home, ".openmausbot", "secret.md"), "TOP-SECRET-MARKER sibling");
-
-      for (const name of [
-        "..%2F..%2Fsecret.md", // encoded slashes
-        "%2e%2e%2fsecret.md", // dots encoded too
-        "..%2FMEMORY.md", // one level up, inside the workspace
-        "..%5C..%5Csecret.md", // encoded backslashes (Windows separators)
-        "secret%00.md", // null byte
-      ]) {
-        const res = await rawGet(`/api/bots/${bot.id}/memory/topics/${name}`);
-        expect(res.status, name).toBe(400);
-        expect(res.text, name).not.toContain("TOP-SECRET");
-      }
-      // a raw ../ segment is normalized away by URL parsing before routing —
-      // it can only miss the route, never reach a file
-      const raw = await rawGet(`/api/bots/${bot.id}/memory/topics/../../secret.md`);
-      expect(raw.status).toBe(404);
-      expect(raw.text).not.toContain("TOP-SECRET");
-      // malformed percent-encoding is a clean 400, not a crash
-      expect((await rawGet(`/api/bots/${bot.id}/memory/topics/%zz.md`)).status).toBe(400);
     } finally {
       await api("DELETE", `/api/bots/${bot.id}`);
     }
