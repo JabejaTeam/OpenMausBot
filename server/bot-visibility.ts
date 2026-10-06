@@ -26,8 +26,15 @@
 // other's thread, so a teammate with a different audience could surface a
 // restricted bot's answers to people who cannot see it.
 //
+// Fork: on a workspace several people share, threads are private as well
+// (server/thread-access.ts): a session also needs the thread itself to be
+// theirs or shared with them, admins included. VisibleSet carries that rule
+// as `threadOpen`, so the same checks below cover it.
+//
 // Pure: no store, no server. server/index.ts supplies the records.
 import { z } from "zod";
+
+import { latestThreadFor, type ThreadRole } from "./thread-access.ts";
 
 import type { BotVisibility } from "../shared/wire.ts";
 
@@ -36,7 +43,7 @@ export type { BotVisibility };
 /** The person looking, reduced to what visibility needs. `all` is the owner
  * or a local service; `admin` an admin session; `member` any other session,
  * each with the email it signed in with when it has one. */
-export type Viewer = { kind: "all" } | { kind: "admin" | "member"; email?: string };
+export type Viewer = { kind: "all" } | { kind: "admin" | "member"; email?: string; person?: string };
 
 export const SEES_EVERYTHING: Viewer = { kind: "all" };
 
@@ -213,18 +220,23 @@ export class VisibleSet {
   private readonly ownerOf: (threadId: string) => ThreadOwner | undefined;
   private threads: Map<string, ThreadOwner> | null = null;
   private readonly botMemo = new Map<string, boolean>();
+  /** Fork: how this viewer reaches a thread (own or shared), when threads
+   * are private; undefined otherwise. */
+  readonly threadRole?: (threadId: string) => ThreadRole | undefined;
 
   constructor(
     bots: readonly VisibilityBot[],
     groups: readonly VisibilityGroup[],
     viewer: Viewer,
     ownerOf?: (threadId: string) => ThreadOwner | undefined,
+    threadRole?: (threadId: string) => ThreadRole | undefined,
   ) {
     this.viewer = viewer;
     this.member = viewer.kind === "member";
+    if (viewer.kind !== "all" && threadRole) this.threadRole = threadRole;
     const hides = viewer.kind === "admin" ? isPrivateValue : isRestricted;
-    this.everything = viewer.kind === "all" ||
-      (!bots.some((bot) => hides(bot.visibility)) && !groups.some((group) => hides(group.audienceFloor)));
+    this.everything = viewer.kind === "all" || (!this.threadRole &&
+      !bots.some((bot) => hides(bot.visibility)) && !groups.some((group) => hides(group.audienceFloor)));
     this.ownerOf = ownerOf ?? ((threadId) => this.indexedOwner(threadId));
     if (this.everything) return;
     for (const bot of bots) this.bots.set(bot.id, bot);
@@ -252,11 +264,13 @@ export class VisibleSet {
     return members.length > 0 && members.every((member) => this.bot(member)) && viewerSees(this.viewer, group.audienceFloor);
   }
 
-  /** The bot or room that owns the thread is visible. An unknown thread is not. */
+  /** The bot or room that owns the thread is visible, and (fork) the thread
+   * is this viewer's or shared with them. An unknown thread is not. */
   thread(threadId: string): boolean {
     if (this.everything) return true;
     const owner = this.ownerOf(threadId);
     if (!owner) return false;
+    if (this.threadRole && !this.threadRole(threadId)) return false;
     return owner.bot !== undefined ? this.bot(owner.bot) : this.group(owner.group);
   }
 
@@ -369,20 +383,65 @@ export interface FrameContext {
   freshGroup: (groupId: string) => Record<string, unknown> | undefined;
 }
 
+/** The transcript fields a bot or room record carries for its open thread. */
+const PAGE_FIELDS = ["messages", "hasMore", "activeLeafId"] as const;
+
+/** Fork: a bot or room record narrowed to the viewer's own threads. Its task
+ * list keeps only the threads they may open (each marked `access`), and its
+ * open thread becomes theirs: the one they used last. With no thread of
+ * theirs it keeps the record's id but carries no transcript (the client then
+ * offers a new conversation). A record whose open thread is already theirs
+ * keeps it, unless `page` is given: that is a fresh snapshot (GET /api/bots),
+ * which always opens their latest thread, with the transcript `page` gives. */
+export function ownThreads<T extends object>(record: T, visible: VisibleSet, page?: (threadId: string) => Record<string, unknown>): T {
+  const role = visible.threadRole;
+  if (!role) return record;
+  const out = { ...record } as Record<string, unknown>;
+  type WireThread = { threadId: string; updatedAt?: number; createdAt?: number; routineRunId?: string; unread?: boolean; busy?: boolean };
+  const tasks = Array.isArray(out.tasks)
+    ? (out.tasks as WireThread[]).flatMap((task) => {
+      const access = task && typeof task.threadId === "string" ? role(task.threadId) : undefined;
+      return access ? [{ ...task, access }] : [];
+    })
+    : undefined;
+  if (tasks) {
+    out.tasks = tasks;
+    if ("unread" in out) out.unread = tasks.some((task) => Boolean(task.unread) && !task.routineRunId);
+  }
+  const current = typeof out.threadId === "string" ? out.threadId : "";
+  const latest = tasks ? latestThreadFor(tasks, () => true) : undefined;
+  const keep = !page && current && role(current) ? current : undefined;
+  const open = keep ?? latest?.threadId ?? (current && role(current) ? current : undefined);
+  if (open !== current || !open) {
+    for (const field of PAGE_FIELDS) delete out[field];
+    // No conversation of theirs: show none, never the one the record holds.
+    if (!open) out.messages = [];
+    if (open) {
+      out.threadId = open;
+      Object.assign(out, page?.(open) ?? {});
+    }
+    if ("busy" in out) out.busy = Boolean(latest?.busy);
+  }
+  return out as T;
+}
+
 /** The bot as a member receives it: no audience list (who else may see a bot
- * is an admin's business), and no teammate ids the member cannot see. */
-export function memberBot<T extends object>(bot: T, visible: VisibleSet): T {
+ * is an admin's business), and no teammate ids the member cannot see. Fork:
+ * only the viewer's own threads (ownThreads). */
+export function memberBot<T extends object>(bot: T, visible: VisibleSet, page?: (threadId: string) => Record<string, unknown>): T {
   if (visible.everything) return bot;
-  const { visibility, ...rest } = bot as T & { visibility?: unknown; peers?: unknown };
+  const { visibility, ...rest } = ownThreads(bot, visible, page) as T & { visibility?: unknown; peers?: unknown };
   if (!visible.member && visibility !== undefined) (rest as Record<string, unknown>).visibility = visibility;
   const peers = Array.isArray(rest.peers) ? (rest.peers as unknown[]).filter((id): id is string => typeof id === "string" && visible.bot(id)) : undefined;
   return { ...rest, ...(peers ? { peers } : {}) } as T;
 }
 
-/** A room as a member receives it: without its audience floor. */
-export function memberGroup<T extends object>(group: T, visible?: VisibleSet): T {
-  if (!("audienceFloor" in group) || (visible && !visible.member)) return group;
-  const { audienceFloor: _floor, ...rest } = group as T & { audienceFloor?: unknown };
+/** A room as a member receives it: without its audience floor. Fork: only
+ * the viewer's own threads (ownThreads). */
+export function memberGroup<T extends object>(group: T, visible?: VisibleSet, page?: (threadId: string) => Record<string, unknown>): T {
+  const own = visible ? ownThreads(group, visible, page) : group;
+  if (!("audienceFloor" in own) || (visible && !visible.member)) return own;
+  const { audienceFloor: _floor, ...rest } = own as T & { audienceFloor?: unknown };
   return rest as T;
 }
 
@@ -459,7 +518,7 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
         const fresh = ctx.freshGroup(id);
         if (fresh) return { ...payload, group: memberGroup({ ...fresh, ...group }, visible) };
       }
-      return "audienceFloor" in group ? { ...payload, group: memberGroup(group, visible) } : payload;
+      return "audienceFloor" in group || visible.threadRole ? { ...payload, group: memberGroup(group, visible) } : payload;
     }
     case "group.deleted":
       return seen.groups.delete(str(payload.groupId)) ? payload : undefined;

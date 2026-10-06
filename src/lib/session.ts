@@ -15,7 +15,9 @@ export type SessionState =
   | { kind: "loopback"; trust?: "service" }
   // `cloudGuest`: on an OMB Cloud home, a device that is not one of the
   // owner's own; it writes only in `openedThreads`, the conversations it opened.
-  | { kind: "session"; id: string; label: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[] }
+  // `privateThreads` (fork): conversations belong to their person; this
+  // session is sent only its own and those shared with it.
+  | { kind: "session"; id: string; label: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[]; privateThreads?: true }
   | { kind: "unauthenticated"; error: string }
   | { kind: "unreachable"; error: string };
 
@@ -41,6 +43,7 @@ export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise
       label: typeof record.label === "string" ? record.label : "",
       scopes: Array.isArray(record.scopes) ? record.scopes.filter((s): s is string => typeof s === "string") : [],
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
+      ...(record.privateThreads === true ? { privateThreads: true as const } : {}),
       ...(record.cloudGuest === true ? {
         cloudGuest: true as const,
         openedThreads: Array.isArray(record.openedThreads) ? record.openedThreads.filter((id): id is string => typeof id === "string") : [],

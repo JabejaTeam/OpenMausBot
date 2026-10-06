@@ -5,6 +5,14 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 const jsonHooks = new WeakMap<ServerResponse, (body: unknown) => unknown>();
 const parsedBodies = new WeakMap<IncomingMessage, unknown>();
+const bodyChecks = new WeakMap<IncomingMessage, (body: unknown) => Error | undefined>();
+
+/** Fork: check every JSON body readBody parses for this request before any
+ * handler sees it; an Error returned refuses the request (its `status`).
+ * index.ts uses it so a session can only name threads it may open. */
+export function onParsedBody(req: IncomingMessage, check: (body: unknown) => Error | undefined): void {
+  bodyChecks.set(req, check);
+}
 
 /** Pass every JSON body sent on this response through `hook` first (it may
  * return a narrowed copy). Set once a request is authenticated: index.ts
@@ -58,6 +66,8 @@ export function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> 
         return fail(400, "invalid JSON body");
       }
       done = true;
+      const refused = bodyChecks.get(req)?.(body);
+      if (refused) return reject(refused);
       parsedBodies.set(req, body);
       resolve(body);
     });

@@ -128,6 +128,7 @@ import { appendComposerDraft, appendDraftAttachments, useReplyDraft } from "@/li
 import { citationPreviewText, splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { highlightCitationSource } from "@/lib/citations-dom";
 import { useCanWriteIn } from "@/lib/cloud-guest";
+import { ThreadShareButton } from "./ThreadShare";
 import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
@@ -1107,8 +1108,11 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
-  // A guest on an OMB Cloud home writes only in conversations it opened.
-  const canWrite = useCanWriteIn(bot.threadId);
+  // A guest on an OMB Cloud home writes only in conversations it opened;
+  // fork: with private conversations, only in its own or shared ones (the
+  // server sends no others, so an open thread missing from the list is not).
+  const listed = !bot.tasks || bot.tasks.some((task) => task.threadId === bot.threadId);
+  const canWrite = useCanWriteIn(bot.threadId, listed);
 
   const stream = useStreaming();
   const streaming = stream.streaming[bot.threadId];
@@ -1433,7 +1437,10 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           is z-20 so its menus clear the composer), below the CallOverlay (z-30). */}
       <GlassBar edge="top" className="z-[25]">
       {/* Header */}
-      {simpleUi ? <SimpleChatHeader bot={bot} dragStyle={headerDragStyle} noDragStyle={headerNoDragStyle} /> : <div
+      {simpleUi ? <div className="relative">
+        <SimpleChatHeader bot={bot} dragStyle={headerDragStyle} noDragStyle={headerNoDragStyle} />
+        <div className="absolute right-5 top-3" style={headerNoDragStyle}><ThreadShareButton threadId={bot.threadId} listed={listed} /></div>
+      </div> : <div
         style={headerDragStyle}
         className={cn(
           // @container so the chips on the right can fold to icon bubbles
@@ -1529,6 +1536,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           </button>
           {/* Keep threads reachable even when the sidebar is collapsed.
               Less frequent actions share one menu. */}
+          <ThreadShareButton threadId={bot.threadId} listed={listed} />
           <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} messages={messages} findOpen={findOpen} onFind={() => setFindOpen((open) => !open)} />
         </div>
         </div>
@@ -1743,7 +1751,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           transcript pad grows with it. */}
       <LiveCallBar bot={bot} />
       {canWrite === false ? (
-        <NewConversationInstead onNew={() => dispatch({ type: "newTask", botId: bot.id })} />
+        <NewConversationInstead onNew={() => dispatch({ type: "newTask", botId: bot.id })} message={listed ? undefined : t("chat.private.noneYet")} />
       ) : (
       <Composer
         key={bot.threadId}
@@ -1775,10 +1783,10 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
 /** In place of the composer, for a guest on an OMB Cloud home in a
  * conversation it did not open: it can only start its own. One click, no
  * dialog. */
-export function NewConversationInstead({ onNew }: { onNew: () => void }) {
+export function NewConversationInstead({ onNew, message }: { onNew: () => void; message?: string }) {
   return (
     <div className="pointer-events-auto mx-5 mb-4 flex items-center justify-between gap-3 rounded-2xl border border-hairline/60 bg-raised px-4 py-3" data-testid="cloud-guest-composer">
-      <p className="text-[13px] text-ink-secondary">{t("chat.cloudGuest.notYours")}</p>
+      <p className="text-[13px] text-ink-secondary">{message ?? t("chat.cloudGuest.notYours")}</p>
       <button type="button" onClick={onNew} className="shrink-0 rounded-full bg-accent px-3 py-1 text-[13px] font-medium text-white">
         {t("chat.cloudGuest.newConversation")}
       </button>

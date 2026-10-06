@@ -24,6 +24,19 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
   person boundary `steerCrossesPerson`.
 - Chief-only relay of questions: `shared/relay-question.ts`, `relay_question` route.
 
+## Private conversations (who may see/write a thread)
+- The rule (SSOT): `server/thread-access.ts` — a thread is its starter's (`thread-starters.json`,
+  else the install owner) plus whom they shared it with (`thread-shares.json`). On only with
+  `OMB_PRIVATE_THREADS=1` and a shared sign-in list; admins get no exception, loopback sees all.
+- Applied once, in `server/bot-visibility.ts`: `VisibleSet.threadRole` narrows `.thread()`, so the
+  request gate, search, attachments and live frames follow; `ownThreads` narrows a bot/room's
+  `tasks` and opens the viewer's latest own thread (GET /api/bots).
+- Gate in `handleRequest` (index.ts, "names only threads it may open"): path task id, `?threadId`,
+  and every JSON body's `threadId` via `onParsedBody` (`server/harness/http.ts`).
+- Share routes: `server/routes/fork-threads.ts`; UI `src/components/ThreadShare.tsx`;
+  composer gating `src/lib/cloud-guest.ts` (`privateThreads` from /api/auth/session).
+- Test: `server/private-threads.e2e.test.ts`.
+
 ## Fork routes and people
 - New fork HTTP routes go in `server/routes/fork-people.ts` (route table), not inline in index.ts.
 - Thread worktrees: `server/thread-worktrees.ts`. Outgoing Gmail: `server/email-outbox.ts`.
