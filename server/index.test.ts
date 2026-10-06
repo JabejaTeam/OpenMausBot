@@ -5412,7 +5412,9 @@ describe("harness HTTP API", () => {
       const claude = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
       const targetSelection = { instanceId: claude.instanceId, model: claude.models.default };
 
-      for (const seeded of trustedBots) {
+      // Fork: Full carries across providers that implement it; only Custom
+      // (one provider's command list) needs Ask first.
+      for (const seeded of trustedBots.filter(candidate => candidate.approvalMode === "custom")) {
         const rejected = await isolatedApi("PATCH", `/api/bots/${seeded.id}/model`, targetSelection);
         expect(rejected.status, seeded.approvalMode).toBe(400);
         expect(rejected.body.error).toMatch(/requires choosing Ask first/i);
@@ -5447,6 +5449,10 @@ describe("harness HTTP API", () => {
       });
       expect(sameProvider.status).toBe(200);
       expect(sameProvider.body.task.approvalMode ?? sameProvider.body.bot.approvalMode).toBe("full");
+      const carried = (await isolatedApi("POST", `/api/bots/${full.id}/tasks`, { title: "Carries Full" })).body.task;
+      const carriedSwitch = await isolatedApi("PATCH", `/api/bots/${full.id}/tasks/${carried.threadId}`, { modelSelection: targetSelection });
+      expect(carriedSwitch.status, JSON.stringify(carriedSwitch.body)).toBe(200);
+      expect(carriedSwitch.body.task).toMatchObject({ modelSelection: targetSelection, approvalMode: "full" });
       const switched = await isolatedApi("PATCH", `/api/bots/${full.id}/tasks/${full.threadId}`, {
         modelSelection: targetSelection, updateBotDefault: true, resetApprovalToAsk: true,
       });
