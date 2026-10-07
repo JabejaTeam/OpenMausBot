@@ -412,7 +412,8 @@ export function ownThreads<T extends object>(record: T, visible: VisibleSet, pag
   const latest = tasks ? latestThreadFor(tasks, () => true) : undefined;
   const keep = !page && current && role(current) ? current : undefined;
   const open = keep ?? latest?.threadId ?? (current && role(current) ? current : undefined);
-  if (open !== current || !open) {
+  // A snapshot (page given) always carries the open thread's transcript.
+  if (open !== current || !open || page) {
     for (const field of PAGE_FIELDS) delete out[field];
     // No conversation of theirs: show none, never the one the record holds.
     if (!open) out.messages = [];
@@ -420,7 +421,7 @@ export function ownThreads<T extends object>(record: T, visible: VisibleSet, pag
       out.threadId = open;
       Object.assign(out, page?.(open) ?? {});
     }
-    if ("busy" in out) out.busy = Boolean(latest?.busy);
+    if ("busy" in out && open !== current) out.busy = Boolean(latest?.busy);
   }
   return out as T;
 }

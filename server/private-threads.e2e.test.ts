@@ -109,8 +109,12 @@ posixOnly("private conversations on a shared workspace", () => {
     expect(boss.tasks.map((task: any) => task.threadId)).toEqual([ids.bossThread]);
     expect(boss.threadId).toBe(ids.bossThread);
     expect(JSON.stringify(boss)).not.toContain("ADA-PRIVATE-7");
+    // Every snapshot carries the open thread's transcript, also when that
+    // is already the bot's current thread (the client cannot render without).
+    expect(Array.isArray(boss.messages)).toBe(true);
     const ada = await botAs(ADA);
     expect(ada.threadId).toBe(ids.adaThread);
+    expect(ada.messages.some((m: any) => m.text?.includes("ADA-PRIVATE-7"))).toBe(true);
     expect(ada.tasks.map((task: any) => [task.threadId, task.access])).toEqual([[ids.adaThread, "own"]]);
     const bob = await botAs(BOB);
     expect(bob.tasks).toEqual([]);
@@ -142,6 +146,7 @@ posixOnly("private conversations on a shared workspace", () => {
     const bob = await botAs(BOB);
     expect(bob.tasks.map((task: any) => [task.threadId, task.access])).toEqual([[ids.adaThread, "shared"]]);
     expect(bob.threadId).toBe(ids.adaThread);
+    expect(Array.isArray(bob.messages) && bob.messages.length > 0).toBe(true);
     expect((await api("GET", `/api/threads/${ids.adaThread}/messages`, undefined, BOB)).status).toBe(200);
     expect((await api("POST", `/api/bots/${ids.bot}/messages`, { text: "BOB-JOINS", threadId: ids.adaThread }, BOB)).status).toBe(202);
     // Bob is in it, but it stays Ada's to share.
