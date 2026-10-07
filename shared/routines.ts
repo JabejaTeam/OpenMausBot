@@ -100,6 +100,8 @@ export interface Routine {
   overlap?: "skip" | "queue";
   /** Fork: "send" lets runs send Gmail directly; absent means drafts only. */
   mail?: "draft" | "send";
+  /** Each run starts with the previous run's report. */
+  continuity?: boolean;
   skippedRuns?: number;
   lastSkippedAt?: number;
   failureStreak?: number;
@@ -162,7 +164,9 @@ export interface RoutineInput {
   overlap?: "skip" | "queue";
   /** Fork: "send" lets runs send Gmail directly; "draft" (default) drafts only. */
   mail?: "send" | "draft";
+  /** Each run starts with the previous run's report. */
+  continuity?: boolean;
   attachments?: RoutineContextAttachment[];
-  /** Omission preserves routing; null creates a new dedicated results task. */
+  /** Omission preserves routing; null resets it to the bot's main thread. */
   resultsThreadId?: string | null;
 }

@@ -110,7 +110,8 @@ export interface Routine {
   /** Conversation that created this routine in chat. Calendar/import-created
    * routines intentionally have no source, and older files migrate in place. */
   sourceThreadId?: string;
-  /** Stable visible report destination; execution still gets a fresh task. */
+  /** Stable visible report destination (the bot's main thread unless the
+   * person chose another); execution still gets a fresh task. */
   resultsThreadId?: string;
   /** Server-private: added from the organization's library. Never on the
    * wire (routineWithHealth drops it); packageStamps() reads it. */
@@ -249,7 +250,7 @@ export interface RoutineInput {
   overlap?: "skip" | "queue";
   /** Fork: "send" lets runs send Gmail directly; "draft" (default) drafts only. */
   mail?: "send" | "draft";
-  /** Omission preserves routing; null creates a new dedicated results task. */
+  /** Omission preserves routing; null resets it to the bot's main thread. */
   resultsThreadId?: string | null;
 }
 
@@ -296,7 +297,8 @@ export interface RoutineManagerOptions {
   joinConversation?: (run: RoutineRun) => string | null;
   createGoalTask?: (groupId: string, title: string) => { threadId: string } | null;
   isResultsThread?: (botId: string, threadId: string) => boolean;
-  /** Reuse routine.resultsThreadId, keep a trusted chat source, or allocate a new ID. */
+  /** Reuse a chosen routine.resultsThreadId, else the bot's main thread (a
+   * Cloud guest's routine may allocate its own). `forceNew` ignores the choice. */
   resolveResultsThread?: (routine: Routine, forceNew: boolean) => string | undefined;
   /** Compensate an uncommitted allocation, only while still empty. */
   discardResultsThread?: (botId: string, threadId: string) => void;
@@ -1286,7 +1288,7 @@ export class RoutineManager {
     this.commitMutation(() => {
       run = this.newRun(routine, this.now(), true, allocations, request?.threadId ?? routine.sourceThreadId);
       // Preserve the invoking chat as provenance/fallback for this run.
-      // An explicitly configured results destination continues to win.
+      // The routine's results destination continues to win.
       if (request) run.sourceThreadId = request.threadId;
       if (request) this.rememberRoutineRequest(request, run.id, this.now());
     }, () => this.discardResultsThreads(allocations));
@@ -1899,7 +1901,7 @@ export class RoutineManager {
     if (value === undefined) return;
     if (value === null) {
       const destination = this.options.resolveResultsThread?.(routine, true);
-      if (!destination) throw new Error("Could not create a results thread for this routine");
+      if (!destination) throw new Error("Could not find a results thread for this routine");
       routine.resultsThreadId = destination;
       return () => this.options.discardResultsThread?.(routine.botId, destination);
     }
