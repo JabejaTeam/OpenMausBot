@@ -114,6 +114,8 @@ const FULL = { direct: "direct+skills+shared+voice", room: "room+own-thread+skil
 
 /** Jabeja fork: bytes our own additions add to every direct/room profile. */
 const FORK_EXTRA_BYTES = 1027;
+/** Jabeja fork: room profiles only — coordinate_bots' `parallel` param. */
+const FORK_ROOM_EXTRA_BYTES = 1076;
 
 /** Bytes measured when the budget was last set. A profile may not exceed this
  * by more than 2%, and may not undercut it by more than 2% either: a smaller
@@ -411,7 +413,8 @@ describe("agents proxy tools/list wire size", () => {
     // of upstream's baseline, so BUDGET_BASELINE stays upstream's verbatim
     // and never conflicts on a sync. Raise FORK_EXTRA_BYTES when we add more.
     const baseline = BUDGET_BASELINE[name] === undefined ? undefined
-      : BUDGET_BASELINE[name]! + (name.startsWith("external") ? 0 : FORK_EXTRA_BYTES);
+      : BUDGET_BASELINE[name]! + (name.startsWith("external") ? 0 : FORK_EXTRA_BYTES)
+        + (name.startsWith("room") ? FORK_ROOM_EXTRA_BYTES : 0);
     expect(baseline, `${name} has no BUDGET_BASELINE entry`).toBeTypeOf("number");
     const actual = bytes(wires[name]!);
     expect(actual, `${name} grew past its budget (${baseline} + 2%). Trim the catalog, or raise BUDGET_BASELINE on purpose.`)
