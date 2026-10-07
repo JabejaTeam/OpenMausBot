@@ -37,7 +37,8 @@ import { api, useStore, formatTime, visibleMessages, currentTaskBot, openThread,
 import { approvalModeFor } from "../../shared/approval-mode";
 import { avatarCropRadius, botAvatarProfile } from "../../shared/bot-avatar";
 import { peerLine } from "@/lib/peer-message";
-import { canHideBots, hiddenBotsForMe, setBotHiddenForMe, usePeople } from "@/lib/people";
+import { canHideBots, hiddenBotsForMe, personName, setBotHiddenForMe, usePeople } from "@/lib/people";
+import { inThreadChannel, type ThreadChannel } from "@/lib/thread-channel";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 
@@ -975,14 +976,18 @@ export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; on
 /** The thread tree under one bot row: project folders, then ungrouped rows.
  * Visibility folds old threads away. Pins stay, then the newest update.
  * Waiting and working stay visible as status, not as a sort key. */
-export function BotThreadList({ bot, selected, density = "comfortable", query = "", hidden = false, everything = false }: { bot: Bot; selected: boolean; density?: SidebarDensity; query?: string; hidden?: boolean;
+export function BotThreadList({ bot, selected, density = "comfortable", query = "", hidden = false, everything = false, channel }: { bot: Bot; selected: boolean; density?: SidebarDensity; query?: string; hidden?: boolean;
   /** fork: every thread in one scrolling list (the office's thread column), no "Show all" */
-  everything?: boolean }) {
+  everything?: boolean;
+  /** fork: only this channel's threads (lib/thread-channel); all when absent */
+  channel?: ThreadChannel }) {
   const { state, dispatch } = useStore();
   const now = useRelativeNow();
   const tasks = (bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }])
-    .filter((task) => !task.routineRunId)
+    .filter((task) => !task.routineRunId && (!channel || inThreadChannel(task, channel)))
     .map((task) => ({ ...task, queued: Boolean(state.pendingQueued[task.threadId]?.length) }));
+  // Teammates' rows carry their name (fork, lib/thread-channel).
+  usePeople(tasks.some((task) => task.access && task.access !== "own"));
   const projects = bot.projects ?? [];
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editingProject, setEditingProject] = useState<string | null>(null);
@@ -1027,6 +1032,7 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
     const thread = currentTaskBot(bot, task.threadId);
     return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && task.threadId === bot.threadId} compact={density === "compact"} folders={projects} activityLabel={task.threadId === bot.threadId ? activeActivityLabel : undefined}
       now={now} shownTitle={threadTitle(task, state.bots)}
+      personLabel={task.access && task.access !== "own" && !channel?.startsWith("person:") ? personName(task.person) ?? t("chat.share.someone") : undefined}
       onSelect={() => { if (task.threadId !== bot.threadId) dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId }); else dispatch({ type: "select", id: bot.id }); }}
       onRename={(title) => dispatch({ type: "renameTask", botId: bot.id, threadId: task.threadId, title })}
       onRegenerateTitle={generatedTitles ? (onSettled) => dispatch({ type: "regenerateTaskTitle", botId: bot.id, threadId: task.threadId, onSettled }) : undefined}

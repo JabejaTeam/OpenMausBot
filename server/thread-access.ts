@@ -1,11 +1,13 @@
 // Jabeja fork: whose a conversation is, on a workspace several people share.
 //
 // The single rule (SSOT) for "may this person see and write in this thread":
-// a thread belongs to the person it was opened for (server/thread-starters.ts),
-// and to the teammates that person shared it with (this file's ThreadShares).
-// A thread nobody was recorded for belongs to the install owner. Admins get no
-// exception: private means private. The owner on this machine and local
-// services (loopback) are not people and keep seeing everything.
+// a thread belongs to the person it was opened for (server/thread-starters.ts).
+// Everyone on the workspace sees and writes in it (the team channel), unless
+// its person marked it private (this file's PrivateThreads): then only they
+// and whom they shared it with (ThreadShares) do. A thread nobody was
+// recorded for belongs to the install owner. Admins get no exception: private
+// means private. The owner on this machine and local services (loopback) are
+// not people and keep seeing everything.
 //
 // server/bot-visibility.ts applies the rule to every route, list and live
 // frame; server/index.ts only wires the records in.
@@ -17,8 +19,9 @@ const KEY = /^p_[\w-]{22}$/;
 const THREAD = /^[\w-]{1,128}$/;
 export const MAX_THREAD_SHARES = 50;
 
-/** How a person reaches a thread: their own, or shared with them. */
-export type ThreadRole = "own" | "shared";
+/** How a person reaches a thread: their own, a private one shared with them,
+ * or a teammate's that is not private. */
+export type ThreadRole = "own" | "shared" | "team";
 
 export interface ThreadAccessRecords {
   /** Who the thread was opened for, when recorded. */
@@ -27,6 +30,8 @@ export interface ThreadAccessRecords {
   shares(threadId: string): readonly string[];
   /** The install owner: owns every thread nobody was recorded for. */
   owner(): string | undefined;
+  /** Its person marked it private. */
+  isPrivate(threadId: string): boolean;
 }
 
 export function threadOwnerPerson(threadId: string, records: ThreadAccessRecords): string | undefined {
@@ -36,6 +41,7 @@ export function threadOwnerPerson(threadId: string, records: ThreadAccessRecords
 export function threadRole(person: string | undefined, threadId: string, records: ThreadAccessRecords): ThreadRole | undefined {
   if (!person) return undefined;
   if (threadOwnerPerson(threadId, records) === person) return "own";
+  if (!records.isPrivate(threadId)) return "team";
   return records.shares(threadId).includes(person) ? "shared" : undefined;
 }
 
@@ -88,6 +94,38 @@ export class ThreadShares {
     if (kept.length) this.shares.set(threadId, kept);
     else this.shares.delete(threadId);
     writeFileAtomic(this.file, JSON.stringify(Object.fromEntries(this.shares)) + "\n", { mode: 0o600 });
+    return true;
+  }
+}
+
+/** The threads their person marked private. One small server-private file
+ * (<data>/thread-private.json, 0600): a list of thread ids. */
+export class PrivateThreads {
+  private readonly ids = new Set<string>();
+  private readonly file: string;
+
+  constructor(file: string) {
+    this.file = file;
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      return; // absent or unreadable: nothing is private
+    }
+    if (!Array.isArray(raw)) return;
+    for (const id of raw) if (typeof id === "string" && THREAD.test(id)) this.ids.add(id);
+  }
+
+  has(threadId: string): boolean {
+    return this.ids.has(threadId);
+  }
+
+  /** False for an invalid thread id. */
+  set(threadId: string, value: boolean): boolean {
+    if (!THREAD.test(threadId)) return false;
+    if (value) this.ids.add(threadId);
+    else this.ids.delete(threadId);
+    writeFileAtomic(this.file, JSON.stringify([...this.ids]) + "\n", { mode: 0o600 });
     return true;
   }
 }

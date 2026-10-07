@@ -20,6 +20,8 @@ import { setOfficeView } from "@/lib/office-view";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { ChatView } from "../ChatView";
 import { BotThreadList } from "../Sidebar";
+import { ThreadChannelPicker } from "../ThreadChannel";
+import { useThreadChannel } from "@/lib/thread-channel";
 import { sidebarBotActivityTasks } from "../SidebarBotActivity";
 import type { OfficeBotLook, OfficeScene, OfficeTheme } from "./office-scene";
 import { OfficeStatusRail, StatusSymbol } from "./OfficeStatusRail";
@@ -66,9 +68,12 @@ const THREAD_COLUMN_KEY = "omb-office-thread-column";
  * compose button on top, then every thread in one scrolling list. */
 function OfficeThreads({ bot, onNew }: { bot: Bot; onNew: () => void }) {
   const [query, setQuery] = useState("");
+  const channel = useThreadChannel();
   return (
     <>
-      <div className="sticky top-0 z-10 flex items-center gap-1 bg-app pb-1.5 pt-1">
+      <div className="sticky top-0 z-10 bg-app pb-1.5 pt-1">
+      <ThreadChannelPicker />
+      <div className="flex items-center gap-1">
         <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-inset px-2 text-ink-secondary">
           <Search size={14} className="shrink-0" />
           <input
@@ -90,7 +95,8 @@ function OfficeThreads({ bot, onNew }: { bot: Bot; onNew: () => void }) {
           <SquarePen size={16} />
         </button>
       </div>
-      <BotThreadList bot={bot} selected density="comfortable" query={query} everything />
+      </div>
+      <BotThreadList bot={bot} selected density="comfortable" query={query} everything channel={channel} />
     </>
   );
 }

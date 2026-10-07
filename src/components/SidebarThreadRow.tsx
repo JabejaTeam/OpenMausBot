@@ -219,7 +219,7 @@ export function orderedSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
 
 /** One quiet row for bot and group histories. Surface denotes selection;
  * working/waiting/unread remain independent signals, never different cards. */
-export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onRefreshPermissions, activityLabel, now, shownTitle }: {
+export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onRefreshPermissions, activityLabel, now, shownTitle, personLabel }: {
   task: ThreadRowTask;
   /** the bot or room that owns the thread: the link's ?bot= */
   ownerId: string;
@@ -231,6 +231,8 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   /** The title as people read it (fork, lib/bot-label threadTitle); the
    * stored title stays what rename and the tooltip use. */
   shownTitle?: { title: string; fromOpener: boolean };
+  /** Fork: whose conversation this is, when it is a teammate's (lib/thread-channel). */
+  personLabel?: string;
   /** The list's shared clock tick; the visible stamp renders relative to it.
    * Omit to keep the absolute date everywhere. */
   now?: number;
@@ -257,7 +259,8 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   const menuRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
   const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWaitingOnTeammate(task) ? t("task.waitingOnTeammate") : isWorking(task) ? activityLabel ?? t("chat.activity.working") : task.queued ? t("task.queued") : null;
-  const byline = shownTitle?.fromOpener ? threadByline({ ...task, openedBy: undefined }) : threadByline(task);
+  const ownByline = shownTitle?.fromOpener ? threadByline({ ...task, openedBy: undefined }) : threadByline(task);
+  const byline = [personLabel, ownByline].filter(Boolean).join(" · ") || null;
   const updatedAt = threadRecency(task);
   const updatedStamp = formatUpdatedAt(updatedAt);
   const updatedLabel = now === undefined ? updatedStamp : threadUpdatedLabel(updatedAt, now);

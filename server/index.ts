@@ -568,7 +568,7 @@ import {
 } from "./request-auth.ts";
 import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope, type SessionRecord } from "./sessions.ts";
 import { ThreadStarters } from "./thread-starters.ts";
-import { ThreadShares, threadOwnerPerson, threadRole, type ThreadAccessRecords } from "./thread-access.ts";
+import { PrivateThreads, ThreadShares, threadOwnerPerson, threadRole, type ThreadAccessRecords } from "./thread-access.ts";
 import { createForkThreadRoutes } from "./routes/fork-threads.ts";
 import {
   activityCsv,
@@ -768,17 +768,20 @@ if (CLOUD_HOME && Object.keys(CLOUD_SECRETS).length === 0) {
 }
 // Who each thread is for, when a signed-in person can be named (server-private).
 const threadStarters = new ThreadStarters(join(DATA_DIR, "thread-starters.json"));
-// Fork: who each thread's person shared it with (server/thread-access.ts).
+// Fork: which threads their person marked private, and whom they shared
+// those with (server/thread-access.ts).
 const threadShares = new ThreadShares(join(DATA_DIR, "thread-shares.json"));
+const privateThreadIds = new PrivateThreads(join(DATA_DIR, "thread-private.json"));
 const threadAccessRecords: ThreadAccessRecords = {
   starter: (threadId) => threadStarters.get(threadId),
   shares: (threadId) => threadShares.get(threadId),
   owner: () => ownerPersonKey(),
+  isPrivate: (threadId) => privateThreadIds.has(threadId),
 };
-/** Fork: threads are private to their person (and whom they share with) on
- * a self-hosted workspace several people share, when the deployment opts in
- * with OMB_PRIVATE_THREADS=1 (beast: ~/omb-services/omb-server.env). A Cloud
- * home keeps its own owner/guest rules. */
+/** Fork: each thread belongs to its person (their channel; the team sees it
+ * unless they mark it private) on a self-hosted workspace several people
+ * share, when the deployment opts in with OMB_PRIVATE_THREADS=1 (beast:
+ * ~/omb-services/omb-server.env). A Cloud home keeps its own owner/guest rules. */
 const PRIVATE_THREADS = process.env.OMB_PRIVATE_THREADS === "1";
 function privateThreads(): boolean {
   return PRIVATE_THREADS && !CLOUD_HOME && sharedMembership();
@@ -1602,7 +1605,8 @@ function visibleTo(viewer: Viewer): VisibleSet {
   if (!set) {
     const person = viewer.kind === "all" ? undefined : viewer.person;
     set = new VisibleSet(store.bots, store.groups, viewer, threadOwner,
-      privateThreads() ? (threadId) => threadRole(person, threadId, threadAccessRecords) : undefined);
+      privateThreads() ? (threadId) => threadRole(person, threadId, threadAccessRecords) : undefined,
+      (threadId) => threadOwnerPerson(threadId, threadAccessRecords));
     if (visibleSets.size >= 1_000) visibleSets.clear();
     visibleSets.set(key, set);
   }
@@ -16041,13 +16045,15 @@ ROUTES.push(createForkPeopleRoutes({
   conversationExists: (threadId) => Boolean(store.botByThread(threadId) || store.groupByThread(threadId)),
   threadPerson: connectorThreadPerson,
 }));
-// Fork: sharing a private conversation (server/routes/fork-threads.ts).
+// Fork: marking a conversation private and sharing it (server/routes/fork-threads.ts).
 ROUTES.push(createForkThreadRoutes({
   personKey,
   conversationExists: (threadId) => Boolean(store.botByThread(threadId) || store.groupByThread(threadId)),
   threadOwner: (threadId) => threadOwnerPerson(threadId, threadAccessRecords),
   shares: (threadId) => threadShares.get(threadId),
   setShares: (threadId, people) => threadShares.set(threadId, people),
+  isPrivate: (threadId) => privateThreadIds.has(threadId),
+  setPrivate: (threadId, value) => privateThreadIds.set(threadId, value),
   workspaceEmails: () => [...signInAllowList().admins, ...signInAllowList().members].filter((entry) => !entry.startsWith("@")),
   changed: (threadId) => {
     forgetVisibility();

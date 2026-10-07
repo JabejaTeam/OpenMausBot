@@ -68,7 +68,8 @@ function overBudget(text: string): string | null {
 }
 
 /** Every person's display name by key: what a transcript shows beside a
- * message someone else sent. Names only, never an email or profile text. */
+ * message someone else sent. Names only (fork: else an email's first part),
+ * never a whole email or profile text. */
 export function personNames(): Record<string, string> {
   let files: string[];
   try {
@@ -79,7 +80,10 @@ export function personNames(): Record<string, string> {
   const names: Record<string, string> = {};
   for (const file of files) {
     const key = file.endsWith(".json") ? file.slice(0, -5) : "";
-    const name = KEY.test(key) ? readPersonProfile(key)?.name?.trim() : undefined;
+    const profile = KEY.test(key) ? readPersonProfile(key) : undefined;
+    // Fork: no name given yet: their email's first part ("joren@…" → "Joren").
+    const local = profile?.email?.split("@")[0]?.trim();
+    const name = profile?.name?.trim() || (local ? local[0]!.toUpperCase() + local.slice(1) : undefined);
     if (name) names[key] = name;
   }
   return names;

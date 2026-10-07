@@ -46,6 +46,7 @@ import { t } from "@/lib/i18n";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import { openLiveEvents } from "@/lib/live-events";
+import { noteThreadChosen } from "@/lib/thread-channel";
 
 const MAX_ROUTINE_RUNS = 2_000;
 const ACTIVE_ROUTINE_RUN_STATUSES = new Set<RoutineRun["status"]>(["queued", "running", "waiting"]);
@@ -296,6 +297,11 @@ export interface ModelSelection {
 export interface Task {
   waitingForTeammates?: boolean;
   threadId: string;
+  /** Fork (server/thread-access.ts): how the viewer reaches this thread, and
+   * whose channel it is in (a people key). Absent where conversations are
+   * not split per person. */
+  access?: "own" | "shared" | "team";
+  person?: string;
   /** Internal routine execution; reachable through its run receipt, not history menus. */
   routineRunId?: string;
   projectId?: string;
@@ -3667,6 +3673,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // because switching changes which conversation is on screen
         case "newTask":
         case "switchTask": {
+          if (action.type === "switchTask") noteThreadChosen(action.threadId);
           const revision = (navigation.get(action.botId) ?? 0) + 1;
           navigation.set(action.botId, revision);
           const ready = action.type === "newTask"
