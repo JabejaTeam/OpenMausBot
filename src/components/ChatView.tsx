@@ -128,6 +128,7 @@ import { citationPreviewText, splitTranscriptCitations, type CitationAttachment 
 import { highlightCitationSource } from "@/lib/citations-dom";
 import { useCanWriteIn } from "@/lib/cloud-guest";
 import { ThreadShareButton } from "./ThreadShare";
+import { threadChosen } from "@/lib/thread-channel";
 import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
@@ -1231,7 +1232,10 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   // A guest on an OMB Cloud home writes only in conversations it opened;
   // fork: with private conversations, only in its own or shared ones (the
   // server sends no others, so an open thread missing from the list is not).
-  const listed = !bot.tasks || bot.tasks.some((task) => task.threadId === bot.threadId);
+  // Fork: a teammate's conversation counts only once this device picked it;
+  // opening a bot with none of your own shows none (lib/thread-channel).
+  const openTask = bot.tasks?.find((task) => task.threadId === bot.threadId);
+  const listed = !bot.tasks || (Boolean(openTask) && (openTask!.access !== "team" || threadChosen(bot.threadId)));
   const canWrite = useCanWriteIn(bot.threadId, listed);
 
   const computerStarting = computerStartLine(state.computerStarts[bot.id], bot.name);

@@ -7,6 +7,8 @@ import { Search, SquarePen } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { BotThreadList, botRowProps } from "./Sidebar";
+import { ThreadChannelPicker } from "./ThreadChannel";
+import { useThreadChannel } from "@/lib/thread-channel";
 
 const THREAD_COLUMN_KEY = "omb-office-thread-column";
 let shownChoice: boolean | undefined;
@@ -46,10 +48,14 @@ export function useThreadColumn(): boolean {
 export function BotThreads({ bot, onNew }: { bot: Bot; onNew: () => void }) {
   const { state, dispatch } = useStore();
   const [query, setQuery] = useState("");
+  const channel = useThreadChannel();
   return (
     <>
-      <div className="sticky top-0 z-10 flex items-center gap-1 bg-app pb-1.5 pt-1">
-        <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-inset px-2 text-ink-secondary">
+      <div className="sticky top-0 z-10 bg-[var(--threads-bg,var(--color-app))] pb-1.5 pt-1">
+      {/* whose conversations: mine, the team's, one teammate's (lib/thread-channel) */}
+      <ThreadChannelPicker />
+      <div className="flex items-center gap-1">
+        <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-raised/60 px-2 text-ink-secondary">
           <Search size={14} className="shrink-0" />
           <input
             value={query}
@@ -70,7 +76,8 @@ export function BotThreads({ bot, onNew }: { bot: Bot; onNew: () => void }) {
           <SquarePen size={16} />
         </button>
       </div>
-      <BotThreadList {...botRowProps(state, dispatch, bot, { density: "comfortable", quiet: false, query, onMenu: () => undefined })} selected everything />
+      </div>
+      <BotThreadList {...botRowProps(state, dispatch, bot, { density: "comfortable", quiet: false, query, onMenu: () => undefined })} selected everything channel={channel} />
     </>
   );
 }

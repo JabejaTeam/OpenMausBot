@@ -33,9 +33,10 @@ function changed(): void {
   for (const listener of listeners) listener();
 }
 
-/** Re-render once the people are known. */
-export function usePeople(): void {
-  useEffect(loadPeople, []);
+/** Re-render once the people are known. Fork: `load` false only listens
+ * (a thread list that shows no teammate's conversation asks nothing). */
+export function usePeople(load = true): void {
+  useEffect(() => { if (load) loadPeople(); }, [load]);
   useSyncExternalStore(
     (listener) => {
       listeners.add(listener);
@@ -54,6 +55,11 @@ export function otherSenderName(message: Message): string | undefined {
   const sender = message.sender;
   if (!sender?.id || sender.id === me) return undefined;
   return names[sender.id] ?? sender.name;
+}
+
+/** Fork: a teammate's name for a people key (their profile name), when known. */
+export function personName(key: string | undefined): string | undefined {
+  return key ? names[key] : undefined;
 }
 
 /** Bots the viewer keeps out of their own sidebar (Team map → eye). Empty

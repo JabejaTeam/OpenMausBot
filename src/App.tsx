@@ -12,8 +12,6 @@ import { initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
 import { SimpleSidebar, SimpleThreadColumn } from "@/components/SimpleSidebar";
 import { useSimpleUi } from "@/lib/simple-ui";
-import { OfficeView } from "@/components/office/OfficeView";
-import { useOfficeView } from "@/lib/office-view";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { SIDEBAR_AND_PANEL_FIT, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
@@ -42,7 +40,6 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
   const simpleUi = useSimpleUi();
-  const officeView = useOfficeView();
   const unreadCount =
     state.bots.filter((bot) => !bot.hidden && botShowsUnread(bot)).length +
     state.groups.filter((group) => group.unread).length;
@@ -113,8 +110,6 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const sidePanelOpen = Boolean(bot) && (state.settingsOpen || state.computerOpen || state.inspectorOpen || state.activityOpen);
   const collapseSidebar = sidePanelOpen && !sidebarAndPanelFit;
   const calendarFocus = state.activeView === "routines";
-  // Office view (fork): the 3D office replaces the list and the chat column
-  const office = officeView && state.activeView === "chat";
   // Turning Advanced mode off closes the inspector it no longer offers.
   const advanced = useAdvancedMode();
   useEffect(() => {
@@ -288,7 +283,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       <UpdateBanner />
       <ProIntroduction quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} />
       <div className="relative flex min-h-0 flex-1">
-      {!calendarFocus && !office && <button
+      {!calendarFocus && <button
         type="button"
         ref={menuButtonRef}
         aria-label="Open bot list"
@@ -305,7 +300,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           className="absolute inset-0 z-30 bg-black/50 md:hidden"
         />
       )}
-      {!calendarFocus && !office && (simpleUi ? <><SimpleSidebar
+      {!calendarFocus && (simpleUi ? <><SimpleSidebar
         open={drawerOpen}
         onClose={() => {
           setDrawerOpen(false);
@@ -334,8 +329,6 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <CloudEngineSignIn />
       ) : noEngines ? (
         <NoEngines />
-      ) : office ? (
-        <OfficeView />
       ) : group ? (
         <GroupView key={group.id} group={group} />
       ) : bot ? (

@@ -37,7 +37,8 @@ import { api, useStore, formatTime, visibleMessages, currentTaskBot, openThread,
 import { approvalModeFor } from "../../shared/approval-mode";
 import { avatarCropRadius, botAvatarProfile } from "../../shared/bot-avatar";
 import { peerLine } from "@/lib/peer-message";
-import { canHideBots, hiddenBotsForMe, setBotHiddenForMe, usePeople } from "@/lib/people";
+import { canHideBots, hiddenBotsForMe, personName, setBotHiddenForMe, usePeople } from "@/lib/people";
+import { inThreadChannel, type ThreadChannel } from "@/lib/thread-channel";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 
@@ -1007,18 +1008,22 @@ const NO_FOLDERS: BotProject[] = [];
  * Visibility folds old threads away. Pins stay, then the newest update.
  * Waiting and working stay visible as status, not as a sort key. It takes
  * its bot row's props and renders with that row. */
-export function BotThreadList({ bot, selected, density, query, pendingQueued, reveal, locale, generatedTitles, dispatch, activityLabel, hidden = false, everything = false }: BotRowProps & {
+export function BotThreadList({ bot, selected, density, query, pendingQueued, reveal, locale, generatedTitles, dispatch, activityLabel, hidden = false, everything = false, channel }: BotRowProps & {
   /** The live verb for the open thread's row ("Reading a file"), from the
    * bot's visible tail; without it the row says Working. */
   activityLabel?: string;
   hidden?: boolean;
   /** fork: every thread in one scrolling list (the office's thread column), no "Show all" */
   everything?: boolean;
+  /** fork: only this channel's threads (lib/thread-channel); all when absent */
+  channel?: ThreadChannel;
 }) {
   const now = useRelativeNow();
   const tasks = (bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }])
-    .filter((task) => !task.routineRunId)
+    .filter((task) => !task.routineRunId && (!channel || inThreadChannel(task, channel)))
     .map((task) => ({ ...task, queued: Boolean(pendingQueued[task.threadId]?.length) }));
+  // Teammates' rows carry their name (fork, lib/thread-channel).
+  usePeople(tasks.some((task) => task.access && task.access !== "own"));
   const projects = bot.projects ?? NO_FOLDERS;
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editingProject, setEditingProject] = useState<string | null>(null);
@@ -1092,7 +1097,8 @@ export function BotThreadList({ bot, selected, density, query, pendingQueued, re
     const shown = threadTitle(task);
     return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && task.threadId === bot.threadId} compact={density === "compact"} folders={projects}
       activityLabel={task.threadId === bot.threadId ? activityLabel : undefined} now={stampClock(threadRecency(task), now)} locale={locale} {...actions}
-      shownTitle={shown.title} shownFromOpener={shown.fromOpener} />;
+      shownTitle={shown.title} shownFromOpener={shown.fromOpener}
+      personLabel={task.access && task.access !== "own" && !channel?.startsWith("person:") ? personName(task.person) ?? t("chat.share.someone") : undefined} />;
   };
   const ungrouped = visibleTasks.filter((task) => !projects.some((project) => project.id === task.projectId));
   const projectToEdit = projects.find((project) => project.id === editingProject);

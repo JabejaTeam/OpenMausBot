@@ -26,10 +26,11 @@
 // other's thread, so a teammate with a different audience could surface a
 // restricted bot's answers to people who cannot see it.
 //
-// Fork: on a workspace several people share, threads are private as well
-// (server/thread-access.ts): a session also needs the thread itself to be
-// theirs or shared with them, admins included. VisibleSet carries that rule
-// as `threadOpen`, so the same checks below cover it.
+// Fork: on a workspace several people share, a thread its person marked
+// private is hidden as well (server/thread-access.ts): a session also needs
+// the thread to be theirs, shared with them, or not private, admins included.
+// VisibleSet carries that rule as `threadRole`, so the same checks below
+// cover it.
 //
 // Pure: no store, no server. server/index.ts supplies the records.
 import { z } from "zod";
@@ -223,6 +224,8 @@ export class VisibleSet {
   /** Fork: how this viewer reaches a thread (own or shared), when threads
    * are private; undefined otherwise. */
   readonly threadRole?: (threadId: string) => ThreadRole | undefined;
+  /** Fork: the person a thread belongs to (its channel), alongside threadRole. */
+  readonly threadPerson?: (threadId: string) => string | undefined;
 
   constructor(
     bots: readonly VisibilityBot[],
@@ -230,10 +233,14 @@ export class VisibleSet {
     viewer: Viewer,
     ownerOf?: (threadId: string) => ThreadOwner | undefined,
     threadRole?: (threadId: string) => ThreadRole | undefined,
+    threadPerson?: (threadId: string) => string | undefined,
   ) {
     this.viewer = viewer;
     this.member = viewer.kind === "member";
-    if (viewer.kind !== "all" && threadRole) this.threadRole = threadRole;
+    if (viewer.kind !== "all" && threadRole) {
+      this.threadRole = threadRole;
+      if (threadPerson) this.threadPerson = threadPerson;
+    }
     const hides = viewer.kind === "admin" ? isPrivateValue : isRestricted;
     this.everything = viewer.kind === "all" || (!this.threadRole &&
       !bots.some((bot) => hides(bot.visibility)) && !groups.some((group) => hides(group.audienceFloor)));
@@ -386,32 +393,37 @@ export interface FrameContext {
 /** The transcript fields a bot or room record carries for its open thread. */
 const PAGE_FIELDS = ["messages", "hasMore", "activeLeafId"] as const;
 
-/** Fork: a bot or room record narrowed to the viewer's own threads. Its task
- * list keeps only the threads they may open (each marked `access`), and its
- * open thread becomes theirs: the one they used last. With no thread of
- * theirs it keeps the record's id but carries no transcript (the client then
- * offers a new conversation). A record whose open thread is already theirs
- * keeps it, unless `page` is given: that is a fresh snapshot (GET /api/bots),
- * which always opens their latest thread, with the transcript `page` gives. */
+/** Fork: a bot or room record as one viewer receives it. Its task list keeps
+ * only the threads they may open, each marked with its `access` and its
+ * `person` (whose channel it is in). Its open thread becomes theirs: the one
+ * of their own they used last. With no thread of their own it keeps the
+ * record's id but carries no transcript (the client then offers a new
+ * conversation). A record whose open thread they may open keeps it, unless
+ * `page` is given: that is a fresh snapshot (GET /api/bots), which always
+ * opens their latest own thread, with the transcript `page` gives. */
 export function ownThreads<T extends object>(record: T, visible: VisibleSet, page?: (threadId: string) => Record<string, unknown>): T {
   const role = visible.threadRole;
   if (!role) return record;
+  const personOf = visible.threadPerson;
   const out = { ...record } as Record<string, unknown>;
-  type WireThread = { threadId: string; updatedAt?: number; createdAt?: number; routineRunId?: string; unread?: boolean; busy?: boolean };
+  type WireThread = { threadId: string; updatedAt?: number; createdAt?: number; routineRunId?: string; unread?: boolean; busy?: boolean; access?: ThreadRole };
   const tasks = Array.isArray(out.tasks)
     ? (out.tasks as WireThread[]).flatMap((task) => {
       const access = task && typeof task.threadId === "string" ? role(task.threadId) : undefined;
-      return access ? [{ ...task, access }] : [];
+      const person = access ? personOf?.(task.threadId) : undefined;
+      return access ? [{ ...task, access, ...(person ? { person } : {}) }] : [];
     })
     : undefined;
   if (tasks) {
     out.tasks = tasks;
-    if ("unread" in out) out.unread = tasks.some((task) => Boolean(task.unread) && !task.routineRunId);
+    // The bot's dot follows the viewer's own conversations, not the team's.
+    if ("unread" in out) out.unread = tasks.some((task) => Boolean(task.unread) && !task.routineRunId && task.access !== "team");
   }
   const current = typeof out.threadId === "string" ? out.threadId : "";
-  const latest = tasks ? latestThreadFor(tasks, () => true) : undefined;
+  const mine = (threadId: string) => { const access = role(threadId); return access === "own" || access === "shared"; };
+  const latest = tasks ? latestThreadFor(tasks, (threadId) => mine(threadId)) : undefined;
   const keep = !page && current && role(current) ? current : undefined;
-  const open = keep ?? latest?.threadId ?? (current && role(current) ? current : undefined);
+  const open = keep ?? latest?.threadId ?? (current && mine(current) ? current : undefined);
   // A snapshot (page given) always carries the open thread's transcript.
   if (open !== current || !open || page) {
     for (const field of PAGE_FIELDS) delete out[field];

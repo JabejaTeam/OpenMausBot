@@ -5,7 +5,7 @@
 // row, its lead (the PM); "›" opens the whole team. Teams reorder by drag,
 // sharing the saved order with the full sidebar.
 import { useRef, useState } from "react";
-import { Box, ChevronDown, ChevronLeft, PanelLeft, Plus, Search, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, PanelLeft, Plus, Search, X } from "lucide-react";
 import { useStore, visibleMessages, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -23,7 +23,6 @@ import {
 } from "@/lib/sidebar-layout";
 import { loadSectionOrder, saveSectionOrder } from "@/lib/sidebar-preferences";
 import { simpleSidebarLayout, teamLead, teamToOpen, type SimpleGroup } from "@/lib/simple-ui-groups";
-import { setOfficeView } from "@/lib/office-view";
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { groupPreview, preview } from "./Sidebar";
@@ -274,15 +273,6 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
         <div className="flex items-center gap-2" style={noDragStyle}>
           <button
             type="button"
-            onClick={() => setOfficeView(true)}
-            aria-label={t("simpleUi.office")}
-            title={t("simpleUi.office")}
-            className={circle}
-          >
-            <Box size={18} />
-          </button>
-          <button
-            type="button"
             onClick={() => {
               setSearching((value) => !value);
               setQuery("");
@@ -416,7 +406,7 @@ export function SimpleThreadColumn() {
   const team = groups.find((group) => group.section && group.bots.some((candidate) => candidate.id === bot.id))?.bots ?? [bot];
   const title = <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{bot.name}</span>;
   return (
-    <nav aria-label={t("office.threadsAria", { name: bot.name })} className="flex h-full w-64 shrink-0 flex-col border-l border-hairline/40 bg-app max-md:hidden">
+    <nav aria-label={t("office.threadsAria", { name: bot.name })} className="flex h-full w-64 shrink-0 flex-col border-l border-hairline/40 bg-inset [--threads-bg:var(--color-inset)] max-md:hidden">
       <div className="flex items-center gap-2 px-3 pb-1 pt-4">
         {team.length > 1 ? (
           <div className="min-w-0 flex-1">
