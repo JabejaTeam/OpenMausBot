@@ -139,6 +139,10 @@
           "rework": {
             "type": "boolean",
             "description": "True only to send concrete work again to someone whose request already finished or failed: a correction, a re-check or a retry."
+          },
+          "parallel": {
+            "type": "boolean",
+            "description": "True for a separate assignment a code agent should start now in its own thread, beside work still running, instead of folding it into that work."
           }
         },
         "required": [

@@ -18195,6 +18195,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             botIds: z.array(z.string().min(1).max(128)).min(1).max(4).refine(ids => new Set(ids).size === ids.length),
             message: z.string().trim().min(1).max(4000),
             rework: z.boolean().default(false),
+            parallel: z.boolean().default(false),
           }).safeParse(await readInternalBody());
           if (!parsed.success) return json(res, 400, { error: "Provide 1-4 distinct botIds and a message of 1-4000 characters." });
           const groupId = parsed.data.groupId ?? source?.id;
@@ -18262,8 +18263,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               // teammate: the first request opens it, everything after
               // continues it and runs once the work already there is done.
               const workThread = destination ? undefined : store.workThread(target.botId, internalSender.id, address.threadId);
-              const continued = workThread && (!kindStartsFreshPerAssignment(store.bot(target.botId)?.kind) ||
-                (!parsed.data.rework && roomHandoffs.runningFrom(address.threadId, target.botId, workThread.threadId)))
+              // Fork: parallel=true is a separate assignment, so a code agent
+              // starts it in its own thread beside the one still running.
+              const fresh = kindStartsFreshPerAssignment(store.bot(target.botId)?.kind);
+              const continued = workThread && (!fresh || (!parsed.data.rework && !parsed.data.parallel &&
+                roomHandoffs.runningFrom(address.threadId, target.botId, workThread.threadId)))
                 ? workThread : undefined;
               if (!destination) {
                 const task = continued ?? store.createTask(target.botId, `@${internalSender.name} · work`, false, undefined,

@@ -100,3 +100,25 @@ it("gives a code agent every new assignment in a fresh thread, without the one b
   expect(follow.status, JSON.stringify(follow)).toBe("completed");
   expect(follow.threadId).not.toBe(first.threadId);
 }), 60_000);
+
+it("starts a parallel assignment to a code agent in its own thread beside the one still running", () => fixture(async f => {
+  await f.api(`/api/bots/${f.clerk.id}`, { kind: "code" }, "PATCH");
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: f.assign }], reply: "Asked the Bookkeeper" },
+    { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Book the Q3 customer invoices", parallel: true } }], reply: "Second job started" },
+    { reply: "Both booked" },
+  ] };
+  f.plan[f.clerk.id] = { progress: "Collecting invoices", gateFile: f.gate, reply: "Booked" };
+  f.save();
+  await f.say("Have the Bookkeeper book Q3 supplier invoices");
+  await f.clerkWorking();
+  await f.say("And the customer invoices too, at the same time");
+  await expect.poll(() => f.chiefTurn(1), { timeout: 15_000 }).toBeTruthy();
+  expect(f.stepResponse(1, 0).receipts[0]).toMatchObject({ outcome: "queued" });
+  await expect.poll(() => f.clerkNodes().map((n: any) => n.status), { timeout: 15_000 }).toEqual(["running", "running"]);
+  const [first, second] = f.clerkNodes();
+  expect(second.threadId).not.toBe(first.threadId);
+  expect(first.corrections ?? []).toEqual([]);
+  writeFileSync(f.gate, "go");
+  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((m: any) => m.text === "Both booked"), { timeout: 20_000 }).toBe(true);
+}), 60_000);
