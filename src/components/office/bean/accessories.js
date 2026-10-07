@@ -405,7 +405,7 @@ export function buildAccessories({ tint }) {
     const hub = mesh(new THREE.SphereGeometry(0.05, 16, 12), M.gold);
     const prop = group(...blades, hub); prop.position.y = R + 0.22;
     prop.userData.moves = true;
-    add("Propellerpet", group(crown, rim, stem, prop), (t, dt) => { prop.rotation.y += dt * 9; });
+    add("Propellerpet", group(crown, rim, stem, prop), (t) => { prop.rotation.y = t * 9; });
   }
 
   // ---- Strik (bow): flat satin ribbon loops, a wrapped knot and two tails

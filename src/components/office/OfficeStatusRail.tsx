@@ -9,6 +9,7 @@ import { botLabel } from "@/lib/bot-label";
 import { stateForBot } from "@/lib/mascot";
 import type { OfficeStatus } from "@/lib/office-status";
 import { SimpleBotAvatar as BotAvatar } from "../SimpleBotAvatar";
+import { OVER_CANVAS } from "./office-surface";
 
 type Shown = Exclude<OfficeStatus, "idle">;
 const ORDER: Shown[] = ["waiting", "working", "unread"];
@@ -122,7 +123,7 @@ export function OfficeStatusRail({
           style={{ top }}
           className={cn(
             "absolute left-full ml-2 w-72 overflow-hidden rounded-2xl border border-hairline/40",
-            "bg-panel/90 shadow-xl shadow-black/30 backdrop-blur-xl",
+            OVER_CANVAS.popover,
           )}
         >
           <div className="flex items-center gap-2 px-4 pb-1.5 pt-3 text-[13px] font-semibold text-ink-secondary">

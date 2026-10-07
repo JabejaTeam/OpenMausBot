@@ -87,3 +87,14 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
   office jumps ~700px, then slides back).
   Check a change by tracing frames in headless Chrome (bot screen x must never reverse,
   the canvas must stay at x=0).
+- Frame budget (whole app): `src/lib/frame-budget.ts` — `MAX_FPS` 30 and `FrameCap`. The office
+  loop, `BeanPortrait` and the mascot (`CursorAvatar`) cap with it; every infinite CSS animation in
+  `styles.css` is stepped to ≤30 steps/s per keyframe segment (`frame-budget.test.ts` checks it,
+  and forbids inline infinite animations). Moves cap their step at `MAX_STEP_MS` = 2 frames
+  (`office-motion`), the walker too. Measured 2026-10-07: one CSS spinner at 120 Hz cost more than
+  the 3D office. Loading placeholders animate only on screen (`hooks/use-in-view`,
+  `AttachmentPreview` `ImageLoading`).
+- Over the canvas nothing blurs: surfaces come from `office-surface.ts` (`OVER_CANVAS`; test keeps
+  `backdrop-filter` out of components/office). Point lights skip fragments they can't reach
+  (`light-range.ts`, a lossless patch of three's `lights_fragment_begin`, throws on a three upgrade
+  that changed the chunk).

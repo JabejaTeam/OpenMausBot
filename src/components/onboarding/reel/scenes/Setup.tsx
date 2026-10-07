@@ -193,8 +193,8 @@ export function Setup({ playing, onCue, onEnded, label }: SceneProps) {
                   {[0, 1, 2].map((i) => (
                     <span
                       key={i}
-                      className="size-1.5 rounded-full bg-ink-secondary"
-                      style={{ animation: `dot-bob 0.9s ease-in-out ${i * 0.15}s infinite` }}
+                      className="size-1.5 animate-dot-bob rounded-full bg-ink-secondary"
+                      style={{ animationDelay: `${i * 0.15}s` }}
                     />
                   ))}
                 </div>

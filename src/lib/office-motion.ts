@@ -6,9 +6,12 @@
 // (3) Opening a panel is one movement: slide and flight share PANEL_MOVE_MS
 // and the same curve. (OfficeView adds (4): it starts that movement only once
 // the chat has rendered.)
+import { FRAME_MS } from "./frame-budget";
 
-/** The longest step one frame may advance a move, in ms (one 30 fps frame). */
-export const MAX_STEP_MS = 1000 / 30;
+/** The longest step one frame may advance a move, in ms: two frames of the
+ * app's frame budget (lib/frame-budget), so a frame that is merely late at
+ * 30 fps keeps full speed and only a real hitch slows the move down. */
+export const MAX_STEP_MS = 2 * FRAME_MS;
 
 /** Elapsed time of a move after a frame of `deltaMs`. */
 export function advance(elapsedMs: number, deltaMs: number): number {

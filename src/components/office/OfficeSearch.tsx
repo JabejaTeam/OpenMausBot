@@ -11,6 +11,7 @@ import { botStatus } from "@/lib/office-status";
 import { searchBots } from "@/lib/office-search";
 import { SimpleBotAvatar as BotAvatar } from "../SimpleBotAvatar";
 import { StatusSymbol } from "./OfficeStatusRail";
+import { OVER_CANVAS } from "./office-surface";
 
 export function OfficeSearch({
   open,
@@ -121,7 +122,7 @@ export function OfficeSearch({
         <div
           id="office-search-results"
           role="listbox"
-          className="absolute left-0 top-full mt-2.5 w-72 overflow-hidden rounded-2xl border border-hairline/40 bg-panel/90 p-1.5 shadow-xl shadow-black/30 backdrop-blur-xl"
+          className={cn("absolute left-0 top-full mt-2.5 w-72 overflow-hidden rounded-2xl border border-hairline/40 p-1.5", OVER_CANVAS.popover)}
         >
           {results.length === 0 ? (
             <div className="px-2.5 py-2 text-[13.5px] text-ink-secondary">{t("office.noResults")}</div>

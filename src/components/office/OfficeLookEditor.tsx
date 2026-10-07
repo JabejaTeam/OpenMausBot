@@ -8,6 +8,7 @@ import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { TEAM_TEXT_SWATCHES, TEAM_WALL_SWATCHES, type TeamLook } from "@/lib/office-team-looks";
+import { OVER_CANVAS } from "./office-surface";
 
 type LookPatch = { color?: string | null; logo?: string | null; textColor?: string | null };
 
@@ -91,7 +92,7 @@ export function OfficeLookEditor({
       ref={rootRef}
       role="dialog"
       aria-label={t("office.look.title", { name: label })}
-      className="w-72 rounded-2xl border border-hairline/40 bg-panel/90 p-3 shadow-xl shadow-black/30 backdrop-blur-xl"
+      className={cn("w-72 rounded-2xl border border-hairline/40 p-3", OVER_CANVAS.popover)}
     >
       <div className="px-1 pb-2 text-[13px] font-semibold text-ink">{label}</div>
       <div className="px-1 pb-1.5 text-[12px] text-ink-secondary">{t("office.look.wall")}</div>

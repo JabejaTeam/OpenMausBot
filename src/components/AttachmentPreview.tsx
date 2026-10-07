@@ -32,6 +32,7 @@ import {
   type TranscriptImageAttachment,
 } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
+import { useInView } from "@/hooks/use-in-view";
 import { t } from "@/lib/i18n";
 import { TableFileButton } from "./TableFilePreview";
 
@@ -655,6 +656,19 @@ export function AttachmentPreviewDialog({
   );
 }
 
+/** An image still loading: pulse and spinner, only while on screen. A lazy
+ * image below the fold never starts loading, and its placeholder must not
+ * keep the window composing meanwhile (fork, lib/frame-budget). */
+function ImageLoading({ name, className }: { name: string; className: string }) {
+  const [ref, inView] = useInView<HTMLSpanElement>();
+  return (
+    <span ref={ref} className={cn("flex items-center justify-center", inView && "animate-pulse", className)} role="status">
+      <LoaderCircle size={17} className={cn("text-ink-tertiary", inView && "animate-spin")} />
+      <span className="sr-only">Loading {name}</span>
+    </span>
+  );
+}
+
 export function AttachmentThumbnail({
   image,
   onPreview,
@@ -681,10 +695,7 @@ export function AttachmentThumbnail({
       className={cn("group/image relative block aspect-[4/3] min-w-0 overflow-hidden rounded-xl border border-hairline/40 bg-inset", className)}
     >
       {state === "loading" && (
-        <span className="absolute inset-0 flex animate-pulse items-center justify-center bg-raised/65" role="status">
-          <LoaderCircle size={17} className="animate-spin text-ink-tertiary" />
-          <span className="sr-only">Loading {image.name}</span>
-        </span>
+        <ImageLoading name={image.name} className="absolute inset-0 bg-raised/65" />
       )}
       {state === "failed" ? (
         <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-3 text-center text-ink-secondary" role="alert">
@@ -878,10 +889,7 @@ export function MarkdownImagePreview({
         ) : visibleSource ? (
           <AttachmentThumbnail key={image.src} image={image} onPreview={() => setOpen(true)} className="max-h-96" eager />
         ) : (
-          <span className="flex aspect-[4/3] max-h-96 animate-pulse items-center justify-center rounded-xl border border-hairline/40 bg-inset" role="status">
-            <LoaderCircle size={17} className="animate-spin text-ink-tertiary" />
-            <span className="sr-only">Loading {name}</span>
-          </span>
+          <ImageLoading name={name} className="aspect-[4/3] max-h-96 rounded-xl border border-hairline/40 bg-inset" />
         )}
         {openUrl && (
           <a href={openUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-[11px] text-accent hover:underline">

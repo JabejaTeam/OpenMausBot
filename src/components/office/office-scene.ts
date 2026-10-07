@@ -27,8 +27,10 @@ import { HeadgearInstancer } from "./bean/headgear-instancer.js";
 // @ts-expect-error plain JS module (preview)
 import { BODY } from "./bean/bean.js";
 // @ts-expect-error plain JS module (preview)
-import { AdaptiveResolution, FrameCap, ShadowScheduler, warmUp } from "./bean/render-perf.js";
+import { AdaptiveResolution, ShadowScheduler, warmUp } from "./bean/render-perf.js";
+import { FRAME_MS, FrameCap } from "@/lib/frame-budget";
 import { freeze, markStatic, mergeStatic } from "./office-static-merge";
+import { skipUnreachedPointLights } from "./light-range";
 
 export interface OfficeBotLook {
   name: string;
@@ -239,9 +241,11 @@ export class OfficeScene {
     theme: OfficeTheme,
     private events: { onHover: (botId: string | null, away: boolean) => void; onHoverRoom: (deskId: string | null) => void; onPick: (botId: string) => void; onPickDesk: (deskId: string) => void },
   ) {
+    // the room lamps shade only what they reach (light-range): before any shader compiles
+    skipUnreachedPointLights();
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
     // pixel ratio up to 2, stepping down when frames run late (bean/render-perf)
-    this.resolution = new AdaptiveResolution(this.renderer);
+    this.resolution = new AdaptiveResolution(this.renderer, { frameMs: FRAME_MS });
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.NeutralToneMapping;
@@ -280,7 +284,9 @@ export class OfficeScene {
     this.building = new OfficeBuilding(this.scene, this.renderer, () => this.invalidate());
     this.scene.add(this.baked);
     // shadows are re-drawn on demand (bean/render-perf): a new sun is a reason
-    this.shadows = new ShadowScheduler(this.renderer);
+    // every drawn frame while casters move: at the frame budget's 30 fps a
+    // walking bean's shadow must keep up with the bean itself
+    this.shadows = new ShadowScheduler(this.renderer, { every: 1 });
     const sky = () => {
       this.building.applyDaylight(daylight(), this.renderer);
       this.shadows.invalidate();
@@ -1025,8 +1031,8 @@ export class OfficeScene {
   private frustum = new THREE.Frustum();
   private viewProjection = new THREE.Matrix4();
   private reach = new THREE.Sphere(new THREE.Vector3(), BOT_REACH);
-  /** 60 drawn frames a second, also on 120 Hz screens (the user's choice) */
-  private cap = new FrameCap(60);
+  /** the app's frame budget (lib/frame-budget), also on 120 Hz screens */
+  private cap = new FrameCap();
 
   /** Something changed that the next frame must show. */
   invalidate(): void {

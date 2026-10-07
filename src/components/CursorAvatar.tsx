@@ -22,6 +22,7 @@
 import React, { useEffect, useId, useMemo, useRef } from 'react'
 
 import { MASCOT_BODIES } from "../../shared/mascot-bodies"
+import { FrameCap } from "@/lib/frame-budget"
 import {
   EXPRESSIONS,
   EXPRESSION_COUNT,
@@ -1336,6 +1337,8 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     useEffect(() => {
       let frame = 0
       let wake: ReturnType<typeof setTimeout> | undefined
+      // fork: a moving mascot draws within the app's frame budget (lib/frame-budget)
+      const cap = new FrameCap()
       engine.current.last = performance.now()
 
       const draw = (e: typeof engine.current, now: number, spinTurn: number) => {
@@ -1454,6 +1457,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
         }
         e.pausedPaint = ''
         frame = requestAnimationFrame(step)
+        if (!cap.ready(now)) return
         const dt = Math.min((now - e.last) / 1000, 0.1)
         e.last = now
 

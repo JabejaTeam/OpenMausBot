@@ -28,6 +28,7 @@ import { OfficeLookEditor, useTeamLooks } from "./OfficeLookEditor";
 import { agentColorsFor, looksKey as teamLooksKeyOf } from "@/lib/office-team-looks";
 import { beanMood, headgearFor } from "@/lib/office-bean";
 import { BeanPortrait } from "./BeanPortrait";
+import { OVER_CANVAS } from "./office-surface";
 
 function readTheme(): OfficeTheme {
   const css = getComputedStyle(document.documentElement);
@@ -390,7 +391,7 @@ export function OfficeView() {
   const cachedBots = useMemo(() => recent.flatMap((id) => state.bots.find((bot) => bot.id === id) ?? []), [recent, state.bots]);
   const next = openId ? nextNeedingYou(officeBots, openId) : null;
   const macInset = capabilities.windowChrome === "mac-inset";
-  const glass = "bg-panel/80 shadow-lg shadow-black/20 backdrop-blur-xl";
+  const glass = OVER_CANVAS.glass;
 
   return (
     // overflow-clip, never overflow-hidden: the panel waits off-screen to the
@@ -420,7 +421,7 @@ export function OfficeView() {
                 lookFor === desk.id && "z-40",
               )}
             >
-              <div className="flex items-center gap-0.5 rounded-full bg-panel/75 py-0.5 pl-3 pr-0.5 shadow-md shadow-black/20 backdrop-blur-md">
+              <div className={cn("flex items-center gap-0.5 rounded-full py-0.5 pl-3 pr-0.5", OVER_CANVAS.pill)}>
                 <button type="button" onClick={() => sceneRef.current?.focusDesk(desk.id)} className="whitespace-nowrap py-0.5 text-[12.5px] font-semibold text-ink">
                   {desk.label}
                 </button>

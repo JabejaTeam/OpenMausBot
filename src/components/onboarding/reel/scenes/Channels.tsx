@@ -153,7 +153,7 @@ export function Channels({ playing, onCue, onEnded, label }: SceneProps) {
                 {thinking ? (
                   <div className="inline-flex items-center gap-1 rounded-2xl rounded-tl-md bg-card px-3 py-2.5">
                     {[0, 1, 2].map((i) => (
-                      <span key={i} className="size-1.5 rounded-full bg-ink-secondary" style={{ animation: `dot-bob 0.9s ease-in-out ${i * 0.15}s infinite` }} />
+                      <span key={i} className="size-1.5 animate-dot-bob rounded-full bg-ink-secondary" style={{ animationDelay: `${i * 0.15}s` }} />
                     ))}
                   </div>
                 ) : (

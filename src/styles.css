@@ -95,7 +95,15 @@
   --animate-pop-out: pop-out 0.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   --animate-caret: caret-blink 1s step-end infinite;
   --animate-msg-in: msg-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
-  --animate-shimmer: shimmer 2s linear infinite;
+  /* Frame budget (fork, src/lib/frame-budget.ts MAX_FPS = 30): whatever runs
+     forever is stepped, at most 30 steps a second per keyframe segment
+     (steps = segment seconds × 30), so a spinner never makes the window
+     compose at the display's 120 Hz. frame-budget.test.ts checks every
+     infinite animation in this file. Tailwind's spin and pulse included. */
+  --animate-spin: spin 1s steps(30) infinite;
+  --animate-pulse: pulse 2s steps(30) infinite;
+  --animate-shimmer: shimmer 2s steps(60) infinite;
+  --animate-dot-bob: dot-bob 0.9s steps(8) infinite;
   --animate-status-pulse: status-pulse 1.6s steps(2, jump-none) infinite;
   /* onboarding: a block of copy or a row arriving in a beat; `.stagger`
      spaces siblings out. Rare, first-time motion, so it may run past the
@@ -107,7 +115,7 @@
   /* onboarding: a surface reacting once to an event (a routine firing) */
   --animate-ripple: ripple 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
   /* onboarding: a bolt travelling from a webhook address to the bot */
-  --animate-bolt: bolt 0.9s cubic-bezier(0.77, 0, 0.175, 1) infinite;
+  --animate-bolt: bolt 0.9s steps(10) infinite;
 
   /* Defaults = Midnight. Kept here so the app is never unstyled. */
   --color-app: #070707;
@@ -1291,15 +1299,15 @@ body {
 .maus-motion--thinking .maus-ellipsis-dot--three { animation-delay: 140ms; }
 
 .maus-motion--working .maus-character {
-  animation: maus-working-body 1150ms ease-in-out infinite;
+  animation: maus-working-body 1150ms steps(17) infinite;
 }
 
 .maus-motion--working .maus-orbit {
-  animation: maus-working-orbit 1150ms linear infinite;
+  animation: maus-working-orbit 1150ms steps(15) infinite;
 }
 
 .maus-motion--working .maus-orbit-dot {
-  animation: maus-working-dot 1150ms ease-in-out infinite;
+  animation: maus-working-dot 1150ms steps(17) infinite;
 }
 
 .maus-motion--launch .maus-character {
@@ -1597,7 +1605,7 @@ body {
   }
 
   .animate-spin {
-    animation: reduced-loader-pulse 1.6s ease-in-out infinite !important;
+    animation: reduced-loader-pulse 1.6s steps(24) infinite !important;
   }
 }
 

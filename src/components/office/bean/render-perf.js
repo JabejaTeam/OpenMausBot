@@ -36,35 +36,18 @@ export class ShadowScheduler {
   }
 }
 
-/** At most `fps` drawn frames per second, whatever the display's refresh
- *  rate (a 120 Hz screen would draw twice as often for the same motion).
- *  Skipped display frames are carried over, so 90 Hz still averages `fps`. */
-export class FrameCap {
-  constructor(fps = 60) {
-    this.interval = 1000 / fps;
-    this.last = -Infinity;
-  }
-  /** Call at the start of every display frame: false = skip this one. */
-  ready(now) {
-    const elapsed = now - this.last;
-    if (elapsed < this.interval - 1) return false;
-    // keep the rhythm: what overshot this interval counts toward the next
-    this.last = elapsed >= this.interval && elapsed < 2 * this.interval ? now - (elapsed - this.interval) : now;
-    return true;
-  }
-}
-
 /** Pixel ratio that steps down (by 0.25, not below `min`) when frames run late
  *  and steps back up once there is headroom. Each time it has to step down
  *  again after going up, it waits twice as long before trying up again. */
 export class AdaptiveResolution {
-  constructor(renderer, { max = Math.min(window.devicePixelRatio, 2), min = 1, onChange = () => {} } = {}) {
-    Object.assign(this, { renderer, max, min, onChange });
+  /** `frameMs`: the interval the loop aims for (lib/frame-budget FRAME_MS). */
+  constructor(renderer, { max = Math.min(window.devicePixelRatio, 2), min = 1, frameMs = 1000 / 60, onChange = () => {} } = {}) {
+    Object.assign(this, { renderer, max, min, onChange, frameMs });
     this.ratio = max;
-    this.avg = 16.7;
+    this.avg = frameMs;
     this.slow = 0;
     this.fast = 0;
-    this.upAfter = 180; // frames of headroom before stepping up (~3 s)
+    this.upAfter = Math.round(3000 / frameMs); // frames of headroom before stepping up (~3 s)
     this.wentUp = false;
     renderer.setPixelRatio(max);
   }
@@ -74,8 +57,8 @@ export class AdaptiveResolution {
   tick(intervalMs) {
     if (intervalMs === undefined) return;
     this.avg += (Math.min(intervalMs, 100) - this.avg) * 0.1;
-    this.slow = this.avg > 20 ? this.slow + 1 : 0;   // below ~50 fps
-    this.fast = this.avg < 17.5 ? this.fast + 1 : 0; // holding 60 fps
+    this.slow = this.avg > this.frameMs * 1.2 ? this.slow + 1 : 0; // well under the aimed rate
+    this.fast = this.avg < this.frameMs * 1.05 ? this.fast + 1 : 0; // holding it
     if (this.slow > 30 && this.ratio > this.min) {
       if (this.wentUp) this.upAfter *= 2;
       this.set(this.ratio - 0.25);

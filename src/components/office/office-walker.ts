@@ -4,6 +4,7 @@
 // away from its desk; seated it is the scene's again.
 import * as THREE from "three";
 import { LINGER_MS, pathLength, pointAlong, WALK_SPEED, type Point } from "@/lib/office-wander";
+import { MAX_STEP_MS } from "@/lib/office-motion";
 
 type Phase = "seated" | "rising" | "out" | "linger" | "back" | "sitting";
 
@@ -113,7 +114,8 @@ export class Walker {
     if (this.phase === "seated") return;
     this.mixer.update(deltaSeconds);
     const elapsed = now - this.phaseStart;
-    const step = Math.min(deltaSeconds, 1 / 30) * WALK_SPEED;
+    // capped like every move (lib/office-motion): a hitch slows the walk, never jumps it
+    const step = Math.min(deltaSeconds, MAX_STEP_MS / 1000) * WALK_SPEED;
     if (this.phase === "rising") {
       const t = Math.min(1, elapsed / SIT_MS);
       this.avatar.position.lerpVectors(this.seatedOffset, new THREE.Vector3(), t);
