@@ -122,3 +122,20 @@ it("starts a parallel assignment to a code agent in its own thread beside the on
   writeFileSync(f.gate, "go");
   await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((m: any) => m.text === "Both booked"), { timeout: 20_000 }).toBe(true);
 }), 60_000);
+
+it("resumes the sender with a parallel assignment's result while its sibling is still running", () => fixture(async f => {
+  await f.api(`/api/bots/${f.clerk.id}`, { kind: "code" }, "PATCH");
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: f.assign }, { arguments: { bot_ids: [f.clerk.id], message: "Book the Q3 customer invoices", parallel: true } }], reply: "Two jobs started" },
+    { reply: "Customer invoices are booked; supplier invoices still running", expectContextIncludes: ["Booked", "still running"] },
+    { reply: "Both booked" },
+  ] };
+  f.plan[f.clerk.id] = { gateFile: f.gate, gateWhenIncludes: "supplier invoices", reply: "Booked" };
+  f.save();
+  await f.say("Have the Bookkeeper book Q3 supplier and customer invoices");
+  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((m: any) => m.text === "Customer invoices are booked; supplier invoices still running"), { timeout: 20_000 }).toBe(true);
+  const supplier = f.clerkNodes().find((n: any) => n.text.includes("supplier"));
+  expect(supplier.status).toBe("running");
+  writeFileSync(f.gate, "go");
+  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((m: any) => m.text === "Both booked"), { timeout: 20_000 }).toBe(true);
+}), 60_000);

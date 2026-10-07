@@ -105,8 +105,10 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
       // All MCP calls have completed. An explicit test gate is owned by the
       // parent test's timeout, not the transport deadline: long conversation
       // fixtures may deliberately keep a teammate waiting across many turns.
-      if (plan.gateFile) clearTimeout(timer);
-      if (plan.gateFile && !existsSync(plan.gateFile)) await new Promise<void>(resolve => {
+      // gateWhenIncludes holds only the turns whose context names it.
+      const gated = plan.gateFile && (!plan.gateWhenIncludes || turnContext.includes(plan.gateWhenIncludes));
+      if (gated) clearTimeout(timer);
+      if (gated && !existsSync(plan.gateFile)) await new Promise<void>(resolve => {
         gateTimer = setInterval(() => {
           if (!existsSync(plan.gateFile)) return;
           clearInterval(gateTimer);

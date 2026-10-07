@@ -17,6 +17,12 @@ const nodeSchema = z.object({
   /** Fork: follow-ups from the same conversation steered into this node's
    * running turn instead of queueing behind it (their texts, for repeats). */
   corrections: z.array(z.string()).optional(),
+  /** Fork: children whose results already resumed this node while a sibling
+   * was still running (an interim resume), so each one wakes it only once. */
+  interimFrom: z.array(z.string()).optional(),
+  /** Fork: a code agent's assignment in its own fresh thread, independent of
+   * its siblings, so its result may resume the sender before theirs. */
+  independent: z.boolean().optional(),
   /** Server restarts that cut off this node's turn; past the limit it fails. */
   restarts: z.number().int().nonnegative().default(0),
   /** Its last turn was cut off by a restart; the next run says so. */
@@ -323,6 +329,13 @@ export class RoomHandoffs {
     return { id: batch[0]?.id ?? node.id, botIds: batch.map(n => n.botId) };
   }
 
+  /** Fork: marks a fresh code-agent assignment as independent (interimFrom). */
+  markIndependent(node: RoomHandoff) {
+    if (node.independent) return;
+    node.independent = true;
+    this.save();
+  }
+
   sourceSettled(generation: string, ok: boolean) {
     const node = this.nodes.get(generation);
     if (!node || node.status !== "source") return;
@@ -414,6 +427,12 @@ export class RoomHandoffs {
       if (n.status === "waiting") {
         const children = this.children(n.id);
         if (children.length && children.every(c => terminal(c) && c.reported)) { n.status = "resume"; this.publish(n); }
+        // Fork: an independent child that finished while a sibling still runs
+        // resumes the sender now, so it can act on that result right away.
+        else if (!n.groupId && children.some(c => terminal(c) && c.reported && c.independent && !n.interimFrom?.includes(c.id))) {
+          n.interimFrom = children.filter(c => terminal(c) && c.reported).map(c => c.id);
+          n.status = "resume"; this.publish(n);
+        }
       }
       if (n.status !== "queued" && n.status !== "resume") continue;
       // Independent conversations can start as soon as work is accepted.
@@ -446,7 +465,8 @@ export class RoomHandoffs {
       void running.then(result => {
         if (terminal(n)) return;
         n.result = result.text.slice(0, 12_000);
-        if (this.children(n.id).length > childCount) n.status = "waiting";
+        // Fork: after an interim resume the siblings still running owe it.
+        if (this.children(n.id).length > childCount || this.children(n.id).some(c => !terminal(c))) n.status = "waiting";
         else if (!result.ok) this.cancelTree(n, n.result || "Room agent failed", "failed");
         else { n.status = "completed"; this.stampProgress(root); }
         // Close the paused span with the settlement itself: work enqueued
@@ -457,7 +477,7 @@ export class RoomHandoffs {
       }).catch(e => {
         if (terminal(n)) return;
         n.result = String(e).slice(0, 1000);
-        if (this.children(n.id).length > childCount) {
+        if (this.children(n.id).length > childCount || this.children(n.id).some(c => !terminal(c))) {
           n.status = "waiting";
           this.trackExecutionPauses();
           this.publish(n);
