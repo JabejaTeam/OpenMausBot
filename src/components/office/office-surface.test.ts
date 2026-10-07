@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 describe("office surfaces", () => {
   it("never blur what lies under them (office-surface.ts)", () => {
     const blurred = readdirSync(__dirname)
-      .filter((name) => /\.tsx$/.test(name))
+      .filter((name) => name.endsWith(".tsx"))
       .filter((name) => /backdrop-(blur|filter)/.test(readFileSync(join(__dirname, name), "utf8")));
     expect(blurred).toEqual([]);
   });
