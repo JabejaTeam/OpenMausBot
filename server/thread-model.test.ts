@@ -156,7 +156,8 @@ describe("threads follow their bot's model", () => {
       return { rewound: true };
     });
     expect(moved.sort()).toEqual([full.threadId, asks.threadId, same.threadId].sort());
-    expect(store.taskByThread(bot.id, full.threadId)).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: [], rewound: true });
+    // Fork: Full survives an engine switch the new engine supports (0dd132426).
+    expect(store.taskByThread(bot.id, full.threadId)).toMatchObject({ approvalMode: "full", autoApprove: false, alwaysAllow: ["Bash"], rewound: true });
     expect(store.taskByThread(bot.id, full.threadId)?.modelSelection).toBeUndefined();
     expect(store.taskByThread(bot.id, asks.threadId)).toMatchObject({ approvalMode: "ask" });
     // Another model on the same engine: the level stays.
@@ -165,7 +166,7 @@ describe("threads follow their bot's model", () => {
     expect(resets.map(([, to]) => to)).toEqual([codex, codex, codex]);
     const reloaded = open();
     expect(ownModel(reloaded, bot.id, full.threadId)).toBeUndefined();
-    expect(reloaded.taskByThread(bot.id, full.threadId)?.approvalMode).toBe("ask");
+    expect(reloaded.taskByThread(bot.id, full.threadId)?.approvalMode).toBe("full");
     expect(ownModel(reloaded, bot.id, untouched.threadId)).toEqual(opus);
   });
 
@@ -177,13 +178,14 @@ describe("threads follow their bot's model", () => {
     store.patchBot(bot.id, { modelSelection: opus });
     expect(store.taskByThread(bot.id, full.threadId)).toMatchObject({ approvalMode: "full", alwaysAllow: ["Bash"] });
     store.patchBot(bot.id, { modelSelection: codex });
-    expect(store.taskByThread(bot.id, full.threadId)).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: [] });
-    expect(open().taskByThread(bot.id, full.threadId)?.approvalMode).toBe("ask");
+    // Fork: Full survives an engine switch the new engine supports (0dd132426).
+    expect(store.taskByThread(bot.id, full.threadId)).toMatchObject({ approvalMode: "full", alwaysAllow: ["Bash"] });
+    expect(open().taskByThread(bot.id, full.threadId)?.approvalMode).toBe("full");
 
     const other = store.createTask(bot.id, "Full again")!;
     store.patchTask(bot.id, other.threadId, { approvalMode: "full", autoApprove: false });
     store.applyModelDefault(bot.id, sonnet);
-    expect(store.taskByThread(bot.id, other.threadId)?.approvalMode).toBe("ask");
+    expect(store.taskByThread(bot.id, other.threadId)?.approvalMode).toBe("full");
   });
 
   it("the wire carries the model a thread runs on and whether it follows the bot", () => {

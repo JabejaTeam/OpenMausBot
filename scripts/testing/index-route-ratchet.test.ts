@@ -18,7 +18,7 @@ const EXACT: Record<string, number> = {
 // Jabeja fork: inline routes not yet moved to server/routes (relay-question,
 // person-profile, email-card actions, the per-person connectors guard). Kept
 // apart so upstream's numbers above stay verbatim; moving one out lowers this.
-const FORK_EXTRA: Record<string, number> = { 'path === "/': 2, "path.match(": 1, "path.startsWith(": 1 };
+const FORK_EXTRA: Record<string, number> = { 'path === "/': 2, "path.match(": 1, "path.startsWith(": 1, ".exec(path)": 1 };
 
 const count = (needle: string) => INDEX.split(needle).length - 1;
 

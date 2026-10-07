@@ -106,7 +106,7 @@ describe("Apps pop-up", () => {
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
   it("counts Whop among connected apps", () => {
-    fixture.overrides.set(18, true);
+    fixture.overrides.set(19, true); // fork: the admin state sits before whopConnected
     const { html } = render();
     expect(html).toContain("Connected 2");
   });

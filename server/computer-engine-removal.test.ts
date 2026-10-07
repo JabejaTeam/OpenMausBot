@@ -142,10 +142,12 @@ describe("moving saved bots off the engine", () => {
   });
 
   it("sets a level the new engine would have to confirm back to Ask, as every engine switch does", () => {
+    // Fork: Full survives a switch the new engine supports (0dd132426), so
+    // these cases use Custom, which still goes back to Ask on another engine.
     const store = new Store(newBotDefault);
     const full = store.createBot({ modelSelection: { instanceId: "computer", model: "claude-fable-5" } }, { seedMessages: false });
-    store.patchBot(full.id, { approvalMode: "full", alwaysAllow: ["Bash(ls:*)"] });
-    store.patchTask(full.id, full.threadId, { approvalMode: "full", alwaysAllow: ["Bash(ls:*)"] });
+    store.patchBot(full.id, { approvalMode: "custom", alwaysAllow: ["Bash(ls:*)"] });
+    store.patchTask(full.id, full.threadId, { approvalMode: "custom", alwaysAllow: ["Bash(ls:*)"] });
     const auto = store.createBot({ modelSelection: { instanceId: "computer", model: "claude-fable-5" } }, { seedMessages: false });
     store.patchBot(auto.id, { approvalMode: "auto" });
     store.patchTask(auto.id, auto.threadId, { approvalMode: "auto" });
@@ -166,10 +168,10 @@ describe("moving saved bots off the engine", () => {
     const store = new Store(newBotDefault);
     // The first conversation has no level of its own: it follows the bot's.
     const bot = store.createBot({ modelSelection: { instanceId: "computer", model: "claude-fable-5" } }, { seedMessages: false });
-    store.patchBot(bot.id, { approvalMode: "full", alwaysAllow: ["Bash(ls:*)"] });
+    store.patchBot(bot.id, { approvalMode: "custom", alwaysAllow: ["Bash(ls:*)"] });
     const elsewhere = bot.threadId;
     store.patchTask(bot.id, elsewhere, { modelSelection: { instanceId: "codex", model: "codex-model" } });
-    expect(store.projectBotForTask(bot.id, elsewhere)).toMatchObject({ approvalMode: "full", alwaysAllow: ["Bash(ls:*)"] });
+    expect(store.projectBotForTask(bot.id, elsewhere)).toMatchObject({ approvalMode: "custom", alwaysAllow: ["Bash(ls:*)"] });
 
     const moves = store.retireInstances(removed, replacement, noBoat);
 
@@ -178,7 +180,7 @@ describe("moving saved bots off the engine", () => {
     expect(reloaded.bot(bot.id)).toMatchObject({ modelSelection: replacement, approvalMode: "ask", alwaysAllow: [] });
     // The conversation stays on Codex, so nothing about its level changes.
     expect(reloaded.projectBotForTask(bot.id, elsewhere)).toMatchObject({
-      modelSelection: { instanceId: "codex", model: "codex-model" }, approvalMode: "full", alwaysAllow: ["Bash(ls:*)"],
+      modelSelection: { instanceId: "codex", model: "codex-model" }, approvalMode: "custom", alwaysAllow: ["Bash(ls:*)"],
     });
     // It is the bot's open conversation, so it still hears what moved: the
     // bot's own engine and level, not its own.
@@ -190,7 +192,7 @@ describe("moving saved bots off the engine", () => {
   it("tells a moved conversation that follows the bot's level that it is now Ask", () => {
     const store = new Store(newBotDefault);
     const bot = store.createBot({ modelSelection: { instanceId: "computer", model: "claude-fable-5" } }, { seedMessages: false });
-    store.patchBot(bot.id, { approvalMode: "full" });
+    store.patchBot(bot.id, { approvalMode: "custom" });
     const first = bot.threadId;
     // A newer conversation becomes the open one; the first keeps following the bot.
     store.createTask(bot.id, "Newer", true);

@@ -503,12 +503,14 @@ describe("Store", () => {
     // follows moves to the new engine and, its Full access belonging to the
     // old one, back to Ask; a thread's own model and level stay.
     expect(first.modelSelection).toBeUndefined();
-    expect(sibling).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: [] });
+    // Fork: the follower keeps the Full it had, since the new engine
+    // supports Full (0dd132426); upstream sends it back to Ask.
+    expect(sibling).toMatchObject({ approvalMode: "full", alwaysAllow: ["old-tool"] });
     expect(store.projectBotForTask(bot.id, sibling.threadId)?.modelSelection).toEqual(next);
     expect(picked).toMatchObject({ modelSelection: opus, approvalMode: "full", alwaysAllow: ["old-tool"] });
     const reloaded = new Store(selection);
     expect(reloaded.bot(bot.id)).toMatchObject({ modelSelection: next, approvalMode: "ask" });
-    expect(reloaded.taskByThread(bot.id, sibling.threadId)).toMatchObject({ approvalMode: "ask" });
+    expect(reloaded.taskByThread(bot.id, sibling.threadId)).toMatchObject({ approvalMode: "full" });
     expect(reloaded.taskByThread(bot.id, picked.threadId)).toMatchObject({ modelSelection: opus, approvalMode: "full" });
   });
 

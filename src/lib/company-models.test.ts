@@ -63,8 +63,9 @@ describe("Company switch planning", () => {
     const full = bot("full", "deleted-instance", { approvalMode: "full" });
     const fullSameEngine = bot("full-claude", "claude", { approvalMode: "full" });
     const plan = planCompanySwitch([full, fullSameEngine, bot("ask", "claude")], [signedOutClaude, companyClaude]);
-    expect(plan.bots.map((row) => row.id)).toEqual(["full-claude", "ask"]);
-    expect(plan.needsAsk.map((row) => row.id)).toEqual(["full"]);
+    // Fork: Full survives an engine switch the new engine supports (0dd132426).
+    expect(plan.bots.map((row) => row.id)).toEqual(["full", "full-claude", "ask"]);
+    expect(plan.needsAsk.map((row) => row.id)).toEqual([]);
   });
 
   it("treats a signed-out engine's custom models as still able to run", () => {
