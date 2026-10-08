@@ -10,7 +10,7 @@ import { BotEngine, type BotFrame } from "@/vendor/bloub/engine";
 import { EXPRESSION_BY_ID } from "@/vendor/bloub/expressions";
 import { DEMI_VIEWBOX, RAYON } from "@/vendor/bloub/repere";
 import { COLOR_BY_ID, SHAPE_BY_ID, mixHex } from "@/vendor/bloub/skins";
-import type { StateId } from "@/vendor/bloub/states";
+import { STATE_BY_ID, type StateId } from "@/vendor/bloub/states";
 import { MAX_STEP_MS } from "@/lib/office-motion";
 import type { BloubColorId, BloubExpressionId, BloubShapeId } from "../../shared/bloub-look";
 
@@ -76,12 +76,20 @@ function stopLoop() {
   raf = 0;
 }
 
-let watchingVisibility = false;
+let watching = false;
+
+/** The mouse, in client coordinates, while it is over the window; null for
+ * touch (a lifted finger would leave every gaze stuck) and once it leaves. */
+let pointer: { x: number; y: number } | null = null;
 
 function subscribeTick(tick: Tick): () => void {
-  if (!watchingVisibility && typeof document !== "undefined" && typeof document.addEventListener === "function") {
-    watchingVisibility = true;
+  if (!watching && typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    watching = true;
     document.addEventListener("visibilitychange", () => (document.hidden ? stopLoop() : startLoop()));
+    window.addEventListener("pointermove", (event) => {
+      pointer = event.pointerType === "touch" ? null : { x: event.clientX, y: event.clientY };
+    }, { passive: true });
+    document.documentElement.addEventListener("pointerleave", () => { pointer = null; });
   }
   ticks.add(tick);
   startLoop();
@@ -89,6 +97,25 @@ function subscribeTick(tick: Tick): () => void {
     ticks.delete(tick);
     if (!ticks.size) stopLoop();
   };
+}
+
+/** Head turn toward the mouse, in degrees: bloub's own follow range (its
+ * ui/gaze.ts YAW_MAX, PITCH_MAX, PITCH), straight ahead instead of turned to
+ * its settings panel, and without the entrance spin. */
+const FOLLOW_YAW = 16;
+const FOLLOW_PITCH = 13;
+const FOLLOW_LIFT = 10;
+/** How long the head takes to return when the mouse leaves (bloub's TURN_TIME). */
+const RELEASE_TIME = 1.1;
+
+/** Where a bloub at `box` looks for the current mouse; null without one or
+ * without a box to aim from (a zero box would make NaN, which the engine keeps). */
+function followLook(box: DOMRect | undefined) {
+  if (!pointer || !box || box.width === 0 || box.height === 0) return null;
+  const clamp = (value: number) => Math.max(-1, Math.min(1, value));
+  const nx = clamp((pointer.x - (box.left + box.width / 2)) / Math.max(1, window.innerWidth / 2));
+  const ny = clamp((pointer.y - (box.top + box.height / 2)) / Math.max(1, window.innerHeight / 2));
+  return { yaw: nx * FOLLOW_YAW, pitch: FOLLOW_LIFT - ny * FOLLOW_PITCH, mix: 1, spin: 0, wander: 0 };
 }
 
 /** Whether the element is on screen; true where IntersectionObserver is
@@ -149,8 +176,19 @@ function BloubAvatarComponent({ size, shape, expression, color, state = "idle", 
     const { state: initial, radii: initialRadii, face: initialFace } = latest.current;
     const current = { engine: new BotEngine(R, initial, initialRadii, initialFace), clock: BLOUB_STILL_AT };
     run.current = current;
+    let aiming = false;
     const unsubscribe = subscribeTick((step) => {
       current.clock += step;
+      // the eyes follow the mouse on a resting face; elsewhere the gaze IS
+      // the state's animation (thinking's dots, the orbit) and stays its own
+      const look = STATE_BY_ID.get(latest.current.state)?.baseFace ? followLook(svg.current?.getBoundingClientRect()) : null;
+      if (look) {
+        current.engine.setLook(look, current.clock);
+        aiming = true;
+      } else if (aiming) {
+        current.engine.setLook(null, current.clock, RELEASE_TIME);
+        aiming = false;
+      }
       setLiveFrame(current.engine.sample(current.clock));
     });
     return () => {
