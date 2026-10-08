@@ -78,3 +78,37 @@ export function teamToOpen<B extends { id: string }, R extends { id: string }>(
   if (!group?.section || teamLead(group)?.id === id) return null;
   return group.id;
 }
+
+/** When the person last sent something here: their newest typed message
+ * (not one that came in through the API). 0 when never. */
+export function lastSentAt(messages: ReadonlyArray<{ role: string; at: number; via?: string }>): number {
+  let newest = 0;
+  for (const message of messages) if (message.role === "user" && message.via !== "api" && message.at > newest) newest = message.at;
+  return newest;
+}
+
+export type SimpleRow<B, R> =
+  | { kind: "team"; key: string; group: SimpleGroup<B, R>; lead: B; at: number }
+  | { kind: "bot"; key: string; bot: B; at: number }
+  | { kind: "room"; key: string; room: R; at: number };
+
+/** The list as rows, like Messages: one row per team (its lead), every bot
+ * and room without a team on its own, the one you last wrote to on top.
+ * Rows never written to keep the groups' order underneath. */
+export function simpleSidebarRows<B extends { id: string }, R extends { id: string }>(
+  groups: SimpleGroup<B, R>[],
+  sentAt: (item: B | R) => number,
+): SimpleRow<B, R>[] {
+  const rows: SimpleRow<B, R>[] = [];
+  for (const group of groups) {
+    const lead = teamLead(group);
+    if (lead) {
+      const at = Math.max(0, ...group.bots.map(sentAt), ...group.rooms.map(sentAt));
+      rows.push({ kind: "team", key: group.id, group, lead, at });
+      continue;
+    }
+    for (const bot of group.bots) rows.push({ kind: "bot", key: bot.id, bot, at: sentAt(bot) });
+    for (const room of group.rooms) rows.push({ kind: "room", key: room.id, room, at: sentAt(room) });
+  }
+  return rows.sort((a, b) => b.at - a.at);
+}

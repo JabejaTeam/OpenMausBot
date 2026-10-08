@@ -2,9 +2,9 @@
 // filed by lib/simple-ui-groups, profile and connected apps at the bottom.
 // Threads: hovering a bot shows the thread list toggle and a new-thread button;
 // threads show only in the thread column, never under the bot. Each team shows as one
-// row, its lead (the PM); "›" opens the whole team. Teams reorder by drag,
-// sharing the saved order with the full sidebar.
-import { useRef, useState } from "react";
+// row, its lead (the PM); a bot without a team is its own row. No headings:
+// like Messages, the row you last wrote to is on top (lib/simple-ui-groups).
+import { useState } from "react";
 import { ChevronDown, ChevronLeft, PanelLeft } from "lucide-react";
 import { useStore, visibleMessages, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -12,18 +12,8 @@ import { t } from "@/lib/i18n";
 import { botLabel, botLabelLine } from "@/lib/bot-label";
 import { stateForBot } from "@/lib/mascot";
 import { hiddenBotsForMe, usePeople } from "@/lib/people";
-import {
-  BOTS_SECTION_ID,
-  mergeSectionOrder,
-  orderedSidebarSections,
-  placeSection,
-  sameSectionOrder,
-  shownForMe,
-  userSectionId,
-  type SectionDropPlace,
-} from "@/lib/sidebar-layout";
-import { loadSectionOrder, saveSectionOrder } from "@/lib/sidebar-preferences";
-import { simpleSidebarLayout, teamLead, teamToOpen, type SimpleGroup } from "@/lib/simple-ui-groups";
+import { shownForMe } from "@/lib/sidebar-layout";
+import { lastSentAt, simpleSidebarLayout, simpleSidebarRows, teamToOpen, type SimpleGroup } from "@/lib/simple-ui-groups";
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { groupPreview, preview } from "./Sidebar";
@@ -34,9 +24,6 @@ import { sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { WorkingDots } from "./WorkingIndicator";
 import { profileInitials } from "./SidebarProfileMenu";
 
-function groupLabel(group: SimpleGroup<Bot, Group>): string {
-  return group.section ?? t("simpleUi.unassigned");
-}
 
 function Row({
   selected,
@@ -175,58 +162,15 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
   const bots = state.bots.filter((bot) => shownForMe(bot, hiddenForMe, ""));
   const layout = simpleSidebarLayout(bots, state.groups, state.sections ?? []);
   const hero = layout.hero;
-  // Team order: the same saved order (and ids) as the full sidebar's sections
-  const idOf = (group: SimpleGroup<Bot, Group>) => (group.section ? userSectionId(group.section) : BOTS_SECTION_ID);
-  const [savedOrder, setSavedOrder] = useState<string[]>(() => loadSectionOrder());
-  const orderedIds = orderedSidebarSections(layout.groups.map(idOf), savedOrder);
-  // "Unassigned" is no team: it always closes the list, whatever the saved
-  // order (the full sidebar's order can put its Bots section mid-list)
-  const groups = [...layout.groups].sort((a, b) =>
-    Number(!a.section) - Number(!b.section) || orderedIds.indexOf(idOf(a)) - orderedIds.indexOf(idOf(b)));
+  // Like Messages: the team (or bot) you last wrote to on top, no headings
+  const rows = simpleSidebarRows(layout.groups, (item) => lastSentAt(visibleMessages(item)));
   // A teammate (picked from the thread column's switcher) lights up its team's row
   const selectedTeam = teamToOpen(layout.groups, state.selectedId);
   const teammateUnread = (group: SimpleGroup<Bot, Group>, lead: Bot) =>
     group.bots.some((bot) => bot !== lead && unreadForMe(bot)) || group.rooms.some((room) => room.unread);
-  const dragFrom = useRef<string | null>(null);
-  const [dragging, setDragging] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ id: string; place: SectionDropPlace } | null>(null);
-  const endDrag = () => {
-    dragFrom.current = null;
-    setDragging(null);
-    setDropTarget(null);
-  };
-  const drop = () => {
-    const from = dragFrom.current;
-    if (from && dropTarget) {
-      const next = placeSection(orderedIds, from, dropTarget.id, dropTarget.place);
-      if (!sameSectionOrder(next, orderedIds)) {
-        const merged = mergeSectionOrder(savedOrder, next);
-        setSavedOrder(merged);
-        saveSectionOrder(merged);
-      }
-    }
-    endDrag();
-  };
   const chatView = state.activeView === "chat";
   const select = (id: string) => dispatch({ type: "select", id });
   const threadColumn = useThreadColumn();
-  const teamRows = (group: SimpleGroup<Bot, Group>) => (
-    <>
-      {group.bots.map((bot) => <BotRow key={bot.id} bot={bot} />)}
-      {group.rooms.map((room) => (
-        <Row
-          key={room.id}
-          selected={chatView && state.selectedId === room.id}
-          unread={room.unread}
-          avatar={<RoomAvatar members={state.bots.filter((bot) => room.memberIds.includes(bot.id))} />}
-          name={room.name}
-          sub={groupPreview(room, state.bots, state.instances)}
-          onClick={() => select(room.id)}
-        />
-      ))}
-    </>
-  );
-
   const macInset = capabilities.windowChrome === "mac-inset";
   const draggable = macInset || capabilities.windowChrome === "win-caption";
   // SAFETY: Electron-only CSS property, same as Sidebar's window drag row.
@@ -267,52 +211,22 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {hero && <HeroBot bot={hero} />}
-        {groups.map((group) => {
-          const id = idOf(group);
-          const lead = teamLead(group);
-          const reorderable = groups.length > 1 && Boolean(group.section);
-          return (
-          <section
-            key={group.id}
-            data-simple-section={id}
-            className={cn(lead ? "mt-0.5" : "mt-3", dragging === id && "opacity-50")}
-            onDragOver={(event) => {
-              if (!dragFrom.current || !group.section) return;
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "move";
-              const rect = event.currentTarget.getBoundingClientRect();
-              setDropTarget({ id, place: event.clientY < rect.top + rect.height / 2 ? "before" : "after" });
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              drop();
-            }}
-          >
-            {dropTarget?.id === id && dropTarget.place === "before" && dragging !== id && <div className="mx-2 mb-1 h-0.5 rounded-full bg-accent" />}
-            <div
-              draggable={reorderable}
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("text/plain", id);
-                dragFrom.current = id;
-                setDragging(id);
-              }}
-              onDragEnd={endDrag}
-            >
-              {lead ? (
-                // the team's name: a message here goes to its lead (the PM)
-                <BotRow bot={lead} title={groupLabel(group)} active={selectedTeam === group.id} teamUnread={teammateUnread(group, lead)} />
-              ) : (
-                <>
-                  <div className="mb-1 truncate px-2.5 py-1.5 text-[13.5px] text-ink-secondary">{groupLabel(group)}</div>
-                  {teamRows(group)}
-                </>
-              )}
-            </div>
-            {dropTarget?.id === id && dropTarget.place === "after" && dragging !== id && <div className="mx-2 mt-1 h-0.5 rounded-full bg-accent" />}
-          </section>
-          );
-        })}
+        {rows.map((row) => row.kind === "team" ? (
+          // the team's name: a message here goes to its lead (the PM)
+          <BotRow key={row.key} bot={row.lead} title={row.group.section} active={selectedTeam === row.group.id} teamUnread={teammateUnread(row.group, row.lead)} />
+        ) : row.kind === "bot" ? (
+          <BotRow key={row.key} bot={row.bot} />
+        ) : (
+          <Row
+            key={row.key}
+            selected={chatView && state.selectedId === row.room.id}
+            unread={row.room.unread}
+            avatar={<RoomAvatar members={state.bots.filter((bot) => row.room.memberIds.includes(bot.id))} />}
+            name={row.room.name}
+            sub={groupPreview(row.room, state.bots, state.instances)}
+            onClick={() => select(row.room.id)}
+          />
+        ))}
       </div>
 
       <div className="flex items-center gap-2.5 px-4 pb-4 pt-2">

@@ -1,5 +1,6 @@
 // Selection matching is adapted from T3 Code's assistantTextSelection.ts
 // (Copyright 2026 T3 Tools Inc., MIT License; see third_party/t3-code/LICENSE).
+import { plainMarkdown } from "./plain-markdown";
 
 export const CITATION_MAX_QUOTE_LENGTH = 12_000;
 export const CITATION_MAX_COMMENT_LENGTH = 4_000;
@@ -141,13 +142,14 @@ export function splitTranscriptCitations(text: string): { display: string; citat
 
 export function citationPreviewText(text: string): string {
   const cited = splitTranscriptCitations(text);
-  if (!cited.citations.length) return text;
-  return [
+  // fork: previews read without markdown marks (lib/plain-markdown)
+  if (!cited.citations.length) return plainMarkdown(text);
+  return plainMarkdown([
     cited.display,
     ...cited.citations.map((citation) => citation.comment
       ? `${citation.quote} — ${citation.comment}`
       : citation.quote),
-  ].filter(Boolean).join(" ");
+  ].filter(Boolean).join(" "));
 }
 
 function normalizeWhitespace(text: string): string {

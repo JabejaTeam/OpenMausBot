@@ -68,6 +68,7 @@ import { BotPickerList } from "./BotPickerList";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu } from "./BotProjects";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
+import { groupThreadsByDate } from "@/lib/thread-date-groups";
 import { orderedThreadList, SidebarThreadRow, stampClock, threadRecency, useRelativeNow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
 import {
   loadCollapsedSections,
@@ -1202,7 +1203,15 @@ export function BotThreadList({ bot, selected, density, query, pendingQueued, re
       {readError && <p role="alert" className="px-2.5 py-1 text-[12px] text-danger">{readError}</p>}
       <span role="status" className="sr-only">{readStatus}</span>
       {projects.length > 0 && ungrouped.length > 0 && <div className="pl-6 pr-3 pb-1 pt-2 text-[10.5px] text-ink-tertiary">{t("task.list")}</div>}
-      {ungrouped.map(renderThread)}
+      {/* fork: the thread column reads by date, like Messages (lib/thread-date-groups) */}
+      {everything && !query
+        ? groupThreadsByDate(ungrouped, threadRecency, now, locale).map((group) => (
+          <div key={group.key} role="group" aria-label={group.label}>
+            <div className="px-2.5 pb-1 pt-3 text-[12px] font-medium text-ink-secondary">{group.label}</div>
+            {group.tasks.map(renderThread)}
+          </div>
+        ))
+        : ungrouped.map(renderThread)}
       {!query && !showAll && tasks.length > visibleTasks.length && <button type="button" onClick={() => setShowAll(true)} className="pl-6 pr-3 py-1.5 text-[11px] text-ink-secondary hover:text-ink">{t("task.showAll", { count: tasks.length })}</button>}
       <FullAccessWarning
         open={permissionRefresh?.kind === "full"}
