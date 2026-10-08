@@ -271,6 +271,27 @@ describe("Store", () => {
     expect(store.deleteSection("")).toBe("No such team");
   });
 
+  it("keeps a private personal Chief beside the shared one, also after a reload (fork)", () => {
+    // 2026-10-08: making Lenny's Ratchet a Chief unseated Wiebren's Jarvis,
+    // because both have no team and so shared the one Chief slot.
+    const store = new Store(selection);
+    const jarvis = store.createBot();
+    store.patchBot(jarvis.id, { visibility: "admins" });
+    store.setChiefOfStaff(jarvis.id);
+    const ratchet = store.createBot();
+    store.patchBot(ratchet.id, { visibility: { people: ["lenny@jabeja.be"], private: true } });
+    store.setChiefOfStaff(ratchet.id);
+    expect(store.bot(jarvis.id)?.chiefOfStaff).toBe(true);
+    expect(store.bot(ratchet.id)?.chiefOfStaff).toBe(true);
+    expect(new Store(selection).bots.filter((bot) => bot.chiefOfStaff).map((bot) => bot.id).sort())
+      .toEqual([jarvis.id, ratchet.id].sort());
+    // a second shared Chief still replaces the first
+    const general = store.createBot();
+    store.setChiefOfStaff(general.id);
+    expect(store.bot(jarvis.id)?.chiefOfStaff).toBe(false);
+    expect(store.bot(ratchet.id)?.chiefOfStaff).toBe(true);
+  });
+
   it("restores persisted membership if deleting the team cannot finish", () => {
     const store = new Store(selection);
     const bot = store.createBot({ section: "Studio" });

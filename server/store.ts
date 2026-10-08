@@ -519,6 +519,14 @@ const COLORS: MausColor[] = [
 /** Sections are persisted as display labels, so exact trimmed labels are
  * their identity. Missing/blank means the unsectioned (General) team. */
 export const sectionKey = (section?: string | null): string => section?.trim() || "";
+/** Fork: where a Chief of Staff is unique. One per team section — but a
+ * private personal Chief (no section, visible to one person) is that
+ * person's own, so Lenny's Ratchet never unseats Wiebren's Jarvis. */
+export const chiefSlot = (bot: Pick<BotRecord, "section" | "visibility">): string => {
+  const visibility = typeof bot.visibility === "object" ? bot.visibility : undefined;
+  const people = visibility?.private ? visibility.people ?? [] : [];
+  return !sectionKey(bot.section) && people.length === 1 ? `person:${people[0].toLowerCase()}` : sectionKey(bot.section);
+};
 
 /** Resolve @mentions in a message against a bot roster: `@` must start a
  * word, the name must end on a word boundary (so "@New Bottle" never matches
@@ -786,7 +794,7 @@ export class Store {
     }
     for (const b of this.bots) {
       if (!b.chiefOfStaff) continue;
-      const key = sectionKey(b.section);
+      const key = chiefSlot(b);
       if (!chiefSectionsSeen.has(key)) {
         chiefSectionsSeen.add(key);
         if (b.hidden) {
@@ -2258,10 +2266,10 @@ export class Store {
   setChiefOfStaff(id: string | null, section?: string | null): BotRecord[] | null {
     const selected = id ? this.bot(id) : null;
     if (id && !selected) return null;
-    const targetSection = sectionKey(selected?.section ?? section);
+    const targetSlot = selected ? chiefSlot(selected) : sectionKey(section);
     const changed: BotRecord[] = [];
     for (const bot of this.bots) {
-      if (sectionKey(bot.section) !== targetSection) continue;
+      if (chiefSlot(bot) !== targetSlot) continue;
       const next = bot.id === id;
       if (Boolean(bot.chiefOfStaff) === next && !(next && bot.hidden)) continue;
       if (next) {
