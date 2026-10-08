@@ -8102,7 +8102,6 @@ bus.subscribe((event: RuntimeEvent) => {
     }
     case "request.resolved": {
       if (event.requestId) pendingCommandRules.delete(`${event.threadId}:${event.requestId}`);
-      if (event.requestId) settleWaitingOnPersonChips(event.threadId, event.requestId);
       // answered (by whoever): the turn is working again, unless it settled
       const waiting = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
       if (bot && store.taskByThread(bot.id, event.threadId)?.activity === "waiting-on-you") {
@@ -8122,8 +8121,11 @@ bus.subscribe((event: RuntimeEvent) => {
             });
           }
         }
-        if (event.requestId) askMessageByRequest.delete(`${event.threadId}:${event.requestId}`);
       }
+      // Fork: after the card shows its answer, so a relay copies it rather
+      // than reading "niet meer open".
+      if (event.requestId) settleWaitingOnPersonChips(event.threadId, event.requestId);
+      if (messageId && event.requestId) askMessageByRequest.delete(`${event.threadId}:${event.requestId}`);
       break;
     }
     case "turn.retrying":
@@ -8510,10 +8512,27 @@ function delegatorOf(threadId: string, askerId?: string): { threadId: string; bo
   return source ? { threadId: opener?.threadId ?? source.threadId, botId: source.id } : undefined;
 }
 
+/** Fork: the conversation at the top of the delegation chain — where the
+ * person actually is. Marketing working for a PM working for Jarvis relays
+ * to Jarvis, not into the PM's pair thread nobody reads. */
+function personFacingDelegatorOf(threadId: string, askerId: string): { threadId: string; botId?: string } | undefined {
+  let found = delegatorOf(threadId, askerId);
+  const seen = new Set([threadId]);
+  while (found?.botId && !seen.has(found.threadId)) {
+    seen.add(found.threadId);
+    const above = delegatorOf(found.threadId, found.botId);
+    if (!above || seen.has(above.threadId)) break;
+    found = above;
+  }
+  return found;
+}
+
 // MOCA-274: a delegated teammate's card used to live only in its own thread,
 // so the person talking to the Chief never saw that work was waiting on them.
 // A chip in the delegating conversation points at the card until it settles.
-// Fork: a Chief's conversation gets the card itself (a relay) instead.
+// Fork: every delegating conversation gets the card itself (a relay) instead,
+// so the person answers where they are talking — the chip only remains for a
+// request whose card cannot be found.
 const waitingOnPersonChips = new Map<string, { threadId: string; messageId: string; name: string; kind: string }>();
 
 /** The teammate's own card for this request, where the person answers it. */
@@ -8523,13 +8542,11 @@ function askCard(threadId: string, requestId: string) {
 }
 
 function showWaitingOnPersonChip(threadId: string, requestId: string, asker: BotRecord, kind: "approval" | "answer") {
-  const delegator = delegatorOf(threadId, asker.id);
+  const delegator = personFacingDelegatorOf(threadId, asker.id);
   if (!delegator || delegator.threadId === threadId) return;
-  // A Chief's conversation gets the question itself as a card the person can
-  // answer right there (relay); other delegators keep the pointer chip.
   const source = delegator.botId ? store.bot(delegator.botId) : undefined;
   const card = askCard(threadId, requestId);
-  if (isPersonalChief(source) && card) {
+  if (source && card) {
     const permission = kind === "approval";
     const relayCard = store.appendMessage(delegator.threadId, {
       role: "bot",
@@ -19585,6 +19602,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               threadId, requestId: held.requestId, botId: currentSender.id, botName: currentSender.name,
               tool: outboundTool, summary, decision: "card-shown", source: "outbound",
             });
+            // Fork: the same "a card reached a person" hook as provider cards,
+            // so delegated work relays this card to whoever delegated it.
+            askMessageByRequest.set(`${threadId}:${held.requestId}`, card.id);
+            showWaitingOnPersonChip(threadId, held.requestId, currentSender, "approval");
             if (owner?.group) {
               if (activeGroupTurnForBot(currentSender.id)?.threadId === threadId) store.setActivity(currentSender.id, "waiting-on-you");
             } else if (store.taskByThread(currentSender.id, threadId)?.busy) {
@@ -19601,13 +19622,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 store.setTaskActivity(currentSender.id, threadId, "working");
               }
             }
-            if (answer !== "allow") {
-              if (answer === "timeout") {
-                const stale = store.messagesFor(threadId).find((message) => message.id === card.id);
-                if (stale?.card && !stale.card.answered) {
-                  store.patchMessage(threadId, stale.id, { card: { ...stale.card, answered: "unavailable", dismissed: true } });
-                }
+            if (answer === "timeout") {
+              const stale = store.messagesFor(threadId).find((message) => message.id === card.id);
+              if (stale?.card && !stale.card.answered) {
+                store.patchMessage(threadId, stale.id, { card: { ...stale.card, answered: "unavailable", dismissed: true } });
               }
+            }
+            settleWaitingOnPersonChips(threadId, held.requestId);
+            askMessageByRequest.delete(`${threadId}:${held.requestId}`);
+            if (answer !== "allow") {
               return refuseOutbound(
                 answer === "timeout"
                   ? "OpenMausBot did not send this: nobody answered the approval in time. Ask the user before trying again."

@@ -831,19 +831,20 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
           return Boolean(waitingThreadId);
         }, 30_000, "the delegated teammate never stopped on an approval card");
 
-        // (b) the delegating conversation shows where the approval waits
+        // (b) the delegating conversation shows the approval itself
+        // (fork: a relay card the person answers there, not a pointer chip)
         let chip: any;
         let sourceThreadId = "";
         await waitUntil(async () => {
           for (const thread of await chiefThreads()) {
             const found = thread.messages.find((message: any) =>
-              message.kind === "activity" && message.threadRef?.threadId === waitingThreadId);
+              message.kind === "options" && message.card?.relay?.threadId === waitingThreadId);
             if (found) { chip = found; sourceThreadId = thread.threadId; }
           }
           return Boolean(chip);
-        }, 10_000, "no waiting-on-approval chip in the Chief's conversation");
-        expect(chip.tool.name).toBe("Waiting on your approval in @Gatekeeper");
-        expect(chip.threadRef.botId).toBe(helper.id);
+        }, 10_000, "no relayed approval card in the Chief's conversation");
+        expect(chip.card.title).toBe("Gatekeeper vraagt");
+        expect(chip.card.relay).toMatchObject({ botId: helper.id, permission: true });
 
         // (a) the delegation status says so instead of "running", and says it
         // at once rather than holding the long-poll to its deadline
@@ -879,8 +880,8 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
         await waitUntil(async () => {
           const thread = (await chiefThreads()).find((candidate) => candidate.threadId === sourceThreadId);
           return Boolean(thread?.messages.some((message: any) =>
-            message.id === chip.id && message.tool?.name === "@Gatekeeper got your approval"));
-        }, 20_000, "the chip did not settle once the approval was answered");
+            message.id === chip.id && message.card?.answered === "allow"));
+        }, 20_000, "the relay card did not settle once the approval was answered");
       } finally {
         await api("POST", `/api/bots/${helper.id}/interrupt`);
         await waitUntil(async () => {

@@ -17,6 +17,9 @@ let broker: Server;
 let admin: string;
 let member: string;
 let fullBot: any;
+// Fork: a delegation chain Boss → Manager → Marketing, seeded like fullBot.
+const chain: { boss?: any; manager?: any; marketing?: any; managerThread: string; marketingThread: string } =
+  { managerThread: "seeded-manager-work-thread", marketingThread: "seeded-marketing-work-thread" };
 let brokerOrigin = "";
 const relayed: unknown[] = [];
 const evidence: unknown[] = [];
@@ -92,9 +95,20 @@ beforeAll(async () => {
   const created = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Existing Full grant" }) });
   expect(created.status).toBe(201);
   fullBot = (await created.json() as any).bot;
+  for (const role of ["boss", "manager", "marketing"] as const) {
+    const made = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Chain " + role }) });
+    chain[role] = (await made.json() as any).bot;
+  }
   await waitForExit(fixture.child, { signal: "SIGTERM" });
   const botsFile = join(fixture.info.dataDir, "bots.json");
   const bots = JSON.parse(readFileSync(botsFile, "utf8"));
+  const openWork = (botId: string, threadId: string, by: any, byThread: string) => {
+    const row = bots.find((candidate: any) => candidate.id === botId);
+    row.tasks.push({ ...structuredClone(row.tasks[0]), threadId, title: "@" + by.name + " · work",
+      openedBy: { botId: by.id, name: by.name, kind: "work", threadId: byThread, at: Date.now() } });
+  };
+  openWork(chain.manager.id, chain.managerThread, chain.boss, chain.boss.threadId);
+  openWork(chain.marketing.id, chain.marketingThread, chain.manager, chain.managerThread);
   const saved = bots.find((row: any) => row.id === fullBot.id);
   saved.approvalMode = "full";
   saved.autoApprove = false;
@@ -355,4 +369,33 @@ it("does not relay if the allowance cannot be durably written", async () => {
   expect((await relay(token, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
   expect(relayed).toHaveLength(before);
   expect((await api("GET", `/api/bots/${b.id}/outbound`)).body.today).toBe(0);
+});
+
+it("relays a delegated bot's send approval to the person-facing conversation at the top of the chain", async () => {
+  // 2026-10-08: Marketing, working for the Jabeja PM, held a Composio call on
+  // "Send on your behalf?" in its own thread. Nobody looked there, the hold
+  // timed out and the work fell back to a local file.
+  const token = await mint(chain.marketing.id, chain.marketingThread);
+  const before = relayed.length;
+  const held = relay(token, "GMAIL_SEND_EMAIL", { to: "klant@fixture.test" });
+  const card = await pending(chain.marketingThread);
+  let relayCard: any;
+  await expect.poll(async () => {
+    relayCard = (await cards(chain.boss.threadId)).find((row: any) => row.card?.relay?.requestId === card.card.requestId);
+    return Boolean(relayCard);
+  }, { timeout: 5_000 }).toBe(true);
+  expect(relayCard.card).toMatchObject({
+    title: "Chain marketing vraagt",
+    options: ["Toestaan", "Weigeren"],
+    relay: { botId: chain.marketing.id, threadId: chain.marketingThread, permission: true },
+  });
+  expect(relayCard.card.subtitle).toContain("klant@fixture.test");
+  // not into the middle of the chain, where nobody reads
+  expect((await cards(chain.managerThread)).some((row: any) => row.card?.relay)).toBe(false);
+  // the relay answers the teammate's own request, as RelayCard does
+  await api("POST", `/api/threads/${chain.marketingThread}/respond`, { requestId: card.card.requestId, behavior: "allow" });
+  expect((await held).body.result.isError).toBeFalsy();
+  expect(relayed.length).toBe(before + 1);
+  await expect.poll(async () => (await cards(chain.boss.threadId))
+    .find((row: any) => row.id === relayCard.id)?.card?.answered, { timeout: 5_000 }).toBe("allow");
 });
