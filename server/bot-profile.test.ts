@@ -121,6 +121,23 @@ describe("mascotBody", () => {
   });
 });
 
+describe("bloub", () => {
+  const look = { shape: "nuage", expression: "curieux", color: "turquoise" };
+
+  it("accepts a complete look of known ids", () => {
+    expect(parseBotProfilePatch({ bloub: look } as never, true)).toEqual({ ok: true, patch: { bloub: look } });
+  });
+
+  it("refuses an unknown id, a missing field and an extra key", () => {
+    for (const bloub of [{ ...look, shape: "star" }, { shape: "cercle", expression: "neutre" }, { ...look, glow: true }]) {
+      expect(parseBotProfilePatch({ bloub } as never, true)).toEqual({
+        ok: false,
+        error: "bloub must be { shape, expression, color } with known bloub ids",
+      });
+    }
+  });
+});
+
 describe("soul (standing instructions)", () => {
   it("accepts soul on both the strict and broad boundaries", () => {
     expect(parseBotProfilePatch({ soul: "Be brief." }, true)).toEqual({ ok: true, patch: { soul: "Be brief." } });

@@ -5,13 +5,7 @@ import { useStore, type Bot } from "@/state/store";
 import { useBotEditor } from "./bot-settings/BotEditorContext";
 import { imageAttachmentFromFile } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
-import {
-  PICKABLE_STATES,
-  MAUS_COLORS,
-  MAUS_COLOR_NAMES,
-  type MausMotion,
-  type MausState,
-} from "@/lib/mascot";
+import { type MausMotion, type MausState } from "@/lib/mascot";
 import {
   AVATAR_FOCUS_CENTER,
   AVATAR_ZOOM_MAX,
@@ -22,17 +16,19 @@ import {
   clampAvatarZoom,
   type BotAvatarCrop,
 } from "../../shared/bot-avatar";
-import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
-import { BotAvatar, MausAvatar } from "./Avatar";
+import { bloubLookFor } from "../../shared/bloub-look";
+import { BotAvatar } from "./Avatar";
+import { BloubLookPicker } from "./BloubLookPicker";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
 import { botLabel } from "@/lib/bot-label";
 import { useOrganizationBranding } from "@/lib/use-organization-branding";
 
 type AvatarPatch = Partial<
-  Pick<Bot, "avatarCrop" | "avatarUrl" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "color" | "mascotExpression" | "mascotBody">
+  Pick<Bot, "avatarCrop" | "avatarUrl" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "color" | "mascotExpression" | "mascotBody" | "bloub">
 >;
 
 const FRAME_SIZE = 168;
+
 
 function AvatarFraming({
   bot,
@@ -149,6 +145,7 @@ export function BotProfileAvatarCard({
   const cropRef = useRef(crop);
   cropRef.current = crop;
   const busy = uploading || generating || savingConnection;
+  const look = bloubLookFor(bot);
 
   const upload = async (file: File | undefined) => {
     if (!file || busy) return;
@@ -224,7 +221,7 @@ export function BotProfileAvatarCard({
         <span className="rounded-lg bg-control px-3 py-1.5 text-[14px] font-medium text-ink">Avatar</span>
         <button
           disabled={busy}
-          onClick={() => onPatch({ avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor" })}
+          onClick={() => onPatch({ avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor", bloub: bloubLookFor({ color: "green" }) })}
           className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"
         >
           Reset mascot
@@ -311,74 +308,7 @@ export function BotProfileAvatarCard({
 
         {crop === "mascot" && (
           <>
-            <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Expression
-            </div>
-            <div className="grid grid-cols-5 gap-2">
-              {PICKABLE_STATES.map((expression) => (
-                <button
-                  key={expression}
-                  type="button"
-                  disabled={busy}
-                  aria-pressed={activeState === expression}
-                  onClick={() => onPatch({ mascotExpression: expression })}
-                  className={cn(
-                    "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-control disabled:opacity-50",
-                    activeState === expression && "ring-2 ring-accent-border",
-                  )}
-                  title={expression}
-                  aria-label={`Use ${expression} expression`}
-                >
-                  <MausAvatar color={bot.color} bodyId={bot.mascotBody ?? undefined} state={expression} size={42} animated={false} />
-                </button>
-              ))}
-            </div>
-
-            <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Color
-            </div>
-            <div className="flex flex-wrap gap-2.5">
-              {MAUS_COLOR_NAMES.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  disabled={busy}
-                  aria-pressed={bot.color === color}
-                  onClick={() => onPatch({ color })}
-                  className={cn(
-                    "size-10 rounded-full border-2 border-transparent transition-transform hover:scale-110 disabled:opacity-50",
-                    bot.color === color && "ring-2 ring-accent-border ring-offset-2 ring-offset-card",
-                  )}
-                  style={{ backgroundColor: MAUS_COLORS[color] }}
-                  title={color}
-                  aria-label={`Use ${color} mascot color`}
-                />
-              ))}
-            </div>
-
-            <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Body
-            </div>
-            <div className="grid grid-cols-5 gap-1.5">
-              {MASCOT_BODY_IDS.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  disabled={busy}
-                  aria-pressed={(bot.mascotBody ?? "cursor") === id}
-                  aria-label={`Use the ${MASCOT_BODIES[id].name} body`}
-                  onClick={() => onPatch({ mascotBody: id })}
-                  className={cn(
-                    "flex items-center justify-center rounded-lg py-1.5 disabled:opacity-50",
-                    (bot.mascotBody ?? "cursor") === id
-                      ? "bg-control text-ink"
-                      : "text-ink-secondary hover:bg-control/60",
-                  )}
-                >
-                  <MausAvatar color={bot.color} bodyId={id} size={34} animated={false} trackPointer={false} />
-                </button>
-              ))}
-            </div>
+            <BloubLookPicker look={look} disabled={busy} onPick={(bloub) => onPatch({ bloub })} />
           </>
         )}
 

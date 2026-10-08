@@ -15,10 +15,12 @@ import {
 } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
-import { BeanBotAvatar } from "./office/BeanBotAvatar";
+import { BloubAvatar } from "./BloubAvatar";
 import { botLabelLine } from "@/lib/bot-label";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody, type MascotBodyId } from "../../shared/mascot-bodies";
+import { bloubLookFor, type BloubLook } from "../../shared/bloub-look";
+import type { StateId as BloubStateId } from "@/vendor/bloub/states";
 
 export const EYE_SCALE = 1.12;
 export const MOUTH_WEIGHT = 11;
@@ -214,8 +216,23 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
     avatarFocusX?: number;
     avatarFocusY?: number;
     mascotBody?: MascotBodyId | null;
+    bloub?: BloubLook;
   };
 };
+
+/**
+ * The app's state for a bot -> bloub's. Thinking replaces the body with
+ * bloub's three pulsing dots, so it shows only while the bot really works
+ * (the caller animates it then); stateForBot also says "working" for a bot
+ * that merely is about code, and that bot keeps its face when still.
+ * Waiting on you and a failed tool both get bloub's blue notification
+ * pastille: the bot keeps its shape, where "alert" would turn it into a "!".
+ */
+export function bloubStateFor(state: MausState | undefined, animated: boolean): BloubStateId {
+  if (state === "working" && animated) return "thinking";
+  if (state === "notifying" || state === "alerting") return "notify";
+  return "idle";
+}
 
 export type BotAvatarOutcome = "flatImage" | "gradientMascot";
 
@@ -262,9 +279,21 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
 
   const { name } = bot;
   const shownName = name ? botLabelLine({ name, kind: bot.kind, section: bot.section }) : undefined;
-  // fork: no mascot — every bot shows as its office bean (office/BeanBotAvatar)
+  // fork: no mascot — every bot without a picture is its bloub (BloubAvatar)
   if (outcome !== "flatImage") {
-    return <BeanBotAvatar bot={bot} size={size} still={mascotProps.animated === false || mascotProps.motion === "none"} label={label ?? shownName} />;
+    const look = bloubLookFor(bot);
+    const animated = mascotProps.animated === true;
+    return (
+      <BloubAvatar
+        size={size}
+        shape={look.shape}
+        expression={look.expression}
+        color={look.color}
+        state={bloubStateFor(mascotProps.state, animated)}
+        animated={animated}
+        label={label ?? shownName}
+      />
+    );
   }
 
   const radius = avatarCropRadius(profile.avatarCrop);

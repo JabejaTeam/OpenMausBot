@@ -21,6 +21,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "./bot-profile.ts";
+import { bloubLookTransportSchema } from "./bloub-look.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { normalizeCronSchedule } from "./routine-schedule.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES } from "./skill-md.ts";
@@ -243,6 +244,7 @@ const packageDocumentV1Schema = z.object({
         color: z.enum(COLORS, { error: "is not supported" }),
         mascotExpression: optionalText(80),
         mascotBody: optionalText(40),
+        bloub: bloubLookTransportSchema.optional(),
       }),
       playbooks: z.array(key).max(40).optional(),
       skills: z.array(skillName).max(PACKAGE_V1_MAX_SKILLS).optional(),
@@ -333,6 +335,7 @@ const appearanceSchema = z.object({
   color: z.enum(COLORS, { error: "is not supported" }),
   mascotExpression: optionalText(80),
   mascotBody: optionalText(40),
+  bloub: bloubLookTransportSchema.optional(),
   avatar: avatarSchema.optional(),
 });
 

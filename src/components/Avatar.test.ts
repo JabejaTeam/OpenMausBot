@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   BotAvatar,
   MausAvatar,
+  bloubStateFor,
   resolveBotAvatarOutcome,
   type BotAvatarProps,
   type MausAvatarProps,
@@ -75,17 +76,40 @@ describe("BotAvatar's two avatar outcomes", () => {
     expect(markup).not.toContain("radialGradient");
   });
 
-  // fork: the "gradient mascot" outcome draws the bot's office bean (a canvas)
-  it("renders the bean when the crop is mascot, image or not", () => {
+  // fork: the "gradient mascot" outcome draws the bot's bloub (an svg with a mask)
+  it("renders the bloub when the crop is mascot, image or not", () => {
     const markup = renderBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: "mascot" });
     expect(markup).not.toContain("<img");
-    expect(markup).toContain("<canvas");
+    expect(markup).toContain("<svg");
+    expect(markup).toContain("<mask");
   });
 
-  it("falls back to the bean when a flat crop has no valid image", () => {
+  it("falls back to the bloub when a flat crop has no valid image", () => {
     const markup = renderBot({ avatarUrl: undefined, avatarCrop: "circle" });
     expect(markup).not.toContain("<img");
-    expect(markup).toContain("<canvas");
+    expect(markup).toContain("<mask");
+  });
+
+  it("paints the stored bloub colour, else the bot colour's nearest", () => {
+    expect(renderBot({ color: "blue" })).toContain('fill="#3b93f0"');
+    expect(renderBot({ color: "blue", bloub: { shape: "cercle", expression: "neutre", color: "rose" } })).toContain('fill="#e152b0"');
+  });
+});
+
+describe("bloubStateFor", () => {
+  it("thinks only while animated work runs", () => {
+    expect(bloubStateFor("working", true)).toBe("thinking");
+    expect(bloubStateFor("working", false)).toBe("idle");
+  });
+
+  it("shows the notification pastille when the bot waits on you or a tool failed", () => {
+    expect(bloubStateFor("notifying", false)).toBe("notify");
+    expect(bloubStateFor("alerting", true)).toBe("notify");
+  });
+
+  it("rests on the stored expression otherwise", () => {
+    expect(bloubStateFor("curious", true)).toBe("idle");
+    expect(bloubStateFor(undefined, false)).toBe("idle");
   });
 });
 

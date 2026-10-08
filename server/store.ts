@@ -22,6 +22,7 @@ import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
+import { parseBloubLook } from "../shared/bloub-look.ts";
 import { approvalModeFor, isApprovalMode, lowerApprovalMode, modelSwitchNeedsAsk, type ApprovalMode } from "../shared/approval-mode.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
 
@@ -779,6 +780,12 @@ export class Store {
           b.avatarZoom = zoom;
           botsMigrated = true;
         }
+      }
+      // A look with an unknown id is dropped whole: the bot then draws its
+      // default look (shared/bloub-look bloubLookFor).
+      if (b.bloub !== undefined && !parseBloubLook(b.bloub)) {
+        delete b.bloub;
+        botsMigrated = true;
       }
       for (const key of ["avatarFocusX", "avatarFocusY"] as const) {
         if (b[key] === undefined) continue;
@@ -1800,7 +1807,7 @@ export class Store {
     profile: Partial<
       Pick<
         BotRecord,
-        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section" | "cwd" | "visibility" | "kind" | "toolScope"
+        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "bloub" | "modelSelection" | "section" | "cwd" | "visibility" | "kind" | "toolScope"
       >
     > = {},
     opts: {
@@ -1831,6 +1838,7 @@ export class Store {
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
       ...(profile.mascotBody ? { mascotBody: profile.mascotBody } : {}),
+      ...(profile.bloub ? { bloub: profile.bloub } : {}),
       ...(profile.kind ? { kind: profile.kind } : {}),
       // Restricted from its first frame: no one else is ever told it exists.
       ...(profile.visibility && profile.visibility !== "everyone" ? { visibility: structuredClone(profile.visibility) } : {}),

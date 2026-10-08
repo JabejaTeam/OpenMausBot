@@ -36,6 +36,7 @@
 import { z } from "zod";
 
 import { latestThreadFor, type ThreadRole } from "./thread-access.ts";
+import { ownsBot } from "../shared/bot-edit-access.ts";
 
 import type { BotVisibility } from "../shared/wire.ts";
 
@@ -250,6 +251,12 @@ export class VisibleSet {
     for (const group of groups) this.groups.set(group.id, group);
   }
 
+  /** Fork (shared/bot-edit-access): this viewer owns a personal agent with
+   * this audience. */
+  owns(visibility: unknown): boolean {
+    return this.viewer.kind !== "all" && ownsBot(this.viewer.email, visibility);
+  }
+
   bot(id: string): boolean {
     if (this.everything) return true;
     let seen = this.botMemo.get(id);
@@ -445,6 +452,7 @@ export function memberBot<T extends object>(bot: T, visible: VisibleSet, page?: 
   if (visible.everything) return bot;
   const { visibility, ...rest } = ownThreads(bot, visible, page) as T & { visibility?: unknown; peers?: unknown };
   if (!visible.member && visibility !== undefined) (rest as Record<string, unknown>).visibility = visibility;
+  if (visible.member && visible.owns(visibility)) (rest as Record<string, unknown>).ownedByViewer = true;
   const peers = Array.isArray(rest.peers) ? (rest.peers as unknown[]).filter((id): id is string => typeof id === "string" && visible.bot(id)) : undefined;
   return { ...rest, ...(peers ? { peers } : {}) } as T;
 }

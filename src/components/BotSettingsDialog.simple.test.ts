@@ -13,6 +13,7 @@ const fixture = vi.hoisted(() => {
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
   return {
     advanced: false,
+    admin: true,
     values: [] as unknown[],
     index: 0,
     own: 0,
@@ -41,7 +42,7 @@ vi.mock("react", async (original) => ({
   useEffect: () => {},
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
-vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => false }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("./bot-settings/useSlackManagement", () => ({ useSlackManagementUrl: () => null }));
 vi.mock("./bot-settings/useBotSettingsDerived", () => ({ useBotSettingsDerived: () => fixture.derived }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
@@ -122,6 +123,7 @@ const skill = (name: string, enabled: boolean): ManagedSkill => ({ name, descrip
 
 beforeEach(() => {
   fixture.advanced = false;
+  fixture.admin = true;
   fixture.values = [];
   fixture.index = 0;
   fixture.own = 0;
@@ -151,6 +153,20 @@ describe("the bot settings panel in Simple mode", () => {
     expect(html).toContain("Decide for me");
     expect(html).toContain("All settings");
     expect(html).not.toContain("SOUL.md");
+  });
+
+  it("shows a member every setting greyed out, an owner their agent's profile and icon, and only an admin All settings", () => {
+    fixture.admin = false;
+    const member = panel(makeBot()).html;
+    expect(member).toContain("Only an admin can change this agent.");
+    expect(member.match(/<fieldset disabled=""/g)?.length).toBe(2);
+    expect(member).not.toContain("All settings");
+    expect(member).not.toContain("Change icon");
+    const owner = panel({ ...makeBot(), ownedByViewer: true }).html;
+    expect(owner).toContain("This is your own agent");
+    expect(owner.match(/<fieldset disabled=""/g)?.length).toBe(1);
+    expect(owner).toContain("Change icon");
+    expect(owner).not.toContain("All settings");
   });
 
   it("sets the bot's default model between Instructions and Before acts, in the inline picker", () => {

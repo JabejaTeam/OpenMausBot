@@ -40,3 +40,8 @@ The iOS companion app bundles a prebuilt WebRTC library for Live calls
 (stasel/WebRTC), built from the WebRTC project, Copyright (c) 2011, The WebRTC
 project authors, used under the BSD 3-Clause License. WebRTC includes
 third-party components under their own licenses, listed with the library.
+
+The default agent avatar vendors the animation engine of bloub,
+https://github.com/jeremy-prt/bloub, Copyright (c) 2026 Jérémy Perret, used
+under the MIT License. The engine is in src/vendor/bloub with its license text
+(src/vendor/bloub/LICENSE).

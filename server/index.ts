@@ -4,6 +4,7 @@
 // First, before any module that could start a process: a Cloud home's
 // secrets off the launcher's pipe (cloud-secrets-boot.ts).
 import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
+import { botPatchViolation, canEditBot, ownsBot } from "../shared/bot-edit-access.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, rmSync, mkdirSync } from "node:fs";
@@ -21905,6 +21906,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 400, { error: "avatarUrl must reference an existing stored image" });
       }
       const existingBot = store.bot(m[1]);
+      // Fork (shared/bot-edit-access): an agent's profile is an admin's, or
+      // the person's its personal agent is.
+      if (auth.kind === "session" && !canEditBot({ admin: auth.scopes.includes("admin"), email: auth.session.email }, existingBot?.visibility)) {
+        return json(res, 403, { error: "forbidden: only an admin, or the person a personal agent belongs to, may change this agent" });
+      }
       // On a Cloud home a bot's name, title, description and standing
       // instructions ride every one of the owner's turns (and a lent Mac):
       // only the owner's own devices change them. Anyone else keeps the
@@ -22037,11 +22043,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
       }
-      if (auth.kind === "session" && !auth.scopes.includes("admin")) {
-        const field = clientBotPatchViolation(body);
-        if (field) return json(res, 403, { error: `forbidden: this session may change how a bot looks, not "${field}" (needs the admin scope)` });
-      }
       const existingBot = store.bot(m[1]);
+      // Fork (shared/bot-edit-access): a member keeps their reading state;
+      // the owner of a personal agent also changes its look; the rest is admin.
+      if (auth.kind === "session" && !auth.scopes.includes("admin")) {
+        const field = botPatchViolation(body, ownsBot(auth.session.email, existingBot?.visibility));
+        if (field) return json(res, 403, { error: `forbidden: only an admin, or the person a personal agent belongs to, may change "${field}"` });
+      }
       const selectedTask = existingBot ? requestedTaskBot(existingBot.id, undefined) : null;
       const beforeProfile = existingBot ? profileSnapshot(existingBot) : undefined;
       const beforeVisibility = existingBot?.visibility;
@@ -22445,7 +22453,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // Who may see this bot on a workspace several people share
       // (bot-visibility.ts): "everyone" (the default), "admins", or
       // { people: [...] }. Access control, applied at once; members' PATCHes
-      // never get here (clientBotPatchViolation).
+      // never get here (botPatchViolation).
       if (Object.hasOwn(body, "visibility")) {
         const parsed = parseVisibility(body.visibility);
         if (!parsed.ok) return json(res, 400, { error: parsed.error });

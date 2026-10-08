@@ -14,6 +14,7 @@ import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
 import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop } from "./bot-avatar.ts";
 import type { MascotBodyId } from "./mascot-bodies.ts";
+import type { BloubLook } from "./bloub-look.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
@@ -274,6 +275,8 @@ export interface WireBot {
   color: MausColor;
   mascotExpression?: MausExpression | null;
   mascotBody?: MascotBodyId | null;
+  /** The drawn avatar's look (shared/bloub-look). Absent: a default from color. */
+  bloub?: BloubLook;
   /** App-owned attachment served as this bot's custom profile image;
    * always present on the wire, null when the bot has none. */
   avatarUrl: string | null;
@@ -371,6 +374,9 @@ export interface WireBot {
   /** Who may see this bot on a workspace several people share. Absent means
    * everyone. Sent to admins only; a member's copy of a bot never carries it. */
   visibility?: BotVisibility;
+  /** Fork (shared/bot-edit-access): set for a member who owns this personal
+   * agent, so the app opens its settings to them. Admins never need it. */
+  ownedByViewer?: true;
   /** Admin-set: this bot may reach teammates that more people can see than
    * this bot, and they may answer it. What it tells them is then seen by
    * their audience. Off by default: bots reach only the same audience. */

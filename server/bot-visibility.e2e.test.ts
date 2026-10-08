@@ -467,7 +467,6 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     const answers = [
       ["read", await api("POST", `/api/bots/${ids.hr}/read`, { threadId: ids.hrThread }, ADA)],
       ["display", await api("PATCH", `/api/bots/${ids.hr}`, { pinned: true }, ADA)],
-      ["profile", await api("PATCH", `/api/bots/${ids.hr}/profile`, { title: "Payroll desk" }, ADA)],
       ["task", task],
       ["switch", await api("POST", `/api/bots/${ids.hr}/tasks/${ids.hrThread}`, {}, ADA)],
       ["list", await api("GET", "/api/bots?messages=0", undefined, ADA)],
@@ -482,6 +481,8 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       }
       expect(JSON.stringify(answer.body), route).not.toContain(ADA);
     }
+    // Fork (shared/bot-edit-access): seeing an agent is not changing it
+    expect((await api("PATCH", `/api/bots/${ids.hr}/profile`, { title: "Payroll desk" }, ADA)).status).toBe(403);
     // an admin still gets both
     expect((await api("PATCH", `/api/bots/${ids.hr}`, { pinned: false }, BOSS)).body.bot).toMatchObject({ visibility: { people: [ADA] }, peers: [ids.board, ids.pub] });
     expect((await api("PATCH", `/api/bots/${ids.hr}`, { peers: null, acknowledgePeerScope: true }, BOSS)).status).toBe(200);
@@ -640,6 +641,30 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect((await api("PATCH", `/api/bots/${ids.board}`, { reachesWiderAudience: false }, BOSS)).status).toBe(200);
     expect(await roster(ids.board)).not.toContain("Coach Owl");
   });
+
+  it("lets only an admin, or the one person a personal agent belongs to, change an agent", async () => {
+    const mine = await makeBot("Moochi Owl", "Ada");
+    try {
+      expect((await api("PATCH", `/api/bots/${mine.id}`, { visibility: { people: [ADA], private: true } }, BOSS)).status).toBe(200);
+      // the owner: profile and look, marked as theirs; not its model or permissions
+      const profile = await api("PATCH", `/api/bots/${mine.id}/profile`, { title: "My planner" }, ADA);
+      expect(profile.status, JSON.stringify(profile.body)).toBe(200);
+      expect(profile.body.bot).toMatchObject({ title: "My planner", ownedByViewer: true });
+      expect((await api("PATCH", `/api/bots/${mine.id}`, { color: "blue", pinned: true }, ADA)).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${mine.id}`, { autoApprove: true }, ADA)).status).toBe(403);
+      // a member who merely sees an agent keeps only their reading state
+      expect((await api("PATCH", `/api/bots/${ids.pub}/profile`, { title: "Hijacked" }, ADA)).status).toBe(403);
+      expect((await api("PATCH", `/api/bots/${ids.pub}`, { color: "red" }, ADA)).status).toBe(403);
+      expect((await api("PATCH", `/api/bots/${ids.pub}`, { pinned: true }, ADA)).status).toBe(200);
+      const list = (await api("GET", "/api/bots?messages=0", undefined, ADA)).body.bots as any[];
+      expect(list.find((b) => b.id === mine.id)?.ownedByViewer).toBe(true);
+      expect(list.find((b) => b.id === ids.pub)?.ownedByViewer).toBeUndefined();
+      // an admin changes any agent it sees
+      expect((await api("PATCH", `/api/bots/${ids.pub}/profile`, { title: "Front desk" }, BOSS)).status).toBe(200);
+    } finally {
+      expect(await status("DELETE", `/api/bots/${mine.id}`)).toBeLessThan(300);
+    }
+  }, 60_000);
 
   it("hides a private bot from admins too, while the people it names and the owner keep it", async () => {
     const clank = await makeBot("Clank Beetle", "Ada");

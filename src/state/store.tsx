@@ -22,6 +22,7 @@ import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import { sameModelSelection } from "../../shared/thread-model";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
+import type { BloubLook } from "../../shared/bloub-look";
 import type { QuestionRequestCardData } from "../../shared/ask-question";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
 import type { ModelRequestCardData } from "../../shared/model-request";
@@ -432,6 +433,8 @@ export interface Bot {
   mascotExpression?: string | null;
   /** Which body the bot wears. Unknown/absent values fall back to the cursor. */
   mascotBody?: MascotBodyId | null;
+  /** The drawn avatar's look; absent means the default from color. */
+  bloub?: BloubLook;
   /** App-owned image attachment used for this bot's profile. */
   avatarUrl?: string | null;
   /** Mascot, or the crop applied to avatarUrl. */
@@ -515,6 +518,8 @@ export interface Bot {
   browserProfile?: string | null;
   /** Who may see this bot on a shared workspace; only admins receive it. */
   visibility?: BotVisibility;
+  /** Fork (shared/bot-edit-access): this member owns this personal agent. */
+  ownedByViewer?: true;
   /** Where a shared or organization package put this bot (its provenance line). */
   installedPackage?: InstalledPackageMetadata;
   messages: Message[];

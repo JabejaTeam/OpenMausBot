@@ -18,6 +18,7 @@
     "electron/vendor/**",
     "release/**",
     "third_party/**",
+    "src/vendor/**",
     "electron/resources/**"
   ]
 }

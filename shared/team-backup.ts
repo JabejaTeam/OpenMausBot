@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN } from "./wire.ts";
 import { parseToolScope, type ToolScope } from "./tool-scope.ts";
+import { bloubLookTransportSchema } from "./bloub-look.ts";
 
 export const MAX_TEAM_BACKUP_BYTES = 50 * 1024 * 1024;
 export const TEAM_BACKUP_CONTENTS = "Bot profiles, instructions, sections, rooms, playbooks, routines, each bot's memory (MEMORY.md, topic notes and daily logs) and conversation text (all tasks and branches).";
@@ -104,6 +105,7 @@ const backupSchema = z.object({
     color,
     mascotExpression: z.string().max(80).optional(),
     mascotBody: z.string().max(40).optional(),
+    bloub: bloubLookTransportSchema.optional(),
     chiefOfStaff: z.boolean(),
     hidden: z.boolean(),
     playbooks: z.array(playbook).max(200),

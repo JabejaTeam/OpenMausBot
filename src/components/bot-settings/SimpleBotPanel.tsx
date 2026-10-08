@@ -8,6 +8,10 @@ import { ChevronRight, FileText, Image as ImageIcon, X } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useCanEditBot } from "@/lib/use-can-edit-bot";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { bloubLookFor } from "../../../shared/bloub-look";
+import { BloubLookPicker } from "../BloubLookPicker";
 import { botLabel, botLabelLine } from "@/lib/bot-label";
 import { attachmentBasename } from "@/lib/composer-attachments";
 import { useStore, visibleMessages, type Bot } from "@/state/store";
@@ -106,6 +110,9 @@ export function SimpleBotPanel({
   const customMode = displayedApprovalMode !== "ask" && displayedApprovalMode !== "auto";
 
   const library = useMemo(() => (tab === "library" ? botLibraryItems(bot) : []), [tab, bot]);
+  const admin = useOwnerOrAdmin() === true;
+  const canEdit = useCanEditBot(bot);
+  const [editingLook, setEditingLook] = useState(false);
 
   const tabCls = (active: boolean) =>
     cn(
@@ -132,7 +139,23 @@ export function SimpleBotPanel({
           <h2 id="bot-settings-title" className="max-w-full truncate text-[17px] font-semibold text-ink">
             {botLabelLine(bot)}
           </h2>
+          {canEdit && (
+            <button
+              type="button"
+              data-simple-edit-look
+              aria-expanded={editingLook}
+              onClick={() => setEditingLook((open) => !open)}
+              className="rounded-md px-1.5 py-0.5 text-[12px] font-medium text-accent-text hover:bg-raised"
+            >
+              {t(editingLook ? "botSettings.simple.lookDone" : "botSettings.simple.editLook")}
+            </button>
+          )}
         </div>
+        {canEdit && editingLook && (
+          <div data-simple-look>
+            <BloubLookPicker look={bloubLookFor(bot)} disabled={false} onPick={(bloub) => patch({ bloub })} />
+          </div>
+        )}
 
         <div className="mt-4 flex justify-center">
           <div role="tablist" aria-label={t("botSettings.simple.tabs")} className="inline-flex rounded-full bg-inset p-1">
@@ -161,6 +184,13 @@ export function SimpleBotPanel({
 
         {tab === "details" ? (
           <div role="tabpanel" className="mt-5 flex flex-col gap-5">
+            {/* Fork (shared/bot-edit-access): who may change what, said once */}
+            {!admin && (
+              <p data-simple-edit-access className="rounded-xl bg-inset px-3 py-2 text-[12.5px] text-ink-secondary">
+                {t(canEdit ? "botSettings.simple.ownerAccess" : "botSettings.simple.readOnly")}
+              </p>
+            )}
+            <fieldset disabled={!canEdit} className="contents">
             <div className="grid grid-cols-2 gap-3">
               <div className="min-w-0">
                 <label htmlFor={`simple-bot-name-${bot.id}`} className={labelCls}>{t("botSettings.simple.name")}</label>
@@ -197,6 +227,9 @@ export function SimpleBotPanel({
                 placeholder: t("botSettings.simple.instructionsPlaceholder", { name: botLabel(bot).name }),
               }}
             />
+            </fieldset>
+
+            <fieldset disabled={!admin} className="contents">
 
             {/* The bot's model, in the same plain-words picker as the chat
                 header, shown in place (a floating popover would be clipped by
@@ -283,7 +316,9 @@ export function SimpleBotPanel({
               )}
             </div>
 
-            <button
+            </fieldset>
+
+            {admin && <button
               type="button"
               data-simple-all-settings
               onClick={onAllSettings}
@@ -295,7 +330,7 @@ export function SimpleBotPanel({
                 {t("botSettings.simple.allSettingsHint")}
               </span>
               <ChevronRight size={15} className="shrink-0" />
-            </button>
+            </button>}
           </div>
         ) : (
           <div role="tabpanel" className="mt-5">
