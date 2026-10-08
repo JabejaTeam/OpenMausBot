@@ -4134,6 +4134,11 @@ export function useStore() {
   return ctx;
 }
 
+/** Fork: the store where there is one (a bot avatar renders inside and outside it). */
+export function useOptionalStore() {
+  return useContext(StoreContext);
+}
+
 /** Scoped state for an unsaved editor. The parent workspace remains intact. */
 export function BotEditorStore({ value, children }: { value: ReturnType<typeof useStore>; children: ReactNode }) {
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

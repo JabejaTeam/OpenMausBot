@@ -59,7 +59,8 @@ import { setNotificationSounds, useNotificationSounds } from "@/lib/notification
 import { setPinnedCircles, setUniversalPins, usePinnedCircles, useUniversalPins } from "@/lib/sidebar-preferences";
 import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
 import { setSimpleUi, useSimpleUi } from "@/lib/simple-ui";
-import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
+import { useAdvancedMode } from "@/lib/interface-mode";
+import { advancedAllowed } from "@/lib/advanced-access";
 import { parseSidebarDensity, setSidebarDensity, SIDEBAR_DENSITIES, useSidebarDensity, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
@@ -466,19 +467,6 @@ function FontRow() {
   );
 }
 
-function AdvancedModeRow() {
-  const enabled = useAdvancedMode();
-  return (
-    <SettingRow title={t("settings.advancedMode.title")} subtitle={t("settings.advancedMode.subtitle")}>
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.advancedMode.title")}
-        onClick={() => setAdvancedMode(!enabled)}
-      />
-    </SettingRow>
-  );
-}
-
 function ShowThreadsRow() {
   const enabled = useShowThreadsChoice();
   return (
@@ -494,6 +482,7 @@ function ShowThreadsRow() {
 
 function SimpleUiRow() {
   const enabled = useSimpleUi();
+  if (!advancedAllowed()) return null;
   return (
     <SettingRow title={t("settings.simpleUi.title")} subtitle={t("settings.simpleUi.subtitle")}>
       <Switch checked={enabled} aria-label={t("settings.simpleUi.title")} onClick={() => setSimpleUi(!enabled)} />
@@ -933,9 +922,6 @@ export function SettingsModal() {
       case "general":
         return (
           <>
-            <div className="rounded-2xl border border-accent-border/40 bg-raised-hover/40 px-1">
-              <AdvancedModeRow />
-            </div>
             <ProSettingsCard />
             <Card title={t("settings.profile.title")} subtitle={t("settings.profile.sharedSubtitle")}>
               <ProfileFields />
@@ -971,8 +957,6 @@ export function SettingsModal() {
               <SkinPicker />
             </Card>
             <div>
-              {/* A paired remote client has no General page; keep the switch reachable. */}
-              {remoteActive && <AdvancedModeRow />}
               <FontRow />
               <SidebarDensityRow />
               {/* Simple mode keeps one conversation per bot, so the switch

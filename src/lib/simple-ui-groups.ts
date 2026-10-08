@@ -59,14 +59,22 @@ export function simpleSidebarLayout<B extends SimpleBot, R extends SimpleRoom>(
   return { hero, groups };
 }
 
-// Grok's list shows soft shapes, never the cursor. A bot that kept the default
-// cursor body gets one of these, fixed per bot id; a chosen body is kept.
-const SIMPLE_BODIES = ["drop", "blob", "squircle", "capsule", "circle"] as const;
+// One row per team: the sidebar shows each team's lead (its chief, else its
+// first bot); the rest of the team opens on demand. "Unassigned" is no team,
+// so it has no lead and its bots all show.
+export function teamLead<B, R>(group: SimpleGroup<B, R>): B | null {
+  return group.section ? (group.bots[0] ?? null) : null;
+}
 
-export function simpleMascotBody(bot: { id?: string; name?: string; mascotBody?: string | null }): string {
-  if (bot.mascotBody && bot.mascotBody !== "cursor") return bot.mascotBody;
-  const key = bot.id ?? bot.name ?? "";
-  let hash = 0;
-  for (const char of key) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return SIMPLE_BODIES[hash % SIMPLE_BODIES.length];
+/** The team whose row stands for `id` (a bot or room hidden behind its lead):
+ * null when it shows in the team list itself (a lead, an unassigned bot or
+ * room, or unknown). */
+export function teamToOpen<B extends { id: string }, R extends { id: string }>(
+  groups: SimpleGroup<B, R>[],
+  id: string | null | undefined,
+): SimpleGroupId | null {
+  if (!id) return null;
+  const group = groups.find((g) => g.bots.some((bot) => bot.id === id) || g.rooms.some((room) => room.id === id));
+  if (!group?.section || teamLead(group)?.id === id) return null;
+  return group.id;
 }

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { advancedAllowed } from "./advanced-access";
 
 export const SIMPLE_UI_KEY = "omb-simple-ui";
 
@@ -16,12 +17,14 @@ function storage(): Storage | undefined {
   }
 }
 
-function simpleUi(): boolean {
+// Simple is the default; only an admin may turn it off (lib/advanced-access).
+export function readSimpleUi(): boolean {
+  if (!advancedAllowed()) return true;
   if (sessionChoice !== undefined) return sessionChoice;
   try {
-    return storage()?.getItem(SIMPLE_UI_KEY) === "1";
+    return storage()?.getItem(SIMPLE_UI_KEY) !== "0";
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -60,5 +63,5 @@ export function setSimpleUi(enabled: boolean): void {
 }
 
 export function useSimpleUi(): boolean {
-  return useSyncExternalStore(subscribe, simpleUi, () => false);
+  return useSyncExternalStore(subscribe, readSimpleUi, () => false);
 }

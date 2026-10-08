@@ -2,32 +2,28 @@
 // desk; hover a bot for its name, click it to open its newest conversation in
 // a side panel, switch threads from the panel header. three.js loads lazily.
 import { Activity, memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ChevronRight, List, Paintbrush, PanelLeft, Scan, Search, SquarePen, X } from "lucide-react";
+import { ChevronRight, List, Paintbrush, PanelLeft, Scan, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { botLabel, botLabelLine, threadTitle } from "@/lib/bot-label";
-import { MAUS_COLORS } from "@/lib/mascot";
-import { hiddenBotsForMe, usePeople } from "@/lib/people";
-import { BOTS_SECTION_ID, orderedSidebarSections, shownForMe, userSectionId } from "@/lib/sidebar-layout";
-import { loadSectionOrder } from "@/lib/sidebar-preferences";
-import { simpleSidebarLayout } from "@/lib/simple-ui-groups";
-import { officeLayout, officeSignature, type OfficeTeam } from "@/lib/office-layout";
-import { attentionThreadId, botStatus, focusTask, hasUnread, nextNeedingYou, statusGroups } from "@/lib/office-status";
+import { usePeople } from "@/lib/people";
+import { officeLayout, officeSignature } from "@/lib/office-layout";
+import { attentionThreadId, botStatus, focusTask, nextNeedingYou, statusGroups } from "@/lib/office-status";
 import { prewarm, remember } from "@/lib/office-recent";
 import { delegationLinks } from "@/lib/office-delegations";
 import { setOfficeView } from "@/lib/office-view";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { ChatView } from "../ChatView";
-import { BotThreadList, botRowProps } from "../Sidebar";
-import { sidebarBotActivityTasks } from "../SidebarBotActivity";
-import type { OfficeBotLook, OfficeScene, OfficeTheme } from "./office-scene";
+import type { OfficeScene, OfficeTheme } from "./office-scene";
 import { OfficeStatusRail, StatusSymbol } from "./OfficeStatusRail";
 import { OfficeSearch } from "./OfficeSearch";
-import { OfficeLookEditor, useTeamLooks } from "./OfficeLookEditor";
-import { agentColorsFor, looksKey as teamLooksKeyOf } from "@/lib/office-team-looks";
-import { beanMood, headgearFor } from "@/lib/office-bean";
-import { BeanPortrait } from "./BeanPortrait";
+import { OfficeLookEditor } from "./OfficeLookEditor";
+import { useTeamLooks } from "@/lib/use-team-looks";
+import { looksKey as teamLooksKeyOf } from "@/lib/office-team-looks";
+import { botLooks, officeTeams } from "./bean-looks";
+import { BeanBotAvatar } from "./BeanBotAvatar";
+import { BotThreads, setThreadColumn, useThreadColumn } from "../BotThreads";
 
 function readTheme(): OfficeTheme {
   const css = getComputedStyle(document.documentElement);
@@ -37,10 +33,6 @@ function readTheme(): OfficeTheme {
     success: value("--color-success", "#38d591"),
     warning: value("--color-warning", "#ff9f0a"),
   };
-}
-
-function isWorking(bot: Bot, pendingQueued: Parameters<typeof sidebarBotActivityTasks>[1]): boolean {
-  return Boolean(bot.busy) || sidebarBotActivityTasks(bot, pendingQueued).some((task) => task.busy || task.activity === "working");
 }
 
 /** Team, and what the bot is on: the thread a click opens, in its status. */
@@ -57,42 +49,6 @@ function PanelSubtitle({ bot, team }: { bot: Bot; team?: string }) {
         {[team, status !== "idle" ? t(`office.status.${status}`) : null, title].filter(Boolean).join(" · ")}
       </span>
     </span>
-  );
-}
-
-const THREAD_COLUMN_KEY = "omb-office-thread-column";
-
-/** The bot's threads as Messages lists conversations: a search field and a
- * compose button on top, then every thread in one scrolling list. */
-function OfficeThreads({ bot, onNew }: { bot: Bot; onNew: () => void }) {
-  const { state, dispatch } = useStore();
-  const [query, setQuery] = useState("");
-  return (
-    <>
-      <div className="sticky top-0 z-10 flex items-center gap-1 bg-app pb-1.5 pt-1">
-        <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-inset px-2 text-ink-secondary">
-          <Search size={14} className="shrink-0" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => { if (event.key === "Escape" && query) { event.stopPropagation(); setQuery(""); } }}
-            placeholder={t("sidebar.search")}
-            aria-label={t("task.search")}
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={onNew}
-          title={t("task.newShort")}
-          aria-label={t("task.newShort")}
-          className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
-        >
-          <SquarePen size={16} />
-        </button>
-      </div>
-      <BotThreadList {...botRowProps(state, dispatch, bot, { density: "comfortable", quiet: false, query, onMenu: () => undefined })} selected everything />
-    </>
   );
 }
 
@@ -141,58 +97,25 @@ export function OfficeView() {
   const [recent, setRecent] = useState<string[]>([]);
   // phones: the thread list as a popover; wider: a column beside the chat
   const [threadsOpen, setThreadsOpen] = useState(false);
-  const [threadColumn, setThreadColumnState] = useState(() => {
-    try {
-      return localStorage.getItem(THREAD_COLUMN_KEY) !== "0";
-    } catch {
-      return true;
-    }
-  });
-  const setThreadColumn = (shown: boolean) => {
-    setThreadColumnState(shown);
-    try {
-      localStorage.setItem(THREAD_COLUMN_KEY, shown ? "1" : "0");
-    } catch {
-      // the choice still holds for this session
-    }
-  };
+  const threadColumn = useThreadColumn();
   const [searchOpen, setSearchOpen] = useState(false);
   // each team's wall colour and logo, edited from its name over the door
-  const teamLooks = useTeamLooks();
+  const teamLooks = useTeamLooks({ refresh: true });
   const [lookFor, setLookFor] = useState<string | null>(null);
   const closeLook = useMemo(() => () => setLookFor(null), []);
   const openIdRef = useRef(openId);
   openIdRef.current = openId;
 
   // Same teams, order and visibility as the Simple UI list
-  const hiddenForMe = hiddenBotsForMe();
-  const bots = state.bots.filter((bot) => shownForMe(bot, hiddenForMe, ""));
-  const grouped = simpleSidebarLayout(bots, [], state.sections ?? []);
-  const idOf = (section?: string) => (section ? userSectionId(section) : BOTS_SECTION_ID);
-  const order = orderedSidebarSections(grouped.groups.map((group) => idOf(group.section)), loadSectionOrder());
-  const teams: OfficeTeam[] = [...grouped.groups]
-    .sort((a, b) => order.indexOf(idOf(a.section)) - order.indexOf(idOf(b.section)))
-    .map((group) => ({ id: group.id, label: group.section ?? t("simpleUi.unassigned"), bots: group.bots }));
-  const hero: OfficeTeam | null = grouped.hero ? { id: "hero", label: grouped.hero.name, bots: [grouped.hero] } : null;
+  const { bots, teams, hero } = officeTeams(state);
   const signature = officeSignature(teams, hero);
   // the signature is the layout's identity
   const layout = useMemo(() => officeLayout(teams, hero), [signature]);
   const teamOf = new Map<string, string>();
   for (const team of teams) for (const bot of team.bots) teamOf.set(bot.id, team.label);
 
-  // a bean wears its team's wall colour (lib/office-team-looks)
-  const agentColors = agentColorsFor(layout, teamLooks.looks);
-  const looks = new Map<string, OfficeBotLook>();
-  for (const bot of bots) {
-    looks.set(bot.id, {
-      name: bot.name,
-      color: agentColors.get(bot.id) ?? MAUS_COLORS[bot.color] ?? MAUS_COLORS.blue,
-      working: isWorking(bot, state.pendingQueued),
-      waiting: botStatus(bot) === "waiting",
-      unread: hasUnread(bot),
-      chief: Boolean(bot.chiefOfStaff),
-    });
-  }
+  // a bean wears its team's wall colour (bean-looks, the same for every avatar)
+  const looks = botLooks(bots, state.pendingQueued, layout, teamLooks.looks);
   const looksKey = [...looks].map(([id, look]) => `${id}:${look.color}:${look.working ? 1 : 0}${look.waiting ? 1 : 0}${look.unread ? 1 : 0}${look.chief ? 1 : 0}`).join("|");
   // the rail lists bots in the office's own order: the hero, then team by team
   const officeBots = [...(hero?.bots ?? []), ...teams.flatMap((team) => team.bots)] as Bot[];
@@ -446,7 +369,7 @@ export function OfficeView() {
           <div ref={hoverRef} style={{ visibility: "hidden" }} className="absolute left-0 top-0 pb-1.5" aria-hidden={!hoveredBot}>
             {hoveredBot && (
               <div className={cn("flex items-center gap-2 rounded-full py-1 pl-1 pr-3", glass)} role="tooltip">
-                <BeanAvatar botId={hoveredBot.id} looks={looks} size={22} still />
+                <BeanBotAvatar bot={hoveredBot} size={22} still />
                 <span className="text-[13.5px] font-semibold text-ink">{botLabel(hoveredBot).name}</span>
                 {teamOf.get(hoveredBot.id) && <span className="text-[12.5px] text-ink-secondary">{teamOf.get(hoveredBot.id)}</span>}
                 {hoveredAway && <span className="text-[12.5px] text-ink-secondary">{t("office.away")}</span>}
@@ -521,7 +444,7 @@ export function OfficeView() {
               title={t("chat.openProfile")}
               className="flex min-w-0 items-center gap-2 rounded-full py-1 pl-1 pr-3 hover:bg-raised/60"
             >
-              <BeanAvatar botId={openBot.id} looks={looks} size={28} />
+              <BeanBotAvatar bot={openBot} size={28} />
               <span className="min-w-0 text-left">
                 <span className="block truncate text-[15px] font-semibold leading-5 text-ink">{botLabel(openBot).name}</span>
                 <PanelSubtitle bot={openBot} team={teamOf.get(openBot.id)} />
@@ -567,14 +490,14 @@ export function OfficeView() {
         )}
         {openBot && threadsOpen && (
           <div className={cn("absolute inset-x-3 top-14 z-20 max-h-[60%] overflow-y-auto rounded-2xl border border-hairline/40 bg-panel p-2 md:hidden", "shadow-xl shadow-black/30")}>
-            <OfficeThreads bot={openBot} onNew={() => { setThreadsOpen(false); dispatch({ type: "newTask", botId: openBot.id }); }} />
+            <BotThreads bot={openBot} onNew={() => { setThreadsOpen(false); dispatch({ type: "newTask", botId: openBot.id }); }} />
           </div>
         )}
         <div className="flex min-h-0 flex-1">
           {/* the bot's threads, one tap to switch — the sidebar's own list */}
           {openBot && threadColumn && (
             <nav aria-label={t("office.threadsAria", { name: botLabelLine(openBot) })} className="hidden w-60 shrink-0 overflow-y-auto border-r border-hairline/40 px-2 pb-3 pt-1 md:block">
-              <OfficeThreads bot={openBot} onNew={() => dispatch({ type: "newTask", botId: openBot.id })} />
+              <BotThreads bot={openBot} onNew={() => dispatch({ type: "newTask", botId: openBot.id })} />
             </nav>
           )}
           {/* the open chat shows; the others stay rendered, hidden, for an instant switch */}
@@ -583,10 +506,4 @@ export function OfficeView() {
       </aside>
     </main>
   );
-}
-
-/** The bot's bean portrait, from the same look the scene uses. `still`: no motion (hover chip). */
-function BeanAvatar({ botId, looks, size, still }: { botId: string; looks: Map<string, OfficeBotLook>; size: number; still?: boolean }) {
-  const look = looks.get(botId);
-  return <BeanPortrait color={look?.color ?? "#8e8e93"} headgear={headgearFor(botId, look?.chief)} mood={still ? "idle" : beanMood(look)} size={size} />;
 }

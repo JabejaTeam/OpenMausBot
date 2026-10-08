@@ -8,6 +8,7 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { setSimpleUi } from "@/lib/simple-ui";
 import type { AppState, Bot, InstanceInfo, Message } from "@/state/store";
 
 const renders = vi.hoisted(() => ({ botText: 0, userText: 0, toolChip: 0, speak: 0 }));
@@ -103,6 +104,7 @@ async function rowRendersAfter(change: (current: AppState) => AppState) {
 }
 
 beforeAll(async () => {
+  setSimpleUi(false); // fork: Simple is the default now; these rows are the full chat's
   // late on the day of the thread, so its separator reads "Today"
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2026, 9, 3, 23, 0));

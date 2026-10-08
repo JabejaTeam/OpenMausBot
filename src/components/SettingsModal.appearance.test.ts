@@ -87,24 +87,16 @@ afterEach(() => {
 const render = () => renderToStaticMarkup(createElement(SettingsModal));
 
 describe("Settings → Appearance", () => {
-  it.each([true, false])("flips Advanced mode from the top of General when the switch is %s", (enabled) => {
+  // fork: the Advanced mode switch is gone (Simple UI is the app; lib/advanced-access)
+  it.each([true, false])("shows no Advanced mode switch in General when it is %s", (enabled) => {
     fixture.section = "general";
     fixture.advancedMode = enabled;
-    const html = render();
-    expect(html.indexOf('aria-label="Advanced mode"')).toBeLessThan(html.indexOf("Language"));
-    expect(html).toContain('aria-label="Advanced mode"');
-    expect(html).toContain("Nothing is deleted either way");
-    const toggle = fixture.switches.find((props) => props["aria-label"] === "Advanced mode")!;
-    expect(toggle.checked).toBe(enabled);
-    toggle.onClick!({} as never);
-    expect(fixture.setAdvancedMode).toHaveBeenCalledWith(!enabled);
-    expect(fixture.api).not.toHaveBeenCalled();
-    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(render()).not.toContain('aria-label="Advanced mode"');
   });
 
-  it("keeps the Advanced mode switch reachable from a paired remote client", () => {
+  it("shows no Advanced mode switch to a paired remote client either", () => {
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
-    expect(render()).toContain('aria-label="Advanced mode"');
+    expect(render()).not.toContain('aria-label="Advanced mode"');
   });
 
   it("does not repeat the Advanced mode switch in Appearance on this computer", () => {

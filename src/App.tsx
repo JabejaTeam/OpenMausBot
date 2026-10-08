@@ -10,7 +10,7 @@ import { LiveCallHost } from "@/components/LiveCallHost";
 import { ThreadRefsProvider } from "@/components/ThreadRefs";
 import { initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
-import { SimpleSidebar } from "@/components/SimpleSidebar";
+import { SimpleSidebar, SimpleThreadColumn } from "@/components/SimpleSidebar";
 import { useSimpleUi } from "@/lib/simple-ui";
 import { OfficeView } from "@/components/office/OfficeView";
 import { useOfficeView } from "@/lib/office-view";
@@ -305,13 +305,13 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           className="absolute inset-0 z-30 bg-black/50 md:hidden"
         />
       )}
-      {!calendarFocus && !office && (simpleUi ? <SimpleSidebar
+      {!calendarFocus && !office && (simpleUi ? <><SimpleSidebar
         open={drawerOpen}
         onClose={() => {
           setDrawerOpen(false);
           menuButtonRef.current?.focus();
         }}
-      /> : <Sidebar
+      /><SimpleThreadColumn /></> : <Sidebar
         collapseToIcons={collapseSidebar}
         open={drawerOpen}
         onClose={() => {

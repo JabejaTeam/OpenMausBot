@@ -56,8 +56,9 @@ export function SidebarPopoverMenu({
 }: {
   /** "above" stretches over the trigger's width and opens upward (the
    * sidebar's profile menu); "below" hangs a fixed-width sheet under the
-   * trigger's right edge (a header icon). */
-  placement?: "above" | "below";
+   * trigger's right edge (a header icon); "below-start" hangs it under the
+   * left edge instead (fork: a title that opens a list). */
+  placement?: "above" | "below" | "below-start";
   items: SidebarMenuItem[];
   ariaLabel: string;
   openOnHover?: boolean;
@@ -137,7 +138,9 @@ export function SidebarPopoverMenu({
           {...motion.exitProps}
           className={cn(
             "absolute z-40 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/50",
-            placement === "below" ? "top-full right-0 mt-1 w-72 max-w-[calc(100vw-2rem)]" : "bottom-full left-0 right-0 mb-1",
+            placement === "below" ? "top-full right-0 mt-1 w-72 max-w-[calc(100vw-2rem)]"
+              : placement === "below-start" ? "top-full left-0 mt-1 w-72 max-w-[calc(100vw-2rem)]"
+              : "bottom-full left-0 right-0 mb-1",
             motion.className,
           )}
         >

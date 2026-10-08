@@ -75,16 +75,17 @@ describe("BotAvatar's two avatar outcomes", () => {
     expect(markup).not.toContain("radialGradient");
   });
 
-  it("renders the gradient mascot when the crop is mascot, image or not", () => {
+  // fork: the "gradient mascot" outcome draws the bot's office bean (a canvas)
+  it("renders the bean when the crop is mascot, image or not", () => {
     const markup = renderBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: "mascot" });
     expect(markup).not.toContain("<img");
-    expect(markup).toContain("<svg");
+    expect(markup).toContain("<canvas");
   });
 
-  it("falls back to the gradient mascot when a flat crop has no valid image", () => {
+  it("falls back to the bean when a flat crop has no valid image", () => {
     const markup = renderBot({ avatarUrl: undefined, avatarCrop: "circle" });
     expect(markup).not.toContain("<img");
-    expect(markup).toContain("<svg");
+    expect(markup).toContain("<canvas");
   });
 });
 

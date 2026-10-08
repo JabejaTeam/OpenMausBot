@@ -8,7 +8,7 @@ import { t } from "@/lib/i18n";
 import { botLabel } from "@/lib/bot-label";
 import { stateForBot } from "@/lib/mascot";
 import type { OfficeStatus } from "@/lib/office-status";
-import { SimpleBotAvatar as BotAvatar } from "../SimpleBotAvatar";
+import { BotAvatar } from "../Avatar";
 
 type Shown = Exclude<OfficeStatus, "idle">;
 const ORDER: Shown[] = ["waiting", "working", "unread"];

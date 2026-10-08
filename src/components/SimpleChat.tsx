@@ -6,7 +6,7 @@ import { useStore, type Bot, type MausColor } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { botLabel } from "@/lib/bot-label";
 import { stateForBot } from "@/lib/mascot";
-import { SimpleBotAvatar as BotAvatar } from "./SimpleBotAvatar";
+import { BotAvatar } from "./Avatar";
 
 /** The team of the chat being read: a teammate from that team is named by
  * role alone ("Code"), anyone else with their team ("Manager · Ripal"). */

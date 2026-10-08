@@ -672,6 +672,7 @@
   "office.status.idle": "Idle",
   "office.away": "Away from desk",
   "simpleUi.dragTeam": "Drag to reorder teams",
+  "simpleUi.switchBot": "Switch to a teammate",
   "simpleUi.connectApps": "Connect apps",
   "simpleUi.search": "Search",
   "simpleUi.clearSearch": "Clear search",

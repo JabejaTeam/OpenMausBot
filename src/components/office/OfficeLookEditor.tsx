@@ -4,25 +4,10 @@
 // (server/team-looks.ts); only an admin may change it.
 import { useEffect, useRef, useState } from "react";
 import { Check, ImagePlus, Trash2 } from "lucide-react";
-import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { TEAM_TEXT_SWATCHES, TEAM_WALL_SWATCHES, type TeamLook } from "@/lib/office-team-looks";
-
-type LookPatch = { color?: string | null; logo?: string | null; textColor?: string | null };
-
-/** Every team's look, read once and kept current after each save. */
-export function useTeamLooks() {
-  const [looks, setLooks] = useState<Record<string, TeamLook>>({});
-  useEffect(() => {
-    api<{ teams: Record<string, TeamLook> }>("/api/team-looks").then((r) => setLooks(r?.teams ?? {})).catch(() => {});
-  }, []);
-  const save = async (teamId: string, patch: LookPatch) => {
-    const r = await api<{ teams: Record<string, TeamLook> }>(`/api/team-looks/${encodeURIComponent(teamId)}`, { method: "PUT", body: JSON.stringify(patch) });
-    if (r?.teams) setLooks(r.teams);
-  };
-  return { looks, save };
-}
+import type { TeamLookPatch as LookPatch } from "@/lib/use-team-looks";
 
 /** Any image the person picks, as a PNG of at most 512 px: never markup. */
 async function logoDataUrl(file: File): Promise<string> {

@@ -4,7 +4,7 @@ import { blinking, MOOD, WAITING_PITCH, workingMotion, type BeanMood } from "@/l
 // Office view (fork): the bot's avatar as its bean — a head-and-shoulders
 // portrait with its colour and headgear (bean/portrait.js draws it). It moves
 // only when the bot does: working nods, waiting tilts its head, idle is still.
-export function BeanPortrait({ color, headgear, mood, size }: { color: string; headgear: string; mood: BeanMood; size: number }) {
+export function BeanPortrait({ color, headgear, mood, size, label }: { color: string; headgear: string; mood: BeanMood; size: number; label?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     let frame = 0;
@@ -29,5 +29,5 @@ export function BeanPortrait({ color, headgear, mood, size }: { color: string; h
     };
   }, [color, headgear, mood]);
   const pixels = Math.round(size * Math.min(globalThis.devicePixelRatio ?? 1, 2));
-  return <canvas ref={ref} width={pixels} height={pixels} style={{ width: size, height: size }} className="shrink-0 rounded-full bg-raised" aria-hidden />;
+  return <canvas ref={ref} width={pixels} height={pixels} style={{ width: size, height: size }} className="shrink-0" {...(label ? { role: "img", "aria-label": label } : { "aria-hidden": true })} />;
 }

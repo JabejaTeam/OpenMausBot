@@ -9,7 +9,7 @@ import { botLabel } from "@/lib/bot-label";
 import { stateForBot } from "@/lib/mascot";
 import { botStatus } from "@/lib/office-status";
 import { searchBots } from "@/lib/office-search";
-import { SimpleBotAvatar as BotAvatar } from "../SimpleBotAvatar";
+import { BotAvatar } from "../Avatar";
 import { StatusSymbol } from "./OfficeStatusRail";
 
 export function OfficeSearch({

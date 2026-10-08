@@ -1,10 +1,11 @@
 // Simple UI (fork): the one-list sidebar — chief on top, bots and rooms
 // filed by lib/simple-ui-groups, profile and connected apps at the bottom.
 // Threads: hovering a bot shows the thread list toggle and a new-thread button;
-// active and unread threads always show under the bot. Teams reorder by drag,
+// active and unread threads always show under the bot. Each team shows as one
+// row, its lead (the PM); "›" opens the whole team. Teams reorder by drag,
 // sharing the saved order with the full sidebar.
 import { useRef, useState } from "react";
-import { Box, ChevronDown, Plus, Search, X } from "lucide-react";
+import { Box, ChevronDown, ChevronLeft, PanelLeft, Plus, Search, X } from "lucide-react";
 import { useStore, visibleMessages, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -20,13 +21,14 @@ import {
   userSectionId,
   type SectionDropPlace,
 } from "@/lib/sidebar-layout";
-import { loadCollapsedSections, loadSectionOrder, saveCollapsedSections, saveSectionOrder, toggleCollapsedSection } from "@/lib/sidebar-preferences";
-import { simpleSidebarLayout, type SimpleGroup } from "@/lib/simple-ui-groups";
+import { loadSectionOrder, saveSectionOrder } from "@/lib/sidebar-preferences";
+import { simpleSidebarLayout, teamLead, teamToOpen, type SimpleGroup } from "@/lib/simple-ui-groups";
 import { setOfficeView } from "@/lib/office-view";
-import { InitialsAvatar } from "./Avatar";
-import { SimpleBotAvatar as BotAvatar } from "./SimpleBotAvatar";
+import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
-import { BotThreadList, botRowProps, groupPreview, preview } from "./Sidebar";
+import { groupPreview, preview } from "./Sidebar";
+import { BotThreads, setThreadColumn, useThreadColumn } from "./BotThreads";
+import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
 import { SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { WorkingDots } from "./WorkingIndicator";
 import { profileInitials } from "./SidebarProfileMenu";
@@ -43,7 +45,6 @@ function Row({
   sub,
   subNode,
   onClick,
-  padRight = false,
 }: {
   selected: boolean;
   unread?: boolean;
@@ -52,8 +53,6 @@ function Row({
   sub: string;
   subNode?: React.ReactNode;
   onClick: () => void;
-  /** room for hover buttons on the right */
-  padRight?: boolean;
 }) {
   return (
     <button
@@ -62,93 +61,66 @@ function Row({
       aria-current={selected ? "page" : undefined}
       className={cn(
         "flex w-full items-center gap-3 rounded-2xl px-2.5 py-2 text-left transition-colors",
-        padRight && "group-hover:pr-[4.5rem] group-focus-within:pr-[4.5rem] max-md:pr-[4.5rem] touch:pr-[4.5rem]",
         selected ? "bg-raised" : "hover:bg-raised/50",
       )}
     >
       <span className="flex size-10 shrink-0 items-center justify-center">{avatar}</span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[15px] font-semibold leading-5 text-ink">{name}</span>
-        {subNode ?? <span className="block truncate text-[13.5px] leading-5 text-ink-secondary">{sub || " "}</span>}
+        {subNode ?? <span className="block truncate text-[13.5px] leading-5 text-ink-secondary">{sub || " "}</span>}
       </span>
-      {unread && <span className={cn("size-2 shrink-0 rounded-full bg-accent", padRight && "group-hover:hidden group-focus-within:hidden")} aria-label={t("task.unread")} />}
+      {unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
     </button>
   );
 }
 
-/** A bot row: Grok look, plus the full sidebar's threads — a hover toggle
- * for the whole list and a new-thread button; active/unread threads below. */
-function BotRow({ bot, query }: { bot: Bot; query: string }) {
+/** A bot row (Grok look) with its active/unread threads below. Every thread
+ * and new ones live in the thread column (SimpleThreadColumn). */
+function BotRow({ bot, title, active = false, teamUnread = false }: {
+  bot: Bot;
+  /** the name shown instead of the bot's (a team's row shows the team) */
+  title?: string;
+  /** shown selected although the bot itself is not (a teammate is open) */
+  active?: boolean;
+  /** a teammate behind this row has something unread */
+  teamUnread?: boolean;
+}) {
   const { state, dispatch } = useStore();
-  const [open, setOpen] = useState(false);
-  const selected = state.activeView === "chat" && state.selectedId === bot.id;
+  const selected = state.activeView === "chat" && (state.selectedId === bot.id || active);
   const activity = sidebarBotActivityTasks(bot, state.pendingQueued);
   const working = Boolean(bot.busy) || activity.some((task) => task.busy || task.activity === "working");
   const unread = Boolean(bot.unread) || activity.some((task) => task.unread);
-  const hasThreadList = (bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0;
-  const hover = "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-70 touch:opacity-100";
   return (
     <>
-      <div className="group relative">
-        <Row
-          selected={selected}
-          unread={unread}
-          avatar={
-            <span className="relative flex">
-              <BotAvatar bot={bot} state={working ? stateForBot(bot) : "happy"} size={40} animated={working} />
-              {working && <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-panel bg-success" />}
-            </span>
-          }
-          name={bot.name}
-          sub={working ? "" : preview(bot, visibleMessages(bot), state.instances)}
-          subNode={working ? <span className="flex h-5 items-center" role="status"><WorkingDots size={3.5} /></span> : undefined}
-          onClick={() => dispatch({ type: "select", id: bot.id })}
-          padRight
-        />
-        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
-          <button
-            type="button"
-            aria-label={t("task.newShort")}
-            title={t("task.newShort")}
-            onClick={() => { setOpen(true); dispatch({ type: "newTask", botId: bot.id }); }}
-            className={cn("flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink", hover)}
-          >
-            <Plus size={15} />
-          </button>
-          {hasThreadList && (
-            <button
-              type="button"
-              aria-label={t(open ? "task.collapseNamed" : "task.expandNamed", { name: bot.name })}
-              aria-expanded={open}
-              onClick={() => setOpen((value) => !value)}
-              className={cn("flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink", !open && hover)}
-            >
-              <ChevronDown size={15} className={cn("transition-transform", open && "rotate-180")} />
-            </button>
-          )}
-        </div>
-      </div>
-      {open && hasThreadList
-        ? <div className="pl-10"><BotThreadList {...botRowProps(state, dispatch, bot, { density: "comfortable", quiet: false, query, onMenu: () => undefined })} selected={selected} /></div>
-        : <div className="pl-10"><SidebarBotActivity bot={bot} density="comfortable" pendingQueued={state.pendingQueued} dispatch={dispatch} /></div>}
+      <Row
+        selected={selected}
+        unread={unread || teamUnread}
+        avatar={
+          <span className="relative flex">
+            <BotAvatar bot={bot} state={working ? stateForBot(bot) : "happy"} size={40} animated={working} />
+            {working && <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-panel bg-success" />}
+          </span>
+        }
+        name={title ?? bot.name}
+        sub={working ? "" : preview(bot, visibleMessages(bot), state.instances)}
+        subNode={working ? <span className="flex h-5 items-center" role="status"><WorkingDots size={3.5} /></span> : undefined}
+        onClick={() => dispatch({ type: "select", id: bot.id })}
+      />
+      <div className="pl-10"><SidebarBotActivity bot={bot} density="comfortable" pendingQueued={state.pendingQueued} dispatch={dispatch} /></div>
     </>
   );
 }
 
-/** The unsectioned chief, big on top; same thread controls as a bot row. */
-function HeroBot({ bot, query }: { bot: Bot; query: string }) {
+/** The unsectioned chief, big on top, with its active/unread threads below. */
+function HeroBot({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
-  const [open, setOpen] = useState(false);
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
   const activity = sidebarBotActivityTasks(bot, state.pendingQueued);
   const working = Boolean(bot.busy) || activity.some((task) => task.busy || task.activity === "working");
   const unread = Boolean(bot.unread) || activity.some((task) => task.unread);
-  const hasThreadList = (bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0;
-  const hover = "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-70 touch:opacity-100";
-  const small = "flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink";
   return (
     <div className="mb-2">
-      <div className="group relative flex justify-center">
+      <div className="flex justify-center">
         <button
           type="button"
           onClick={() => dispatch({ type: "select", id: bot.id })}
@@ -162,22 +134,8 @@ function HeroBot({ bot, query }: { bot: Bot; query: string }) {
           </span>
           <span className={cn("text-[13px] font-medium", selected ? "text-ink" : "text-ink-secondary")}>{bot.name}</span>
         </button>
-        <div className="absolute right-2 top-1/2 flex -translate-y-1/2 flex-col items-center gap-0.5">
-          <button type="button" aria-label={t("task.newShort")} title={t("task.newShort")}
-            onClick={() => { setOpen(true); dispatch({ type: "newTask", botId: bot.id }); }} className={cn(small, hover)}>
-            <Plus size={15} />
-          </button>
-          {hasThreadList && (
-            <button type="button" aria-label={t(open ? "task.collapseNamed" : "task.expandNamed", { name: bot.name })} aria-expanded={open}
-              onClick={() => setOpen((value) => !value)} className={cn(small, !open && hover)}>
-              <ChevronDown size={15} className={cn("transition-transform", open && "rotate-180")} />
-            </button>
-          )}
-        </div>
       </div>
-      {open && hasThreadList
-        ? <BotThreadList {...botRowProps(state, dispatch, bot, { density: "comfortable", quiet: false, query, onMenu: () => undefined })} selected={selected} />
-        : <SidebarBotActivity bot={bot} density="comfortable" pendingQueued={state.pendingQueued} dispatch={dispatch} />}
+      <SidebarBotActivity bot={bot} density="comfortable" pendingQueued={state.pendingQueued} dispatch={dispatch} />
     </div>
   );
 }
@@ -231,13 +189,10 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
   const [savedOrder, setSavedOrder] = useState<string[]>(() => loadSectionOrder());
   const orderedIds = orderedSidebarSections(layout.groups.map(idOf), savedOrder);
   const groups = [...layout.groups].sort((a, b) => orderedIds.indexOf(idOf(a)) - orderedIds.indexOf(idOf(b)));
-  // Collapsed teams: the same saved list as the full sidebar's sections
-  const [collapsedIds, setCollapsedIds] = useState<string[]>(() => loadCollapsedSections());
-  const toggleTeam = (id: string) => {
-    const next = toggleCollapsedSection(collapsedIds, id);
-    setCollapsedIds(next);
-    saveCollapsedSections(next);
-  };
+  // A teammate (picked from the thread column's switcher) lights up its team's row
+  const selectedTeam = teamToOpen(layout.groups, state.selectedId);
+  const teammateUnread = (group: SimpleGroup<Bot, Group>, lead: Bot) =>
+    group.bots.some((bot) => bot !== lead && (bot.unread || bot.tasks?.some((task) => task.unread))) || group.rooms.some((room) => room.unread);
   const dragFrom = useRef<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; place: SectionDropPlace } | null>(null);
@@ -260,6 +215,23 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
   };
   const chatView = state.activeView === "chat";
   const select = (id: string) => dispatch({ type: "select", id });
+  const threadColumn = useThreadColumn();
+  const teamRows = (group: SimpleGroup<Bot, Group>) => (
+    <>
+      {group.bots.map((bot) => <BotRow key={bot.id} bot={bot} />)}
+      {group.rooms.map((room) => (
+        <Row
+          key={room.id}
+          selected={chatView && state.selectedId === room.id}
+          unread={room.unread}
+          avatar={<RoomAvatar members={state.bots.filter((bot) => room.memberIds.includes(bot.id))} />}
+          name={room.name}
+          sub={groupPreview(room, state.bots, state.instances)}
+          onClick={() => select(room.id)}
+        />
+      ))}
+    </>
+  );
 
   const macInset = capabilities.windowChrome === "mac-inset";
   const draggable = macInset || capabilities.windowChrome === "win-caption";
@@ -284,7 +256,21 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
       )}
     >
       <div className="flex items-center justify-between px-4 pb-1 pt-3" style={dragStyle}>
-        <div className={macInset ? "w-14" : undefined} />
+        <div className="flex items-center">
+          <div className={macInset ? "w-16" : undefined} />
+          {/* the thread column beside this list (SimpleThreadColumn) */}
+          <button
+            type="button"
+            style={noDragStyle}
+            onClick={() => setThreadColumn(!threadColumn)}
+            aria-pressed={threadColumn}
+            aria-label={t(threadColumn ? "office.hideThreads" : "office.showThreads")}
+            title={t(threadColumn ? "office.hideThreads" : "office.showThreads")}
+            className={cn(circle, "max-md:hidden", !threadColumn && "text-ink-secondary")}
+          >
+            <PanelLeft size={18} />
+          </button>
+        </div>
         <div className="flex items-center gap-2" style={noDragStyle}>
           <button
             type="button"
@@ -345,17 +331,16 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {hero && <HeroBot bot={hero} query={q} />}
+        {hero && <HeroBot bot={hero} />}
         {groups.map((group) => {
           const id = idOf(group);
+          const lead = q ? null : teamLead(group);
           const reorderable = !q && groups.length > 1;
-          // a search always shows its matches
-          const collapsed = !q && collapsedIds.includes(id);
           return (
           <section
             key={group.id}
             data-simple-section={id}
-            className={cn("mt-3", dragging === id && "opacity-50")}
+            className={cn(q || !lead ? "mt-3" : "mt-0.5", dragging === id && "opacity-50")}
             onDragOver={(event) => {
               if (!dragFrom.current) return;
               event.preventDefault();
@@ -378,44 +363,17 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
                 setDragging(id);
               }}
               onDragEnd={endDrag}
-              className="mb-1"
             >
-              <button
-                type="button"
-                onClick={() => toggleTeam(id)}
-                aria-expanded={!collapsed}
-                title={reorderable ? t("simpleUi.dragTeam") : undefined}
-                className={cn(
-                  "group/team flex w-full items-center justify-between rounded-xl px-2.5 py-1.5 text-left text-[13.5px] text-ink-secondary hover:bg-raised/70 hover:text-ink",
-                  reorderable && "cursor-grab active:cursor-grabbing",
-                )}
-              >
-                <span className="truncate">{groupLabel(group)}</span>
-                {collapsed && (group.bots.some((bot) => bot.unread || bot.tasks?.some((task) => task.unread)) || group.rooms.some((room) => room.unread)) && (
-                  <span className="ml-auto mr-2 size-2 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />
-                )}
-                <ChevronDown
-                  size={16}
-                  aria-hidden="true"
-                  className={cn(
-                    "shrink-0 transition-transform",
-                    collapsed ? "-rotate-90 opacity-100" : "opacity-0 group-hover/team:opacity-100 group-focus-within/team:opacity-100 max-md:opacity-70 touch:opacity-100",
-                  )}
-                />
-              </button>
+              {lead ? (
+                // the team's name: a message here goes to its lead (the PM)
+                <BotRow bot={lead} title={groupLabel(group)} active={selectedTeam === group.id} teamUnread={teammateUnread(group, lead)} />
+              ) : (
+                <>
+                  <div className="mb-1 truncate px-2.5 py-1.5 text-[13.5px] text-ink-secondary">{groupLabel(group)}</div>
+                  {teamRows(group)}
+                </>
+              )}
             </div>
-            {!collapsed && group.bots.map((bot) => <BotRow key={bot.id} bot={bot} query={q} />)}
-            {!collapsed && group.rooms.map((room) => (
-              <Row
-                key={room.id}
-                selected={chatView && state.selectedId === room.id}
-                unread={room.unread}
-                avatar={<RoomAvatar members={state.bots.filter((bot) => room.memberIds.includes(bot.id))} />}
-                name={room.name}
-                sub={groupPreview(room, state.bots, state.instances)}
-                onClick={() => select(room.id)}
-              />
-            ))}
             {dropTarget?.id === id && dropTarget.place === "after" && dragging !== id && <div className="mx-2 mt-1 h-0.5 rounded-full bg-accent" />}
           </section>
           );
@@ -442,5 +400,58 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
         </button>
       </div>
     </aside>
+  );
+}
+
+/** Simple UI (fork): the open bot's threads in a column beside the list —
+ * every thread, old ones too; folds away from the list's header button. */
+export function SimpleThreadColumn() {
+  const { state, dispatch } = useStore();
+  const shown = useThreadColumn();
+  const bot = state.activeView === "chat" ? state.bots.find((candidate) => candidate.id === state.selectedId) : undefined;
+  if (!shown || !bot) return null;
+  // the bot's team, in the list's order: switch between them from the title
+  const hiddenForMe = hiddenBotsForMe();
+  const { groups } = simpleSidebarLayout(state.bots.filter((candidate) => shownForMe(candidate, hiddenForMe, "")), [], state.sections ?? []);
+  const team = groups.find((group) => group.section && group.bots.some((candidate) => candidate.id === bot.id))?.bots ?? [bot];
+  const title = <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{bot.name}</span>;
+  return (
+    <nav aria-label={t("office.threadsAria", { name: bot.name })} className="flex h-full w-64 shrink-0 flex-col border-l border-hairline/40 bg-app max-md:hidden">
+      <div className="flex items-center gap-2 px-3 pb-1 pt-4">
+        {team.length > 1 ? (
+          <div className="min-w-0 flex-1">
+            <SidebarPopoverMenu
+              placement="below-start"
+              ariaLabel={t("simpleUi.switchBot")}
+              items={team.map((member) => ({
+                key: member.id,
+                label: member.name,
+                icon: <BotAvatar bot={member} size={24} animated={false} />,
+                active: member.id === bot.id,
+                onSelect: () => dispatch({ type: "select", id: member.id }),
+              }))}
+              renderTrigger={({ open }) => (
+                <span className="flex w-full min-w-0 items-center gap-1 rounded-lg px-1 py-1 text-left hover:bg-raised/60" title={t("simpleUi.switchBot")}>
+                  {title}
+                  <ChevronDown size={15} aria-hidden="true" className={cn("shrink-0 text-ink-secondary transition-transform", open && "rotate-180")} />
+                </span>
+              )}
+            />
+          </div>
+        ) : title}
+        <button
+          type="button"
+          onClick={() => setThreadColumn(false)}
+          aria-label={t("office.hideThreads")}
+          title={t("office.hideThreads")}
+          className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
+        >
+          <ChevronLeft size={17} />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        <BotThreads bot={bot} onNew={() => dispatch({ type: "newTask", botId: bot.id })} />
+      </div>
+    </nav>
   );
 }

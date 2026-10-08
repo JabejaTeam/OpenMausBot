@@ -2,12 +2,13 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import {
-  BROWSER_SIGN_IN_FAILED, previewBrowserSignIn, readSessionState, SERVICE_TRUST_REASON, takeBrowserSignInFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation,
+  BROWSER_SIGN_IN_FAILED, isOwnerOrAdmin, previewBrowserSignIn, readSessionState, SERVICE_TRUST_REASON, takeBrowserSignInFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation,
 } from "./lib/session";
 import { bootstrapBrand } from "./lib/brand";
 import { applySkin, readSkin } from "./lib/skins";
 import { applyFont, readFont } from "./lib/fonts";
 import { settleAdvancedModeDefault } from "./lib/interface-mode";
+import { setAdvancedAllowed } from "./lib/advanced-access";
 import { BrowserSignInPage } from "./pair/BrowserSignInPage";
 import { PairPage } from "./pair/PairPage";
 import "katex/dist/katex.min.css";
@@ -38,6 +39,7 @@ async function chooseRoot(): Promise<React.ReactNode> {
     return <PairPage initialCode={takePairingCodeFromLocation()} initialEmail={takeInvitedEmailFromLocation()} />;
   }
   const session = await readSessionState();
+  setAdvancedAllowed(isOwnerOrAdmin(session));
   if (session.kind === "unauthenticated") return <PairPage initialCode={null} reason={session.error} />;
   // A service-trust server answers this machine's requests without a session
   // but refuses to let it manage anything: sign in first, as a remote browser would.

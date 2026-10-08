@@ -15,6 +15,7 @@ import {
 } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
+import { BeanBotAvatar } from "./office/BeanBotAvatar";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody, type MascotBodyId } from "../../shared/mascot-bodies";
 
@@ -201,6 +202,7 @@ export const MausAvatar = memo(forwardRef(MausAvatarComponent));
 
 export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
   bot: {
+    id?: string;
     name?: string;
     color: MausColor;
     avatarUrl?: string | null;
@@ -255,16 +257,9 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
     imageFailed,
   });
 
+  // fork: no mascot — every bot shows as its office bean (office/BeanBotAvatar)
   if (outcome !== "flatImage") {
-    return (
-      <MausAvatar
-        bodyId={bot.mascotBody ?? undefined}
-        {...mascotProps}
-        color={bot.color}
-        size={size}
-        label={label ?? bot.name}
-      />
-    );
+    return <BeanBotAvatar bot={bot} size={size} still={mascotProps.animated === false || mascotProps.motion === "none"} label={label ?? bot.name} />;
   }
 
   const radius = avatarCropRadius(profile.avatarCrop);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { simpleSidebarLayout } from "./simple-ui-groups";
+import { simpleSidebarLayout, teamLead, teamToOpen } from "./simple-ui-groups";
 
 describe("simpleSidebarLayout", () => {
   const bots = [
@@ -35,12 +35,23 @@ describe("simpleSidebarLayout", () => {
   });
 });
 
-describe("simpleMascotBody", () => {
-  it("keeps a chosen body and swaps the cursor for a stable soft shape", async () => {
-    const { simpleMascotBody } = await import("./simple-ui-groups");
-    expect(simpleMascotBody({ id: "a", mascotBody: "star" })).toBe("star");
-    const picked = simpleMascotBody({ id: "a", mascotBody: "cursor" });
-    expect(picked).not.toBe("cursor");
-    expect(simpleMascotBody({ id: "a" })).toBe(picked);
+describe("team leads", () => {
+  const { groups } = simpleSidebarLayout(
+    [{ id: "pm", section: "A", chiefOfStaff: true }, { id: "code", section: "A" }, { id: "solo", section: "B" }, { id: "loose" }],
+    [{ id: "room", section: "A" }, { id: "free" }],
+  );
+
+  it("leads a team with its chief, else its first bot; Unassigned has none", () => {
+    expect(groups.map((g) => teamLead(g)?.id ?? null)).toEqual(["pm", "solo", null]);
+  });
+
+  it("opens the team of a hidden member, never for a lead or unassigned row", () => {
+    expect(teamToOpen(groups, "code")).toBe("section:A");
+    expect(teamToOpen(groups, "room")).toBe("section:A");
+    expect(teamToOpen(groups, "pm")).toBeNull();
+    expect(teamToOpen(groups, "solo")).toBeNull();
+    expect(teamToOpen(groups, "loose")).toBeNull();
+    expect(teamToOpen(groups, "free")).toBeNull();
+    expect(teamToOpen(groups, "nope")).toBeNull();
   });
 });

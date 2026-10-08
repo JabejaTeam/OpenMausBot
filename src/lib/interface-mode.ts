@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { advancedAllowed } from "./advanced-access";
 
 // Simple vs Advanced. Simple is the app a non-technical person meets first;
 // Advanced shows every technical control. This only hides controls: no
@@ -25,6 +26,7 @@ function storage(): Storage | undefined {
 }
 
 export function readAdvancedMode(): boolean {
+  if (!advancedAllowed()) return false; // fork: Advanced is for admins only
   if (sessionChoice !== undefined) return sessionChoice;
   try {
     const store = storage();
