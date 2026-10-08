@@ -179,7 +179,10 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
   const idOf = (group: SimpleGroup<Bot, Group>) => (group.section ? userSectionId(group.section) : BOTS_SECTION_ID);
   const [savedOrder, setSavedOrder] = useState<string[]>(() => loadSectionOrder());
   const orderedIds = orderedSidebarSections(layout.groups.map(idOf), savedOrder);
-  const groups = [...layout.groups].sort((a, b) => orderedIds.indexOf(idOf(a)) - orderedIds.indexOf(idOf(b)));
+  // "Unassigned" is no team: it always closes the list, whatever the saved
+  // order (the full sidebar's order can put its Bots section mid-list)
+  const groups = [...layout.groups].sort((a, b) =>
+    Number(!a.section) - Number(!b.section) || orderedIds.indexOf(idOf(a)) - orderedIds.indexOf(idOf(b)));
   // A teammate (picked from the thread column's switcher) lights up its team's row
   const selectedTeam = teamToOpen(layout.groups, state.selectedId);
   const teammateUnread = (group: SimpleGroup<Bot, Group>, lead: Bot) =>
@@ -267,14 +270,14 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
         {groups.map((group) => {
           const id = idOf(group);
           const lead = teamLead(group);
-          const reorderable = groups.length > 1;
+          const reorderable = groups.length > 1 && Boolean(group.section);
           return (
           <section
             key={group.id}
             data-simple-section={id}
             className={cn(lead ? "mt-0.5" : "mt-3", dragging === id && "opacity-50")}
             onDragOver={(event) => {
-              if (!dragFrom.current) return;
+              if (!dragFrom.current || !group.section) return;
               event.preventDefault();
               event.dataTransfer.dropEffect = "move";
               const rect = event.currentTarget.getBoundingClientRect();
