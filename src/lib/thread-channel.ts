@@ -64,3 +64,12 @@ export function noteThreadChosen(threadId: string): void {
 export function threadChosen(threadId: string): boolean {
   return chosen.has(threadId);
 }
+
+/** Whether a bot has something unread for the viewer: only their own
+ * conversations count, never a teammate's. Without per-person threads
+ * (no `access`), every unread thread is everyone's. */
+export function unreadForMe(bot: { unread?: boolean; tasks?: Pick<Task, "unread" | "access">[] }): boolean {
+  const tasks = bot.tasks ?? [];
+  if (!tasks.some((task) => task.access)) return Boolean(bot.unread) || tasks.some((task) => task.unread);
+  return tasks.some((task) => task.unread && task.access === "own");
+}

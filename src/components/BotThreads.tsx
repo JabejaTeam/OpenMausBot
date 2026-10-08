@@ -51,10 +51,7 @@ export function BotThreads({ bot, onNew }: { bot: Bot; onNew: () => void }) {
   const channel = useThreadChannel();
   return (
     <>
-      <div className="sticky top-0 z-10 bg-[var(--threads-bg,var(--color-app))] pb-1.5 pt-1">
-      {/* whose conversations: mine, the team's, one teammate's (lib/thread-channel) */}
-      <ThreadChannelPicker />
-      <div className="flex items-center gap-1">
+      <div className="sticky top-0 z-10 flex items-center gap-1 bg-[var(--threads-bg,var(--color-app))] pb-1.5 pt-1">
         <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-raised/60 px-2 text-ink-secondary">
           <Search size={14} className="shrink-0" />
           <input
@@ -75,7 +72,8 @@ export function BotThreads({ bot, onNew }: { bot: Bot; onNew: () => void }) {
         >
           <SquarePen size={16} />
         </button>
-      </div>
+        {/* whose conversations: mine, the team's, one teammate's (lib/thread-channel) */}
+        <ThreadChannelPicker variant="icon" />
       </div>
       <BotThreadList {...botRowProps(state, dispatch, bot, { density: "comfortable", quiet: false, query, onMenu: () => undefined })} selected everything channel={channel} />
     </>

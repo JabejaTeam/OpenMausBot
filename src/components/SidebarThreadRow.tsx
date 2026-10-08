@@ -9,6 +9,7 @@ import { nextRename } from "@/lib/rename";
 import { threadRefUrl } from "@/lib/thread-refs";
 import { copyText } from "@/lib/copy-text";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { profileInitials } from "./SidebarProfileMenu";
 
 type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates"> & {
   queued?: boolean;
@@ -243,7 +244,8 @@ type ThreadRowProps = {
    * the memoized row still compares by value. */
   shownTitle?: string;
   shownFromOpener?: boolean;
-  /** Fork: whose conversation this is, when it is a teammate's (lib/thread-channel). */
+  /** Fork: whose conversation this is (lib/thread-channel), shown as their
+   * initials in a circle in the row's left gutter; the name is its tooltip. */
   personLabel?: string;
   /** The list's clock tick while the stamp reads relative (stampClock).
    * Omit to keep the absolute date. */
@@ -293,7 +295,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const actionRef = useRef<HTMLButtonElement>(null);
   const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWaitingOnTeammate(task) ? t("task.waitingOnTeammate") : isWorking(task) ? activityLabel ?? t("chat.activity.working") : task.queued ? t("task.queued") : null;
   const ownByline = shownFromOpener ? threadByline({ ...task, openedBy: undefined }) : threadByline(task);
-  const byline = [personLabel, ownByline].filter(Boolean).join(" · ") || null;
+  const byline = ownByline || null;
   const updatedAt = threadRecency(task);
   const updatedStamp = formatUpdatedAt(updatedAt);
   const updatedLabel = now === undefined ? updatedStamp : threadUpdatedLabel(updatedAt, now);
@@ -349,6 +351,11 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   }, [menu]);
   return <>
     <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", current ? "bg-raised" : "hover:bg-raised/50")}>
+      {personLabel && (
+        <span title={personLabel} aria-label={personLabel} className="pointer-events-none absolute left-1 top-1/2 flex size-[18px] -translate-y-1/2 items-center justify-center rounded-full bg-raised-hover text-[8px] font-semibold text-ink-secondary">
+          {profileInitials({ name: personLabel })}
+        </span>
+      )}
       {renaming ? <input autoFocus value={draft} maxLength={80} aria-label={t("task.renameAria")}
         onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDraft(event.target.value)} onBlur={() => finishRename(true)}
         onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}

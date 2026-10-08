@@ -1,7 +1,7 @@
 // Jabeja fork: the channel picker on top of the office's thread column
 // (src/lib/thread-channel.ts). A popup button, as a Mac toolbar has one:
 // My conversations, Team, then each teammate who has conversations here.
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Users } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { usePrivateThreads } from "@/lib/cloud-guest";
@@ -11,7 +11,9 @@ import { personName, usePeople } from "@/lib/people";
 import { setThreadChannel, useThreadChannel, type ThreadChannel } from "@/lib/thread-channel";
 import { useStore } from "@/state/store";
 
-export function ThreadChannelPicker() {
+/** `icon`: a quiet button beside the search field (the Simple UI's thread
+ * column), tinted while another channel than your own is shown. */
+export function ThreadChannelPicker({ variant = "label" }: { variant?: "label" | "icon" } = {}) {
   const privateThreads = usePrivateThreads();
   const channel = useThreadChannel();
   const { state } = useStore();
@@ -44,19 +46,34 @@ export function ThreadChannelPicker() {
 
   return (
     <div ref={box} className="relative">
-      <button
-        type="button"
-        data-testid="thread-channel"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        className="flex h-7 max-w-full items-center gap-1 rounded-md px-1.5 text-[13px] font-semibold text-ink hover:bg-raised"
-      >
-        <span className="truncate">{current.label}</span>
-        <ChevronDown size={14} className={cn("shrink-0 text-ink-secondary transition-transform", open && "rotate-180")} />
-      </button>
+      {variant === "icon" ? (
+        <button
+          type="button"
+          data-testid="thread-channel"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label={current.label}
+          title={current.label}
+          onClick={() => setOpen((value) => !value)}
+          className={cn("flex size-8 shrink-0 items-center justify-center rounded-full hover:bg-raised", current.value === "mine" ? "text-ink-secondary hover:text-ink" : "bg-accent/15 text-accent")}
+        >
+          <Users size={16} />
+        </button>
+      ) : (
+        <button
+          type="button"
+          data-testid="thread-channel"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          className="flex h-7 max-w-full items-center gap-1 rounded-md px-1.5 text-[13px] font-semibold text-ink hover:bg-raised"
+        >
+          <span className="truncate">{current.label}</span>
+          <ChevronDown size={14} className={cn("shrink-0 text-ink-secondary transition-transform", open && "rotate-180")} />
+        </button>
+      )}
       {open && (
-        <div role="menu" className="absolute left-0 top-full z-50 mt-1 w-56 rounded-xl border border-hairline/60 bg-raised p-1 shadow-lg shadow-black/30">
+        <div role="menu" className={cn("absolute top-full z-50 mt-1 w-56 rounded-xl border border-hairline/60 bg-raised p-1 shadow-lg shadow-black/30", variant === "icon" ? "right-0" : "left-0")}>
           {options.map((option, index) => (
             <div key={option.value}>
               {index === 2 && <div className="mx-2 my-1 h-px bg-hairline/60" />}
