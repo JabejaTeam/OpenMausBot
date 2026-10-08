@@ -124,15 +124,14 @@ function HeroBot({ bot }: { bot: Bot }) {
   );
 }
 
-/** The Gmail "M" beside Connect apps, drawn inline (no remote logo fetch). */
-function GmailMark() {
+/** The Model Context Protocol mark: the connected apps are MCP servers.
+ * Drawn inline (no remote logo fetch), in the text colour. */
+function McpMark() {
   return (
-    <svg width="18" height="14" viewBox="0 0 24 18" aria-hidden="true">
-      <path fill="#4285F4" d="M1.6 18h3.8V8.7L0 4.7v11.7C0 17.3.7 18 1.6 18z" />
-      <path fill="#34A853" d="M18.6 18h3.8c.9 0 1.6-.7 1.6-1.6V4.7l-5.4 4z" />
-      <path fill="#FBBC04" d="M18.6 1.8v6.9l5.4-4V2.4C24 .4 21.7-.7 20.1.5z" />
-      <path fill="#EA4335" d="M5.4 8.7V1.8L12 6.7l6.6-4.9v6.9L12 13.6z" />
-      <path fill="#C5221F" d="M0 2.4v2.3l5.4 4V1.8L3.9.5C2.3-.7 0 .4 0 2.4z" />
+    <svg width="18" height="18" viewBox="0 0 180 180" fill="none" stroke="currentColor" strokeWidth="12" strokeLinecap="round" aria-hidden="true">
+      <path d="M18 84.85 85.88 16.97c9.37-9.37 24.57-9.37 33.94 0 9.37 9.37 9.37 24.57 0 33.94L68.56 102.18" />
+      <path d="M69.27 101.47 119.82 50.91c9.37-9.37 24.57-9.37 33.94 0l.35.36c9.37 9.37 9.37 24.57 0 33.94L92.72 146.6a8 8 0 0 0 0 11.31l12.61 12.61" />
+      <path d="M102.85 33.94 52.65 84.15c-9.37 9.37-9.37 24.57 0 33.94 9.37 9.37 24.57 9.37 33.94 0l50.2-50.2" />
     </svg>
   );
 }
@@ -186,7 +185,7 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
       data-sidebar
       data-simple-ui
       className={cn(
-        "flex h-full w-[320px] shrink-0 flex-col bg-panel",
+        "flex h-full w-64 shrink-0 flex-col bg-panel",
         // same mobile drawer rules as Sidebar (see its className comment)
         "max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40",
         "max-md:transition-transform max-md:duration-200",
@@ -242,10 +241,11 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
         <button
           type="button"
           onClick={() => dispatch({ type: "togglePlugins", open: true })}
-          className="flex h-10 items-center gap-2 rounded-full border border-hairline/40 bg-app/40 pl-4 pr-3 text-[14px] text-ink hover:bg-raised"
+          aria-label={t("simpleUi.connectApps")}
+          title={t("simpleUi.connectApps")}
+          className={circle}
         >
-          {t("simpleUi.connectApps")}
-          <GmailMark />
+          <McpMark />
         </button>
       </div>
     </aside>
