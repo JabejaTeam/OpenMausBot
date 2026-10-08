@@ -1,7 +1,7 @@
 // Office view (fork): the bot list as a 3D office. Every team works at its own
 // desk; hover a bot for its name, click it to open its newest conversation in
 // a side panel, switch threads from the panel header. three.js loads lazily.
-import { Activity, memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Activity, memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ChevronRight, List, Paintbrush, PanelLeft, Scan, Search, SquarePen, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -461,7 +461,15 @@ export function OfficeView() {
           </div>
         </div>
 
-        <div className={cn("absolute top-3 flex items-center gap-1 rounded-full p-1", glass, macInset ? "left-20" : "left-3")}>
+        {/* macOS: the window's drag handle beside the traffic lights. Adding a
+            drag region here also makes Electron recompute them all: without
+            it the list's header region (gone from the DOM) stayed active and
+            swallowed clicks on the buttons below. */}
+        {macInset && <div aria-hidden className="absolute left-0 top-0 h-[52px] w-20" style={{ WebkitAppRegion: "drag" } as CSSProperties} />}
+        <div
+          className={cn("absolute top-3 flex items-center gap-1 rounded-full p-1", glass, macInset ? "left-20" : "left-3")}
+          style={macInset ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined}
+        >
           <button
             type="button"
             onClick={() => setOfficeView(false)}
