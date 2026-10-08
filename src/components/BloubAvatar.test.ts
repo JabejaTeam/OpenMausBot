@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // A still avatar is one engine sample and never starts an animation loop —
-// many avatars share a screen. An animated one runs the loop and stops it
-// on unmount.
+// many avatars share a screen. Animated ones share one loop that stops when
+// the last of them unmounts.
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -57,6 +57,18 @@ describe("BloubAvatar", () => {
     expect(raf).toHaveBeenCalled();
     flushSync(() => root.unmount());
     expect(cancel).toHaveBeenCalledWith(7);
+    root = createRoot(host);
+  });
+
+  it("drives every live avatar from one shared loop", () => {
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 9);
+    const cancel = vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    flushSync(() => root.render(createElement("div", null,
+      ...Array.from({ length: 5 }, (_, i) => createElement(BloubAvatar, { key: i, size: 40, ...look, animated: true })),
+    )));
+    expect(raf).toHaveBeenCalledTimes(1);
+    flushSync(() => root.unmount());
+    expect(cancel).toHaveBeenCalledTimes(1);
     root = createRoot(host);
   });
 });

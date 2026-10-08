@@ -48,6 +48,63 @@ function usePrefersReducedMotion(): boolean {
   );
 }
 
+// Every live bloub on screen shares ONE requestAnimationFrame loop at the
+// office's 30 fps budget: a list of agents costs one loop, not one per icon.
+// It stops when nothing is subscribed and while the tab is hidden.
+type Tick = (seconds: number) => void;
+const ticks = new Set<Tick>();
+let raf = 0;
+let last = 0;
+
+function loop(ms: number) {
+  raf = requestAnimationFrame(loop);
+  if (last && ms - last < FRAME_MS - 1) return;
+  // bounded step: a frame after a long pause resumes, it does not jump
+  const step = last ? Math.min((ms - last) / 1000, 0.1) : 0;
+  last = ms;
+  for (const tick of ticks) tick(step);
+}
+
+function startLoop() {
+  if (raf || !ticks.size || (typeof document !== "undefined" && document.hidden)) return;
+  last = 0;
+  raf = requestAnimationFrame(loop);
+}
+
+function stopLoop() {
+  cancelAnimationFrame(raf);
+  raf = 0;
+}
+
+let watchingVisibility = false;
+
+function subscribeTick(tick: Tick): () => void {
+  if (!watchingVisibility && typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    watchingVisibility = true;
+    document.addEventListener("visibilitychange", () => (document.hidden ? stopLoop() : startLoop()));
+  }
+  ticks.add(tick);
+  startLoop();
+  return () => {
+    ticks.delete(tick);
+    if (!ticks.size) stopLoop();
+  };
+}
+
+/** Whether the element is on screen; true where IntersectionObserver is
+ * missing, so nothing stays frozen for lack of it. */
+function useOnScreen(ref: React.RefObject<Element | null>, enabled: boolean): boolean {
+  const [onScreen, setOnScreen] = useState(true);
+  useEffect(() => {
+    const element = ref.current;
+    if (!enabled || !element || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => setOnScreen(entries.some((entry) => entry.isIntersecting)));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref, enabled]);
+  return onScreen;
+}
+
 export type BloubAvatarProps = {
   size: number;
   shape: BloubShapeId;
@@ -64,7 +121,9 @@ function BloubAvatarComponent({ size, shape, expression, color, state = "idle", 
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const maskId = `bloub-mask-${uid}`;
   const reduced = usePrefersReducedMotion();
-  const live = animated && !reduced;
+  const svg = useRef<SVGSVGElement>(null);
+  const onScreen = useOnScreen(svg, animated && !reduced);
+  const live = animated && !reduced && onScreen;
 
   const radii = SHAPE_BY_ID.get(shape)?.radii ?? null;
   const face = EXPRESSION_BY_ID.get(expression) ?? null;
@@ -90,31 +149,12 @@ function BloubAvatarComponent({ size, shape, expression, color, state = "idle", 
     const { state: initial, radii: initialRadii, face: initialFace } = latest.current;
     const current = { engine: new BotEngine(R, initial, initialRadii, initialFace), clock: BLOUB_STILL_AT };
     run.current = current;
-    let raf = 0;
-    let last = 0;
-    const tick = (ms: number) => {
-      raf = requestAnimationFrame(tick);
-      if (last && ms - last < FRAME_MS - 1) return;
-      // bounded step: a frame after a long pause resumes, it does not jump
-      current.clock += last ? Math.min((ms - last) / 1000, 0.1) : 0;
-      last = ms;
+    const unsubscribe = subscribeTick((step) => {
+      current.clock += step;
       setLiveFrame(current.engine.sample(current.clock));
-    };
-    const start = () => {
-      if (raf || document.hidden) return;
-      last = 0;
-      raf = requestAnimationFrame(tick);
-    };
-    const stop = () => {
-      cancelAnimationFrame(raf);
-      raf = 0;
-    };
-    const onVisibility = () => (document.hidden ? stop() : start());
-    document.addEventListener("visibilitychange", onVisibility);
-    start();
+    });
     return () => {
-      stop();
-      document.removeEventListener("visibilitychange", onVisibility);
+      unsubscribe();
       run.current = null;
     };
   }, [live]);
@@ -146,6 +186,7 @@ function BloubAvatarComponent({ size, shape, expression, color, state = "idle", 
 
   return (
     <svg
+      ref={svg}
       width={size}
       height={size}
       viewBox={`${-VB} ${-VB} ${VB * 2} ${VB * 2}`}

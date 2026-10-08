@@ -282,15 +282,16 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
   // fork: no mascot — every bot without a picture is its bloub (BloubAvatar)
   if (outcome !== "flatImage") {
     const look = bloubLookFor(bot);
-    const animated = mascotProps.animated === true;
+    // every bloub lives (blinks, looks around); `animated` says it works
+    const working = mascotProps.animated === true;
     return (
       <BloubAvatar
         size={size}
         shape={look.shape}
         expression={look.expression}
         color={look.color}
-        state={bloubStateFor(mascotProps.state, animated)}
-        animated={animated}
+        state={bloubStateFor(mascotProps.state, working)}
+        animated
         label={label ?? shownName}
       />
     );
