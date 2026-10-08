@@ -1,5 +1,6 @@
 // Vendored from https://github.com/jeremy-prt/bloub (MIT, see ./LICENSE) at commit
-// b4bb3c1b5f93c7b87a2e8d620f667c4093d97749, src/bot/face.ts. Unmodified below this header:
+// b4bb3c1b5f93c7b87a2e8d620f667c4093d97749, src/bot/face.ts. Unmodified below this header,
+// except that BLINKS and BLINK_DUR are exported (the avatar sleeps between blinks):
 // the numbers are measurements, not settings (see the upstream CLAUDE.md).
 import { clamp, createRng, loopNoise } from './math'
 
@@ -115,7 +116,7 @@ export interface Liveliness {
 
 const BLINK_RNG = createRng(0x5eed)
 /** Calendrier de clignements pre-tire : deterministe et sans etat. */
-const BLINKS: number[] = (() => {
+export const BLINKS: number[] = (() => {
   const out: number[] = []
   let t = 1.4
   while (t < 900) {
@@ -131,7 +132,7 @@ const BLINKS: number[] = (() => {
 })()
 
 /** Mesure : 1 a 2 frames a 10 fps. */
-const BLINK_DUR = 0.18
+export const BLINK_DUR = 0.18
 
 function blinkLid(t: number): number {
   for (let i = 0; i < BLINKS.length; i++) {
