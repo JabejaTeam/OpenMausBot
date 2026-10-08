@@ -7,6 +7,7 @@ import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { shortPath } from "@/lib/short-path";
 import { t } from "@/lib/i18n";
+import { botLabel } from "@/lib/bot-label";
 
 const MAX_FILES = 20;
 
@@ -46,7 +47,7 @@ export function ComputerFilesPane({ bot }: { bot: Bot }) {
         <div className="mt-2 flex items-center gap-2">
           <FolderOpen size={15} className="shrink-0 text-ink-secondary" aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink" title={bot.cwd ?? undefined}>
-            {bot.cwd ? shortPath(bot.cwd, home) : t("computer.files.privateFolder", { name: bot.name })}
+            {bot.cwd ? shortPath(bot.cwd, home) : t("computer.files.privateFolder", { name: botLabel(bot).name })}
           </span>
           <button
             type="button"
@@ -65,7 +66,7 @@ export function ComputerFilesPane({ bot }: { bot: Bot }) {
       <div className="mt-3 rounded-xl bg-card p-4">
         <div className="text-[13px] font-medium text-ink">{t("computer.files.recent")}</div>
         {files.length === 0 ? (
-          <p className="mt-2 text-[12px] leading-5 text-ink-secondary">{t("computer.files.empty", { name: bot.name })}</p>
+          <p className="mt-2 text-[12px] leading-5 text-ink-secondary">{t("computer.files.empty", { name: botLabel(bot).name })}</p>
         ) : (
           <ul className="mt-2 flex flex-col gap-1">
             {files.map((path) => {

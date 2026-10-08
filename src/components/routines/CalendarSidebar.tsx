@@ -1,6 +1,7 @@
 import { useMemo, useState, type DragEvent } from "react";
 import { GripVertical, Search, UsersRound } from "lucide-react";
 import { BotAvatar } from "@/components/Avatar";
+import { botLabelLine, botLabelPhrase, botSearchText } from "@/lib/bot-label";
 import type { Bot } from "@/state/store";
 import { MiniMonth } from "./MiniMonth";
 
@@ -18,7 +19,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
     const normalized = query.trim().toLocaleLowerCase();
     if (!normalized) return bots;
     return bots.filter((bot) =>
-      `${bot.name} ${bot.title} ${bot.description}`.toLocaleLowerCase().includes(normalized),
+      `${botSearchText(bot)} ${bot.title} ${bot.description}`.toLocaleLowerCase().includes(normalized),
     );
   }, [bots, query]);
 
@@ -72,8 +73,8 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
               onDragStart={(event) => beginBotDrag(event, bot)}
               role="listitem"
               className="group flex cursor-grab items-center gap-2 rounded-xl px-2 py-2 transition-colors hover:bg-raised/80 active:cursor-grabbing"
-              aria-label={`Drag ${bot.name} onto the schedule`}
-              title={`Drag ${bot.name} onto the schedule`}
+              aria-label={`Drag ${botLabelPhrase(bot)} onto the schedule`}
+              title={`Drag ${botLabelPhrase(bot)} onto the schedule`}
             >
               <GripVertical
                 size={13}
@@ -82,7 +83,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
               />
               <BotAvatar bot={bot} size={27} animated={false} />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[11.5px] font-medium text-ink">{bot.name}</div>
+                <div className="truncate text-[11.5px] font-medium text-ink">{botLabelLine(bot)}</div>
                 <div className="truncate text-[9.5px] text-ink-tertiary">
                   {bot.title || "BotAgent"}
                 </div>

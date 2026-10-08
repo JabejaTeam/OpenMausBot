@@ -8,6 +8,7 @@ import { rankByName } from "@/lib/palette-rank";
 import { cn } from "@/lib/cn";
 import type { SearchHit } from "@/lib/search-hit";
 import { landOnSearchHit } from "@/lib/focus-message";
+import { botLabelLine } from "@/lib/bot-label";
 
 type PaletteEntry =
   | { kind: "bot"; bot: Bot }
@@ -190,7 +191,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
               () => void activate({ kind: "bot", bot }),
               <>
                 <BotIcon size={16} className="shrink-0 text-ink-secondary" />
-                <span className="truncate text-[14px] text-ink">{bot.name}</span>
+                <span className="truncate text-[14px] text-ink">{botLabelLine(bot)}</span>
                 {bot.title && (
                   <span className="min-w-0 truncate text-[12.5px] text-ink-secondary">{bot.title}</span>
                 )}
@@ -230,7 +231,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
                 <>
                   <span className="flex items-center gap-2 truncate text-[13px] font-medium text-ink">
                     <MessageSquare size={13} className="shrink-0 text-ink-secondary" />
-                    {hit.name}
+                    {hit.botId ? botLabelLine(state.bots.find((b) => b.id === hit.botId) ?? { name: hit.name }) : hit.name}
                     {hit.task ? <span className="font-normal text-ink-secondary"> · {hit.task}</span> : null}
                   </span>
                   <span className="line-clamp-2 text-[12.5px] text-ink-secondary">

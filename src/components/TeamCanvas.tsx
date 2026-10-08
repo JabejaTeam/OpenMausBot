@@ -3,6 +3,7 @@ import { ArrowRight, BookOpen, Brain, Crown, Eye, EyeOff, MessageCircle, Minus, 
 import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { botLabel, botLabelPhrase } from "@/lib/bot-label";
 import { teamMapStatus, type TeamMapSection } from "@/lib/team-map";
 import { canHideBots, hiddenBotsForMe, setBotHiddenForMe, usePeople } from "@/lib/people";
 import { COMPUTER_DRAG_TYPE, fitTeams, layoutTeams, orderBots, parseBotOrders, parsePositions, reorderBot, zoomAt, type Point, type View } from "@/lib/team-canvas";
@@ -34,9 +35,10 @@ function BotCard({ bot, selected, moving, connected, onComputer, onArrange }: {
   const status = teamMapStatus(bot);
   const instance = state.instances.find((item) => item.instanceId === bot.modelSelection.instanceId);
   const model = instance?.models.options.find((item) => item.id === bot.modelSelection.model)?.label ?? bot.modelSelection.model;
+  const label = botLabel(bot).name;
   return <article className={cn("relative h-[126px] w-[236px] shrink-0 rounded-xl border bg-card shadow-sm transition-colors",
     selected ? "border-accent/60 ring-1 ring-accent/15" : connected ? "border-accent/40" : "border-hairline/50 hover:border-ink-secondary/40", moving ? "opacity-35" : hiddenForMe && "opacity-55")}>
-    <button data-bot-id={bot.id} aria-label={t("canvas.editBot", { name: bot.name })}
+    <button data-bot-id={bot.id} aria-label={t("canvas.editBot", { name: label })}
       onClick={() => dispatch({ type: "toggleSettings", botId: bot.id, section: "identity", open: true })}
       title={onArrange ? t("canvas.reorderHint") : undefined}
       onKeyDown={(event) => {
@@ -47,25 +49,25 @@ function BotCard({ bot, selected, moving, connected, onComputer, onArrange }: {
       className="flex h-[82px] w-full cursor-grab items-center gap-3 rounded-t-xl px-4 text-left active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-accent">
       <BotAvatar bot={bot} size={38} motion="none" motionKey={0} animated={false} />
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5"><span className="truncate text-[14px] font-semibold">{bot.name}</span>
+        <span className="flex items-center gap-1.5"><span className="truncate text-[14px] font-semibold">{label}</span>
           {bot.chiefOfStaff && <Crown size={12} className="shrink-0 text-warning" aria-label={t("chat.chiefOfStaff")} />}</span>
         <span className="mt-1 block truncate text-[11px] text-ink-secondary">{bot.title || (bot.chiefOfStaff ? t("chat.chiefOfStaff") : t("canvas.bot"))}</span>
       </span>
     </button>
     <div className="flex h-[43px] items-center gap-1 border-t border-hairline/30 px-2">
-      <button className={cn(iconButton, "size-8")} aria-label={t("canvas.openBotChat", { name: bot.name })} title={t("canvas.openChat")}
+      <button className={cn(iconButton, "size-8")} aria-label={t("canvas.openBotChat", { name: label })} title={t("canvas.openChat")}
         onClick={() => dispatch({ type: "select", id: bot.id })}><MessageCircle size={13} /></button>
       {status.tone !== "idle" && <span className="flex items-center gap-1.5 text-[10px] text-ink-secondary" title={status.label}>
         <span className={cn("size-1.5 rounded-full", status.tone === "success" ? "bg-success" : status.tone === "warning" ? "bg-warning" : status.tone === "danger" ? "bg-danger" : "bg-ink-secondary/35")} />
         {status.label}
       </span>}
-      {selected && onComputer && <button className={cn(iconButton, "size-8")} aria-label={t("canvas.botComputer", { name: bot.name })} title={t("computer.tab.computer")}
+      {selected && onComputer && <button className={cn(iconButton, "size-8")} aria-label={t("canvas.botComputer", { name: label })} title={t("computer.tab.computer")}
         onClick={() => onComputer(bot)}><Monitor size={13} /></button>}
       {canHideBots() && <button className={cn(iconButton, "size-8", hiddenForMe && "text-ink")} aria-pressed={hiddenForMe}
-        aria-label={t(hiddenForMe ? "canvas.showBotForMe" : "canvas.hideBotForMe", { name: bot.name })}
+        aria-label={t(hiddenForMe ? "canvas.showBotForMe" : "canvas.hideBotForMe", { name: label })}
         title={hiddenForMe ? t("sidebar.bot.showForMe") : t("sidebar.bot.hideForMe")}
         onClick={() => void setBotHiddenForMe(bot.id, !hiddenForMe).catch(() => undefined)}>{hiddenForMe ? <EyeOff size={13} /> : <Eye size={13} />}</button>}
-      <button aria-label={t("canvas.changeModel", { name: bot.name })} title={`${t("canvas.defaultModel")}: ${model}`}
+      <button aria-label={t("canvas.changeModel", { name: label })} title={`${t("canvas.defaultModel")}: ${model}`}
         onClick={() => dispatch({ type: "toggleSettings", botId: bot.id, section: "model", open: true })}
         className="ml-auto flex h-8 min-w-0 max-w-[130px] items-center gap-1.5 rounded-md px-2 text-[10px] text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
         <span className="flex size-3.5 shrink-0 items-center justify-center">{instance
@@ -148,7 +150,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
       try { localStorage.setItem(`${storageKey.current}:bot-order`, JSON.stringify(next)); }
       catch { /* Personal ordering remains usable when browser storage is unavailable. */ }
     }
-    setAnnouncement(t("canvas.arrangedBot", { name: bot.name, team: section.name }));
+    setAnnouncement(t("canvas.arrangedBot", { name: botLabel(bot).name, team: section.name }));
   };
   const arrangeBot = (bot: Bot, delta: number) => {
     const section = sections.find((item) => item.key === (bot.section?.trim() ?? ""));
@@ -290,9 +292,9 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
       }
       if (!canManage) return;
       setMoving(active.bot.id);
-      setAnnouncement(t("canvas.reviewMove", { name: active.bot.name, team: destination || t("settings.section.general") }));
+      setAnnouncement(t("canvas.reviewMove", { name: botLabelPhrase(active.bot), team: destination || t("settings.section.general") }));
       void onMove(active.bot, destination).then((moved) => {
-        setAnnouncement(moved === false ? t("canvas.moveCancelled") : t("canvas.moved", { name: active.bot.name, team: destination || t("settings.section.general") }));
+        setAnnouncement(moved === false ? t("canvas.moveCancelled") : t("canvas.moved", { name: botLabelPhrase(active.bot), team: destination || t("settings.section.general") }));
       }).catch((error: unknown) => {
         setAnnouncement(error instanceof Error ? error.message : String(error));
       }).finally(() => setMoving(null));
@@ -305,7 +307,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
   const dropSection = sections.find((section) => section.key === dropKey);
   const dropHint = computerDropKey !== null ? t("canvas.assignComputer", { team: sections.find((section) => section.key === computerDropKey)?.name ?? computerDropKey })
     : dragged && dropSection ? (dragged.bot.section?.trim() ?? "") === dropSection.key
-      ? t("canvas.arrangeBot", { name: dragged.bot.name, team: dropSection.name }) : t("canvas.moveBot", { name: dragged.bot.name, team: dropSection.name })
+      ? t("canvas.arrangeBot", { name: botLabel(dragged.bot).name, team: dropSection.name }) : t("canvas.moveBot", { name: botLabelPhrase(dragged.bot), team: dropSection.name })
       : null;
 
   return <div ref={viewport} role="region" aria-label={t("canvas.region")} tabIndex={0} data-team-canvas
@@ -425,7 +427,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
       })}
     </div>
     {dragged && <div className="pointer-events-none absolute z-40 rounded-xl border border-accent/40 bg-card px-4 py-3 text-[13px] shadow-lg" style={{ left: dragged.point.x + 16, top: dragged.point.y + 16 }}>
-      <span className="flex items-center gap-2"><BotAvatar bot={dragged.bot} size={24} animated={false} />{dragged.bot.name}</span>
+      <span className="flex items-center gap-2"><BotAvatar bot={dragged.bot} size={24} animated={false} />{botLabel(dragged.bot).name}</span>
       {dropHint && <p className="mt-1 text-[10px] text-ink-secondary">{dropHint}</p>}
     </div>}
     <div className="pointer-events-none absolute inset-x-5 bottom-5 flex items-end justify-between gap-3">

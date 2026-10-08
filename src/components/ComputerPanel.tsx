@@ -77,6 +77,7 @@ import { approvalModeFor } from "../../shared/approval-mode";
 import { openPlaceAction, placeBlocked, placeFacts, placeHasIssue, placeViewFor, usePlaceSeat, worksOnSimpleLabel } from "@/lib/place-view";
 import { cloudRefusal, type PlaceActionId, type PlaceFacts, type PlaceView } from "../../shared/place-view";
 import { t } from "@/lib/i18n";
+import { botLabel, botLabelPhrase } from "@/lib/bot-label";
 import type { LocaleKey } from "@/locales";
 
 /** Keep local failure copy translatable while it remains in panel state. */
@@ -1035,7 +1036,7 @@ export function ComputerPanel({
       if (!viewerUrl) throw new LocalizedPanelError("computer.err.noDesktopLink");
 
       if (window.ogb?.desktopViewer) {
-        const opened = await window.ogb.desktopViewer.open(viewerUrl, t("computer.viewerTitle", { name: bot.name }), bot.id);
+        const opened = await window.ogb.desktopViewer.open(viewerUrl, t("computer.viewerTitle", { name: botLabelPhrase(bot) }), bot.id);
         if (!opened) throw new LocalizedPanelError("computer.err.openDesktop");
       } else if (fallbackTab) {
         fallbackTab.location.replace(viewerUrl);
@@ -1124,8 +1125,8 @@ export function ComputerPanel({
       (action === "vm-recreate" || action === "vm-delete") &&
       !window.confirm(
         action === "vm-delete"
-          ? t("computer.confirm.deleteVm", { name: bot.name })
-          : t("computer.confirm.replaceVm", { name: bot.name }),
+          ? t("computer.confirm.deleteVm", { name: botLabelPhrase(bot) })
+          : t("computer.confirm.replaceVm", { name: botLabelPhrase(bot) }),
       )
     ) return;
     if (vmActionController.current) return;
@@ -1174,7 +1175,7 @@ export function ComputerPanel({
   };
 
   const replaceVpsComputer = async () => {
-    if (!window.confirm(t("computer.confirm.replaceVps", { name: bot.name }))) return;
+    if (!window.confirm(t("computer.confirm.replaceVps", { name: botLabelPhrase(bot) }))) return;
     setPending("vps-replace");
     setError(null);
     try {
@@ -1243,13 +1244,13 @@ export function ComputerPanel({
     <div data-testid="browser-switch-row" className="mb-3 flex items-center gap-3 rounded-xl bg-card px-3 py-2.5">
       <Globe size={15} className="shrink-0 text-ink-secondary" aria-hidden="true" />
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium text-ink">{t("computer.browserSwitch.title", { name: bot.name })}</div>
+        <div className="text-[13px] font-medium text-ink">{t("computer.browserSwitch.title", { name: botLabel(bot).name })}</div>
         {!browserCanTurnOn && <div className="text-[11.5px] text-ink-secondary">{browserUnavailableReason(state.config)}</div>}
       </div>
       <Switch
         checked={browserEnabled}
         disabled={browserTurningOn || (!browserEnabled && !browserCanTurnOn)}
-        aria-label={t("computer.browserSwitch.title", { name: bot.name })}
+        aria-label={t("computer.browserSwitch.title", { name: botLabel(bot).name })}
         onClick={() => (browserEnabled ? turnOffBrowser() : void turnOnBrowser())}
       />
     </div>
@@ -1506,7 +1507,7 @@ export function ComputerPanel({
             <Globe size={22} className="text-ink-secondary" aria-hidden="true" />
             <div className="text-[14px] font-medium text-ink">{t("computer.browserOff.title")}</div>
             <p className="text-[12px] leading-5 text-ink-secondary">
-              {browserCanTurnOn ? t("computer.browserOff.body", { name: bot.name }) : browserUnavailableReason(state.config)}
+              {browserCanTurnOn ? t("computer.browserOff.body", { name: botLabel(bot).name }) : browserUnavailableReason(state.config)}
             </p>
             {errorText && (
               <div role="alert" className="w-full rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
@@ -1525,7 +1526,7 @@ export function ComputerPanel({
       <div className="flex-1 overflow-y-auto px-5 pb-5">
           {/* Screen preview */}
           <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
-            <span>{t("computer.screenOf", { name: bot.name })}</span>
+            <span>{t("computer.screenOf", { name: botLabel(bot).name })}</span>
             {currentTeamComputer && <span className="text-[11px]">{autoView.short}</span>}
             {phase === "local" && <span className="text-[11px]">{t("computer.badge.local")}</span>}
             {phase === "vm" && <span className="text-[11px]">{t("vm.dest.vm")}</span>}
@@ -1539,7 +1540,7 @@ export function ComputerPanel({
             <CloudScreenPreview
               key={`${bot.id}:${bot.threadId}:${bot.computer}:${cloudBackend}`}
               src={frameSrc}
-              name={bot.name}
+              name={botLabel(bot).name}
               error={panelErrorText(previewError)}
               refreshing={previewRefreshing}
               retry={previewRetry}
@@ -1561,12 +1562,12 @@ export function ComputerPanel({
               onClick={() => void openDesktop()}
               disabled={controlPending || pending === "join"}
               className="group relative flex h-full w-full cursor-pointer items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-wait"
-              aria-label={t("computer.openLiveDesktopAria", { name: bot.name })}
+              aria-label={t("computer.openLiveDesktopAria", { name: botLabel(bot).name })}
               title={t("computer.openLiveDesktop")}
             >
               <img
                 src={frameSrc}
-                alt={t("computer.screenOf", { name: bot.name })}
+                alt={t("computer.screenOf", { name: botLabel(bot).name })}
                 className="h-full w-full object-contain transition group-hover:brightness-75 group-focus-visible:brightness-75"
               />
               <span className="pointer-events-none absolute right-2 top-2 flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-[11px] font-medium text-white opacity-80 shadow-sm transition group-hover:opacity-100 group-focus-visible:opacity-100">
@@ -1577,7 +1578,7 @@ export function ComputerPanel({
           ) : frameSrc ? (
             <img
               src={frameSrc}
-              alt={t("computer.screenOf", { name: bot.name })}
+              alt={t("computer.screenOf", { name: botLabel(bot).name })}
               className="h-full w-full object-contain"
               title={phase === "vm" ? t("computer.watchOnly") : undefined}
             />
@@ -1665,8 +1666,8 @@ export function ComputerPanel({
                       <Loader2 size={13} className="mr-1.5 inline animate-spin" />
                     )}
                     {vmStatus.container === "missing"
-                      ? t("computer.createVm", { name: bot.name })
-                      : t("computer.replaceVm", { name: bot.name })}
+                      ? t("computer.createVm", { name: botLabel(bot).name })
+                      : t("computer.replaceVm", { name: botLabel(bot).name })}
                   </button>
                 ) : (
                   <button
@@ -1679,7 +1680,7 @@ export function ComputerPanel({
               )}
               {!advanced && computerStatusCurrent && (phase === "vps-unconfigured" || phase === "vps-stopped" || phase === "vps-incompatible") && (
                 <>
-                  <p className="text-[12px]">{t("computer.simple.needsSetup", { name: bot.name })}</p>
+                  <p className="text-[12px]">{t("computer.simple.needsSetup", { name: botLabel(bot).name })}</p>
                   {advancedAllowed() && <button
                     type="button"
                     onClick={() => setAdvancedMode(true)}
@@ -1772,7 +1773,7 @@ export function ComputerPanel({
         {(cloudPreviewReady || phase === "vm" || currentTeamComputer) && control.helpReason && !control.held && (
           <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-4">
             <div className="text-[13px] leading-relaxed text-warning">
-              <b>{bot.name}</b> {t("computer.askedHands")} {control.helpReason}
+              <b>{botLabel(bot).name}</b> {t("computer.askedHands")} {control.helpReason}
             </div>
             <div className="mt-2 flex gap-2">
               <button
@@ -1843,7 +1844,7 @@ export function ComputerPanel({
             onClick={() => void runVmAction("vm-delete")}
             disabled={pending !== null || profileBot.busy}
             className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-danger/30 py-2 text-[13px] text-danger hover:bg-danger/10 disabled:opacity-50"
-            title={profileBot.busy ? t("computer.deleteVmBlocked") : t("computer.deleteVmTitle", { name: bot.name })}
+            title={profileBot.busy ? t("computer.deleteVmBlocked") : t("computer.deleteVmTitle", { name: botLabel(bot).name })}
           >
             {pending === "vm-delete" ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
             {t("computer.deleteVm")}
@@ -2001,7 +2002,7 @@ export function ComputerPanel({
         </button>
         </> : (
           <div className="mt-4 rounded-xl bg-card p-4" data-testid="where-works">
-            <div className="text-[15px] font-medium text-ink">{t("computer.simple.whereWorks", { name: bot.name })}</div>
+            <div className="text-[15px] font-medium text-ink">{t("computer.simple.whereWorks", { name: botLabel(bot).name })}</div>
             <div role="group" aria-label={t("computer.destinationAria")} className="mt-3 grid grid-cols-3 gap-2">
               {placeOptions.map(({ mode, Icon, selected, disabled, unavailableTitle, simpleLabel, issue, view }) => (
                 <button

@@ -8,6 +8,7 @@ import { api, useStore, type Bot, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { t } from "@/lib/i18n";
+import { botLabelLine } from "@/lib/bot-label";
 import type { LocaleKey } from "@/locales";
 import { readCachedInventory, writeCachedInventory } from "@/lib/connected-apps-cache";
 import { reserveConnectionPage, reusableConnectionUrl, type PendingAuthorization } from "@/lib/connector-oauth";
@@ -780,7 +781,7 @@ export function PluginsPanel() {
                     onClick={() => dispatch({ type: "updateBot", botId: candidate.id, patch: { composio: true } })}
                     className="rounded-full bg-control px-2.5 py-1 text-[11.5px] font-medium text-ink hover:bg-raised-hover"
                   >
-                    {t("connectors.perBot.allow", { name: candidate.name })}
+                    {t("connectors.perBot.allow", { name: botLabelLine(candidate) })}
                   </button>
                 ))}
               </div>
@@ -939,8 +940,8 @@ export function PluginsPanel() {
             {usedBy.length > 0 && (
               <span
                 className="flex shrink-0 -space-x-1.5"
-                title={t("apps.usedBy", { names: usedBy.map((candidate) => candidate.name).join(", ") })}
-                aria-label={t("apps.usedBy", { names: usedBy.map((candidate) => candidate.name).join(", ") })}
+                title={t("apps.usedBy", { names: usedBy.map((candidate) => botLabelLine(candidate)).join(", ") })}
+                aria-label={t("apps.usedBy", { names: usedBy.map((candidate) => botLabelLine(candidate)).join(", ") })}
                 role="img"
               >
                 {/* A mascot fills its whole square (a cursor's tip sits in the
@@ -1057,7 +1058,7 @@ export function PluginsPanel() {
                 }}
                 className="font-medium text-ink underline underline-offset-2 hover:text-accent-text"
               >
-                {candidate.name}
+                {botLabelLine(candidate)}
               </button>
             </span>
           ));

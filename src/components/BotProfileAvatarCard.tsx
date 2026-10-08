@@ -25,6 +25,7 @@ import {
 import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
+import { botLabel } from "@/lib/bot-label";
 import { useOrganizationBranding } from "@/lib/use-organization-branding";
 
 type AvatarPatch = Partial<
@@ -80,7 +81,7 @@ function AvatarFraming({
         onPointerCancel={endDrag}
         onWheel={onWheel}
       >
-        <BotAvatar bot={bot} size={FRAME_SIZE} animated={false} label={`${bot.name} avatar preview`} />
+        <BotAvatar bot={bot} size={FRAME_SIZE} animated={false} label={`${botLabel(bot).name} avatar preview`} />
       </div>
       <div className="mb-1.5 mt-4 flex items-baseline justify-between">
         <span className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">Zoom</span>
@@ -382,7 +383,7 @@ export function BotProfileAvatarCard({
         )}
 
         <AvatarImageGenerator
-          botLabel={bot.title || bot.name}
+          botLabel={bot.title || botLabel(bot).name}
           disabled={uploading}
           generating={generating}
           onGenerate={generate}

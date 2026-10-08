@@ -12,6 +12,7 @@ import { api, useStore, type Bot } from "@/state/store";
 import { useBotEditor } from "./BotEditorContext";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { botLabel } from "@/lib/bot-label";
 import type { LocaleKey } from "@/locales";
 import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
 import { placeFacts, placeViewFor, usePlaceSeat } from "@/lib/place-view";
@@ -560,7 +561,7 @@ export function AccessSection({
       {/* Where it works is chosen in one place, the Computer panel; here is
           its one line (shared/place-view.ts), the same words the panel uses. */}
       <div className="rounded-xl bg-card p-4" data-testid="access-works-on">
-        <div className="text-[15px] font-medium text-ink">{t("access.worksOn", { name: bot.name, short: worksOn.short })}</div>
+        <div className="text-[15px] font-medium text-ink">{t("access.worksOn", { name: botLabel(bot).name, short: worksOn.short })}</div>
         <ProposalStatus bot={bot} kind="owner" />
         <button
           type="button"

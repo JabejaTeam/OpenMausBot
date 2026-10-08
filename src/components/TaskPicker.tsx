@@ -15,7 +15,7 @@ import { formatTaskTokens, headlineTokens, usageDetail } from "@/lib/usage";
 import { nextRename } from "@/lib/rename";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { attentionJumpAction, attentionOwnerName, AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
+import { attentionJumpAction, attentionOwnerSearch, AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
 import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency, threadUpdatedLabel, useRelativeNow } from "./SidebarThreadRow";
 
 /** Click-to-switch used to close this menu immediately, which unmounted the
@@ -230,7 +230,7 @@ function ConversationTaskPicker({
   // a query narrows it by thread title or bot name rather than hiding it.
   const attentionNeedle = query.trim().toLowerCase();
   const attentionRows = (attention ?? []).filter((entry) =>
-    !attentionNeedle || entry.task.title.toLowerCase().includes(attentionNeedle) || attentionOwnerName(entry).toLowerCase().includes(attentionNeedle));
+    !attentionNeedle || entry.task.title.toLowerCase().includes(attentionNeedle) || attentionOwnerSearch(entry).toLowerCase().includes(attentionNeedle));
   const looking = query.trim();
   // One result list for keyboard, count, and empty state: an attention row
   // that matches the query is a real result even when no tree thread does.

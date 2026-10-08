@@ -203,11 +203,13 @@ export function TeamImportDetails({ pending, importedNames, org = false }: {
               ? <img src={pending.pictures[index]!} alt="" className="size-9 shrink-0 rounded-lg object-cover" />
               : (
                 <div className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold", TEAM_GLYPHS[index % TEAM_GLYPHS.length])}>
+                  {/* bot-name: identity (template member from a backup, no team yet) */}
                   {member.name.slice(0, 1).toUpperCase()}
                 </div>
               )}
             <div className="min-w-0">
               <div className="truncate text-[14px] font-medium text-ink">{importedNames[index]}</div>
+              {/* bot-name: identity (the template's name the new copy is renamed from) */}
               {importedNames[index] !== member.name && <div className="text-[11.5px] text-ink-secondary">New copy of {member.name}</div>}
               <div className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{member.title || "General assistant"}</div>
             </div>
@@ -579,6 +581,7 @@ export function TeamLibraryPanel({
         .filter((candidate) => pickedDirectory.has(candidate.slug))
         .map((candidate, index) => ({
           key: `dir-${candidate.slug}`,
+          // bot-name: identity (manifest payload)
           name: candidate.name,
           title: candidate.category || "Community bot",
           description: candidate.prompt,
@@ -1054,10 +1057,12 @@ export function TeamLibraryPanel({
                         {scouted.suggestion.manifest.team.members.map((member, index) => (
                           <div key={member.key} className="flex min-h-[64px] items-center gap-3 border-b border-hairline/35 px-1 py-3">
                             <div className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold", TEAM_GLYPHS[index % TEAM_GLYPHS.length])}>
+                              {/* bot-name: identity (suggested template member, not a live bot) */}
                               {member.name.slice(0, 1).toUpperCase()}
                             </div>
                             <div className="min-w-0">
                               <div className="truncate text-[14px] font-medium text-ink">
+                                {/* bot-name: identity (suggested template member, not a live bot) */}
                                 {member.name} <span className="font-normal text-ink-secondary">· {member.title}</span>
                               </div>
                               <div className="mt-0.5 truncate text-[12px] text-ink-secondary">
@@ -1090,6 +1095,7 @@ export function TeamLibraryPanel({
                                   />
                                   <div className="min-w-0 flex-1">
                                     <div className="truncate text-[13.5px] font-medium text-ink">
+                                      {/* bot-name: identity (botdirectory.ai listing, not a live bot) */}
                                       {candidate.name}
                                       {candidate.category && <span className="font-normal text-ink-secondary"> · {candidate.category}</span>}
                                     </div>
@@ -1100,6 +1106,7 @@ export function TeamLibraryPanel({
                                 </label>
                                 <button
                                   onClick={() => void openExternal(candidate.detailUrl)}
+                                  // bot-name: identity (botdirectory.ai listing, not a live bot)
                                   aria-label={`Open ${candidate.name} on botdirectory.ai`}
                                   title="Read this bot's page before adding it"
                                   className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"

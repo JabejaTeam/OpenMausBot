@@ -11,6 +11,7 @@ const entry: AttentionThread = {
   kind: "bot",
   botId: "atlas",
   botName: "Atlas",
+  botSearch: "Atlas",
   task: { threadId: "pinned-1", title: "Quarterly plan", createdAt: 1, queued: false },
 };
 
@@ -112,7 +113,7 @@ describe("pinned thread rows", () => {
 
   it("shows the live status icon and word for an actively working pinned thread", () => {
     const working: AttentionThread = {
-      kind: "bot", botId: "atlas", botName: "Atlas",
+      kind: "bot", botId: "atlas", botName: "Atlas", botSearch: "Atlas",
       task: { threadId: "pinned-2", title: "Build report", createdAt: 1, queued: false, busy: true, activity: "working" },
     };
     const { markup } = renderRows([working]);
@@ -123,7 +124,7 @@ describe("pinned thread rows", () => {
 
   it("shows the waiting icon and word for a pinned thread waiting on the person", () => {
     const waiting: AttentionThread = {
-      kind: "bot", botId: "atlas", botName: "Atlas",
+      kind: "bot", botId: "atlas", botName: "Atlas", botSearch: "Atlas",
       task: { threadId: "pinned-3", title: "Needs approval", createdAt: 1, queued: false, activity: "waiting-on-you" },
     };
     const { markup } = renderRows([waiting]);

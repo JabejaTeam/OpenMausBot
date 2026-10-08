@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { botLabel, botLabelLine, threadTitle } from "./bot-label";
+import { botLabel, botLabelLine, botLabelPhrase, botSearchText, threadTitle } from "./bot-label";
 
 describe("botLabel", () => {
   it("names a team's PM Manager, team underneath", () => {
@@ -58,5 +58,20 @@ describe("threadTitle", () => {
     expect(threadTitle({ title: "Depotkaart" }, bots)).toEqual({ title: "Depotkaart", fromOpener: false });
     expect(threadTitle({ title: "@Ripal PMs planning", openedBy }, bots)).toEqual({ title: "@Ripal PMs planning", fromOpener: false });
     expect(threadTitle({ title: "@Ripal PM · x", openedBy: { botId: "c", name: "Ripal Code" } }, bots)).toEqual({ title: "@Ripal PM · x", fromOpener: false });
+  });
+});
+
+describe("botLabelPhrase", () => {
+  it("names a teamed bot inside a sentence without the dot", () => {
+    expect(botLabelPhrase({ name: "Ripal PM", kind: "pm", section: "Ripal" })).toBe("Ripal Manager");
+    expect(botLabelPhrase({ name: "Jarvis" })).toBe("Jarvis");
+  });
+});
+
+describe("botSearchText", () => {
+  it("matches both the shown name and the real name", () => {
+    const text = botSearchText({ name: "Jabeja PM", kind: "pm", section: "Jabeja" });
+    expect(text).toContain("Manager · Jabeja");
+    expect(text).toContain("Jabeja PM");
   });
 });

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { ExternalLink, Mic, MicOff, PhoneOff, RotateCcw, Settings, X } from "lucide-react";
 
 import { t } from "@/lib/i18n";
+import { botLabel } from "@/lib/bot-label";
 import { isMacPlatform } from "@/lib/keyboard-shortcuts";
 import {
   dismissLiveNotice, hangUpLiveCall, isLiveCallRunning, liveCallChord, setLiveMuted, takeLiveCallAction, useLiveMedia,
@@ -37,7 +38,7 @@ function clock(ms: number): string {
 
 /** Pure: what the bar shows for this chat. */
 export function liveCallBarView({ bot, media, server, now }: {
-  bot: { id: string; threadId: string; name: string };
+  bot: { id: string; threadId: string; name: string; kind?: string; section?: string };
   media: LiveMediaState;
   server: LiveCallState | null;
   now: number;
@@ -53,7 +54,7 @@ export function liveCallBarView({ bot, media, server, now }: {
       kind: "local",
       // after this window's Hang up, until the computer confirms the end (as
       // on the iPhone); an end nobody here asked for keeps the call's title
-      title: media.hangingUp ? t("call.live.hangingUp") : `${t("call.live.with", { name: bot.name })} · ${when}`,
+      title: media.hangingUp ? t("call.live.hangingUp") : `${t("call.live.with", { name: botLabel(bot).name })} · ${when}`,
       caption: media.caption,
       heard: media.heard,
       muted: media.muted,
@@ -69,7 +70,7 @@ export function liveCallBarView({ bot, media, server, now }: {
     server && server.status !== "ending" && server.status !== "ended"
     && server.botId === bot.id && server.threadId === bot.threadId && server.callId !== media.callId
   ) {
-    return { kind: "remote", title: t("call.live.onPhone", { name: bot.name, device: t(DEVICE_KEY[server.client]) }), callId: server.callId };
+    return { kind: "remote", title: t("call.live.onPhone", { name: botLabel(bot).name, device: t(DEVICE_KEY[server.client]) }), callId: server.callId };
   }
   return null;
 }
@@ -187,7 +188,7 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
     <div
       ref={rootRef}
       role="region"
-      aria-label={t("call.live.with", { name: bot.name })}
+      aria-label={t("call.live.with", { name: botLabel(bot).name })}
       className={cn(frame, "relative flex-wrap gap-x-2 gap-y-1 border-success/40")}
     >
       <span className="size-2 shrink-0 animate-pulse rounded-full bg-success" aria-hidden />

@@ -73,7 +73,8 @@ import { PersonLabel } from "./PersonLabel";
 import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
-import { commDirection, SimpleCommLine, SimpleHeaderPill } from "./SimpleChat";
+import { BotName, commDirection, SimpleCommLine, SimpleHeaderPill } from "./SimpleChat";
+import { botLabelLine, botLabelPhrase } from "@/lib/bot-label";
 import { useSimpleUi } from "@/lib/simple-ui";
 import { dayLabel, localDay } from "@/lib/transcript-derivations";
 
@@ -165,9 +166,16 @@ function ClusterLabel({ bot, name, color }: { bot?: Bot; name: string; color: st
         motionKey={0}
         animated={false}
       />
-      <span className="text-[11px] font-medium text-ink-secondary">{name}</span>
+      <span className="text-[11px] font-medium text-ink-secondary"><BotName bot={bot} fallback={name} /></span>
     </div>
   );
+}
+
+/** defaultResponderName as people read it (lib/bot-label). */
+function defaultResponderLabel(group: Group, members: Bot[]): string | null {
+  const name = defaultResponderName(group, members);
+  const lead = members.find((member) => member.name === name);
+  return lead ? botLabelLine(lead) : name;
 }
 
 /** Pin toggle for one room message — one pin per room, patchGroup path. */
@@ -461,8 +469,8 @@ export function DefaultResponderSelect({ group, members }: { group: Group; membe
         : responder.kind === "auto"
           ? jevOn
             ? t("room.responder.auto")
-            : t("room.responder.autoOff", { name: defaultResponderName(group, members) ?? t("room.responder.leadFallback") })
-          : t("room.responder.lead", { name: lead?.name ?? t("room.responder.leadFallback") });
+            : t("room.responder.autoOff", { name: defaultResponderLabel(group, members) ?? t("room.responder.leadFallback") })
+          : t("room.responder.lead", { name: (lead && botLabelPhrase(lead)) ?? t("room.responder.leadFallback") });
 
   const change = (nextValue: string) => {
     let next: GroupDefaultResponder;
@@ -485,7 +493,7 @@ export function DefaultResponderSelect({ group, members }: { group: Group; membe
         <optgroup label={t("room.responder.groupLead")}>
           {members.map((member) => (
             <option key={member.id} value={`member:${member.id}`}>
-              {t("room.responder.leadOption", { name: member.name })}
+              {t("room.responder.leadOption", { name: botLabelLine(member) })}
             </option>
           ))}
         </optgroup>
@@ -860,7 +868,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
                   />
                 </span>
                 <span className="ml-6 mt-2 truncate text-[11.5px] text-ink-secondary">
-                  {selectedLead?.name ?? t("room.behavior.chooseTeammate")}
+                  {(selectedLead && botLabelLine(selectedLead)) ?? t("room.behavior.chooseTeammate")}
                 </span>
               </button>
               {leadMotion.shown && (
@@ -898,7 +906,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
                             animated={false}
                           />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[13px] font-medium text-ink">{member.name}</span>
+                            <span className="block truncate text-[13px] font-medium text-ink">{botLabelLine(member)}</span>
                             <span className="block truncate text-[11px] text-ink-secondary">{member.title}</span>
                           </span>
                           {selected && <Check size={15} className="shrink-0 text-accent" />}
@@ -1045,6 +1053,11 @@ export function GroupView({ group }: { group: Group }) {
     [group.memberIds, state.bots],
   );
   const speaker = members.find((b) => b.id === group.busyBotId);
+  // A member's name as people read it (lib/bot-label); a sender no longer in the room keeps its own.
+  const named = useCallback(
+    (from?: { botId: string; name: string }) => from && botLabelLine(members.find((b) => b.id === from.botId) ?? from),
+    [members],
+  );
   const setupPending = !remoteClient && roomNeedsSetup(group);
 
   // Mascot stays while a member works; the finished reply pops in above it.
@@ -1097,12 +1110,12 @@ export function GroupView({ group }: { group: Group }) {
     const approval = pendingApprovals(group.messages)[0];
     return {
       busy: Boolean(group.working || group.busyBotId),
-      reply: latestReply(group.messages, (m) => m.from?.name ?? group.name),
+      reply: latestReply(group.messages, (m) => named(m.from) ?? group.name),
       approval: approval
-        ? { id: approval.requestId, name: approval.message.from?.name ?? speaker?.name ?? group.name }
+        ? { id: approval.requestId, name: named(approval.message.from) ?? (speaker && botLabelLine(speaker)) ?? group.name }
         : undefined,
     };
-  }, [group.messages, group.working, group.busyBotId, group.name, speaker?.name]);
+  }, [group.messages, group.working, group.busyBotId, group.name, speaker, named]);
   const presenceSpeaker =
     speaker ?? awaited ?? members.find((member) => member.id === popping?.botId) ?? members[0];
 
@@ -1152,7 +1165,7 @@ export function GroupView({ group }: { group: Group }) {
     return (
       <span
         key={b.id}
-        title={`${b.name}${busy ? " — working…" : ""}`}
+        title={`${botLabelLine(b)}${busy ? " — working…" : ""}`}
         className={cn(
           "relative inline-flex rounded-full",
           busy && "ring-2 ring-accent/50 ring-offset-1 ring-offset-app",
@@ -1280,7 +1293,7 @@ export function GroupView({ group }: { group: Group }) {
       {!setupPending && !group.dm && !remoteClient && state.config && group.defaultResponder.kind === "auto" && !jevRoomRoutingOn(state.config) && (
         <div className="w-full px-5">
           <p data-testid="room-jev-off" className="mb-1 px-2 text-[12px] text-ink-secondary">
-            {t("room.responder.jevOffHint", { name: defaultResponderName(group, members) ?? t("room.responder.leadFallback") })}{" "}
+            {t("room.responder.jevOffHint", { name: defaultResponderLabel(group, members) ?? t("room.responder.leadFallback") })}{" "}
             <button
               type="button"
               onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "decisionModel" })}
@@ -1342,7 +1355,7 @@ export function GroupView({ group }: { group: Group }) {
         const pinned = group.messages.find((m) => m.id === group.pinnedMessageId && m.kind === "text");
         const text = pinned ? citationPreviewText(pinned.text ?? "").replace(/\s+/g, " ").trim() : "";
         if (!pinned || !text) return null;
-        const sender = pinned.role === "user" ? (otherSenderName(pinned) ?? t("chat.you")) : (pinned.from?.name ?? t("room.aBot"));
+        const sender = pinned.role === "user" ? (otherSenderName(pinned) ?? t("chat.you")) : (named(pinned.from) ?? t("room.aBot"));
         return (
           <div className="w-full px-5">
             <div className="mb-2 flex items-center gap-2 rounded-lg border border-accent/25 bg-accent/[0.07] px-3 py-1.5">

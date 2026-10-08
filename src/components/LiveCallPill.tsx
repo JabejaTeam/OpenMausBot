@@ -5,6 +5,7 @@
 // itself (LiveCallBar) lives in the call's own chat.
 import { Mic, MicOff, Phone, PhoneOff } from "lucide-react";
 import { t } from "@/lib/i18n";
+import { botLabelPhrase } from "@/lib/bot-label";
 import { cn } from "@/lib/cn";
 import { isMacPlatform } from "@/lib/keyboard-shortcuts";
 import { hangUpLiveCall, isLiveCallRunning, liveCallChord, setLiveMuted, useLiveMedia, type LiveMediaState } from "@/lib/live-call-media";
@@ -40,7 +41,7 @@ export function LiveCallPill({ onOpen, currentBotId, iconOnly = false }: {
 }) {
   const { media, bot, threadId } = useCallElsewhere(currentBotId);
   if (!bot || !threadId) return null;
-  const title = t("call.live.pill", { name: bot.name });
+  const title = t("call.live.pill", { name: botLabelPhrase(bot) });
   const ending = media.phase === "ending";
   const round = "flex shrink-0 items-center justify-center rounded-full p-1.5";
   const isMac = isMacPlatform();
@@ -111,7 +112,7 @@ export function LiveCallChip({ currentBotId, onOpen }: { currentBotId: string; o
     <button
       type="button"
       onClick={() => onOpen(bot.id, threadId)}
-      title={t("call.live.pill", { name: bot.name })}
+      title={t("call.live.pill", { name: botLabelPhrase(bot) })}
       className="flex shrink-0 items-center gap-1.5 rounded-full border border-success/40 px-2.5 py-1 text-[12px] text-ink hover:bg-raised md:hidden"
     >
       <span className="size-2 animate-pulse rounded-full bg-success" aria-hidden />

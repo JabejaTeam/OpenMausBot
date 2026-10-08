@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CircleAlert, FileText, Loader2, Search } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { botLabelLine, botSearchText } from "@/lib/bot-label";
 import { isRoutineProblemRun, type RoutineRun, type RoutineRunStatusFilter } from "@/lib/routines";
 import { routineDateTime, routineRunLabel, routineRunTime, routineRunTone } from "@/lib/routine-display";
 import type { Bot } from "@/state/store";
@@ -20,7 +21,7 @@ export function RoutineLogs({ runs, bots, loading, error, routineId, status, onS
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(50);
   const filtered = runs.filter((run) => (!routineId || run.routineId === routineId) && (status === "all" || (status === "problems" ? isRoutineProblemRun(run) : run.status === status))
-    && `${run.routineName} ${bots.find((bot) => bot.id === run.botId)?.name ?? ""} ${run.output ?? ""} ${run.error ?? ""} ${run.attention ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()))
+    && `${run.routineName} ${((bot) => bot ? botSearchText(bot) : "")(bots.find((candidate) => candidate.id === run.botId))} ${run.output ?? ""} ${run.error ?? ""} ${run.attention ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()))
     .sort((a, b) => routineRunTime(b) - routineRunTime(a));
   return <section className="mx-auto w-full max-w-5xl space-y-4 p-4 sm:p-6" aria-label={t("routines.logs")}>
     <div><h2 className="text-[17px] font-semibold text-ink">{t("routines.logs")}</h2><p className="mt-1 text-[12px] text-ink-secondary">{t("routines.logsHint")}</p></div>
@@ -35,7 +36,7 @@ export function RoutineLogs({ runs, bots, loading, error, routineId, status, onS
     <div className="space-y-2">{filtered.slice(0, limit).map((run) => {
       const bot = bots.find((candidate) => candidate.id === run.botId);
       return <button type="button" key={run.id} onClick={() => onOpen(run)} aria-label={t("routines.openRun", { name: run.routineName, status: routineRunLabel(run) }) + (isRoutineProblemRun(run) && !run.seenAt ? ` · ${t("routines.unread")}` : "")} className="block w-full rounded-xl border border-hairline/40 bg-card p-4 text-left hover:border-accent/40 hover:bg-raised/40">
-        <div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="block truncate text-[13px] font-semibold text-ink">{run.routineName}</span><span className="mt-1 block text-[11px] text-ink-secondary">{bot?.name ?? t("routines.unavailableBot")} · {routineDateTime(run.scheduledFor)} · {t(`routines.trigger.${run.triggerSource ?? (run.manual ? "manual" : "schedule")}`)}</span></div><div className="flex shrink-0 items-center gap-1.5">{isRoutineProblemRun(run) && !run.seenAt && <span className="size-1.5 shrink-0 rounded-full bg-danger" title={t("routines.unread")} />}<span className={cn("text-[11.5px] font-medium", routineRunTone(run))}>{routineRunLabel(run)}</span></div></div>
+        <div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="block truncate text-[13px] font-semibold text-ink">{run.routineName}</span><span className="mt-1 block text-[11px] text-ink-secondary">{bot ? botLabelLine(bot) : t("routines.unavailableBot")} · {routineDateTime(run.scheduledFor)} · {t(`routines.trigger.${run.triggerSource ?? (run.manual ? "manual" : "schedule")}`)}</span></div><div className="flex shrink-0 items-center gap-1.5">{isRoutineProblemRun(run) && !run.seenAt && <span className="size-1.5 shrink-0 rounded-full bg-danger" title={t("routines.unread")} />}<span className={cn("text-[11.5px] font-medium", routineRunTone(run))}>{routineRunLabel(run)}</span></div></div>
         <p className={cn("mt-2 line-clamp-2 whitespace-pre-wrap text-[12px] leading-relaxed", run.error ? "text-danger" : "text-ink-secondary")}>{run.attention || run.error || run.output || t("routines.noOutput")}</p>
       </button>;
     })}</div>

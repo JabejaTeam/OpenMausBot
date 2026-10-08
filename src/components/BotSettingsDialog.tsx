@@ -28,6 +28,7 @@ import { HistorySection, type HistoryRow } from "./bot-settings/HistorySection";
 import { UsageSection } from "./bot-settings/UsageSection";
 import { VisibilitySection } from "./bot-settings/VisibilitySection";
 import { t } from "@/lib/i18n";
+import { botLabelLine } from "@/lib/bot-label";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { SimpleBotPanel } from "./bot-settings/SimpleBotPanel";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -386,7 +387,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
         )}
         <div className={cn("flex shrink-0 items-center justify-between px-4 py-3", !advanced ? undefined : padClass)}>
           <span id="bot-settings-title" className="truncate text-[15px] font-semibold text-ink">
-            {bot.name}
+            {botLabelLine(bot)}
           </span>
           <button
             type="button"

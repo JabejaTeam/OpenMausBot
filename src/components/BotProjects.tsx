@@ -5,6 +5,7 @@ import { useStore, type Bot, type BotProject } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
+import { botLabel } from "@/lib/bot-label";
 
 const FOLDER_EMOJI = ["📁", "💼", "🏠", "📬", "💡", "🚀", "🎨", "🧪", "📚", "🌱", "⭐", "🛠️"];
 
@@ -154,7 +155,7 @@ export function BotProjectDialog({ bot, project, onClose, onCreated }: {
               <input value={emoji} disabled={saving} maxLength={64} onChange={(event) => setEmoji(event.target.value)} className="mt-1 w-full rounded border border-hairline/50 bg-panel px-2 py-1.5 text-[14px] text-ink focus:outline-none" />
             </label>
           </div>}
-          <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("folder.detail", { name: bot.name })}</p>
+          <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("folder.detail", { name: botLabel(bot).name })}</p>
           {error && <p role="alert" className="mt-3 text-[12px] text-danger">{error}</p>}
           <div className="mt-5 flex justify-end gap-2">
             <button type="button" onClick={onClose} className="rounded-lg px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised">{t("common.cancel")}</button>

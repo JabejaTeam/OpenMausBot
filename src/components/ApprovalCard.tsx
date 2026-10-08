@@ -9,6 +9,7 @@ import { Check, ShieldCheck, Undo2, X } from "lucide-react";
 import { api, ApiError, type Bot, type Message, type OptionCardData } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
+import { botLabel } from "@/lib/bot-label";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
 import { composioActionPhrase, outboundSummary } from "@/lib/approval-summary";
@@ -259,7 +260,7 @@ export function ApprovalCard({
   threadId,
 }: {
   /** who is asking, for the "Name wants to …" line */
-  bot?: Pick<Bot, "name">;
+  bot?: Pick<Bot, "name" | "kind" | "section">;
   message: Message;
   /** the conversation the card is in, for Undo on a change that applied
    * without a person */
@@ -267,11 +268,12 @@ export function ApprovalCard({
 }) {
   const card = message.card;
   if (!card) return null;
+  const asker = bot ? botLabel(bot).name : t("approval.someone");
   // A change that applied without a person reads as one line with Undo.
   const applied = card.autoApplied === true && card.answered === "allow" && !card.held
-    ? appliedChange(card, bot?.name ?? t("approval.someone"))
+    ? appliedChange(card, asker)
     : undefined;
-  if (applied) return <AppliedChangeLine card={card} name={bot?.name ?? t("approval.someone")} threadId={threadId} summary={applied} />;
+  if (applied) return <AppliedChangeLine card={card} name={asker} threadId={threadId} summary={applied} />;
   const settled = card.answered;
   const expired = card.expired === true;
   // decided by voice on a Live call rather than tapped
@@ -300,9 +302,9 @@ export function ApprovalCard({
   // target whenever it differs from the proposer.
   const profileHeader = isProfileRequest && card.profileRequest
     ? card.profileRequest.targetBotId === card.profileRequest.botId
-      ? t("approval.card.profileWantsToOwn", { name: bot?.name ?? t("approval.someone") })
+      ? t("approval.card.profileWantsToOwn", { name: asker })
       : t("approval.card.profileWantsToOther", {
-          name: bot?.name ?? t("approval.someone"),
+          name: asker,
           target: card.profileRequest.targetName,
         })
     : undefined;
@@ -320,7 +322,7 @@ export function ApprovalCard({
           {isTeamSetup ? card.title : outbound ? outbound.headline : profileHeader ?? (
             <>
               {bot
-                ? t("approval.card.namedWantsTo", { name: bot.name, action: toolLabel(displayTool) })
+                ? t("approval.card.namedWantsTo", { name: asker, action: toolLabel(displayTool) })
                 : t("approval.card.wantsTo", { action: toolLabel(displayTool) })}
             </>
           )}

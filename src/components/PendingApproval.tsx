@@ -11,6 +11,7 @@ import { memo } from "react";
 import { useStore, type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
+import { botLabel } from "@/lib/bot-label";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
 import { toolLabel } from "./ApprovalCard";
@@ -268,7 +269,7 @@ export function PendingApprovalActions({
       {!durableRequest && bot && pending.allowKey && (
         <button
           onClick={() => decide("allow", true)}
-          title={t("approval.action.stopAsking", { name: bot.name, key: pending.allowKey })}
+          title={t("approval.action.stopAsking", { name: botLabel(bot).name, key: pending.allowKey })}
           className={cn(base, "border border-hairline/50 text-ink hover:bg-control")}
         >
           {t("approval.action.alwaysAllow")}

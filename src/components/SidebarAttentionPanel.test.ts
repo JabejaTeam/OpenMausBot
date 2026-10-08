@@ -10,6 +10,7 @@ const entry: AttentionThread = {
   kind: "bot",
   botId: "atlas",
   botName: "Atlas",
+  botSearch: "Atlas",
   task: { threadId: "approval", title: "Review permission", createdAt: 1, queued: false, activity: "waiting-on-you" },
 };
 

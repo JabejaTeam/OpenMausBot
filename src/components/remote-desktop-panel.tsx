@@ -10,6 +10,7 @@ import type { Routine } from "@/lib/routines";
 import { scheduleLabel } from "@/lib/schedule-label";
 import { api, ApiError, useStore, type Bot } from "@/state/store";
 import { RoutineEditor } from "./RoutinesPage";
+import { botLabel, botLabelPhrase } from "@/lib/bot-label";
 
 function viewerAddress(raw: unknown): string {
   if (typeof raw !== "string" || !raw) throw new Error("The host did not return a live desktop link");
@@ -173,7 +174,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
       });
       const opened = await window.ogb.desktopViewer.open(
         viewerAddress(joined.joinUrl),
-        `${bot.name}'s live desktop`,
+        `${botLabelPhrase(bot)}'s live desktop`,
         bot.id,
       );
       if (!opened) throw new Error("OpenMausBot could not open the live desktop");
@@ -198,7 +199,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
     <aside className="relative z-20 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline bg-panel">
       <div className={cn("flex items-center justify-between border-b border-hairline px-5 py-4", padClass)}>
         <div>
-          <div className="text-[14px] font-medium text-ink">{bot.name}&apos;s computer</div>
+          <div className="text-[14px] font-medium text-ink">{botLabel(bot).name}&apos;s computer</div>
           <div className="mt-0.5 text-[11px] text-ink-secondary">
             {bot.cloudBackend === "vps" ? "Self-hosted VPS" : "Cloud desktop"}
           </div>
@@ -219,10 +220,10 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           onClick={() => void open()}
           disabled={pending || !frame}
           className="group relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-xl border border-hairline bg-black disabled:cursor-default"
-          aria-label={frame ? `Open ${bot.name}'s live desktop` : "VPS preview unavailable"}
+          aria-label={frame ? `Open ${botLabel(bot).name}'s live desktop` : "VPS preview unavailable"}
         >
           {frame ? (
-            <img src={frame} alt={`${bot.name}'s VPS desktop preview`} className="h-full w-full object-contain" />
+            <img src={frame} alt={`${botLabel(bot).name}'s VPS desktop preview`} className="h-full w-full object-contain" />
           ) : previewPending ? (
             <Loader2 size={22} className="animate-spin text-ink-secondary" />
           ) : (

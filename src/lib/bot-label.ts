@@ -31,6 +31,20 @@ export function botLabelLine(bot: { name: string; kind?: string; section?: strin
   return team ? `${name} · ${team}` : name;
 }
 
+/** The name inside a sentence, where "·" reads badly: "Geef Manager van
+ * Ripal een stem" / "Give Ripal Manager a voice". Lists and titles keep
+ * botLabelLine. */
+export function botLabelPhrase(bot: { name: string; kind?: string; section?: string }): string {
+  const { name, team } = botLabel(bot);
+  return team ? t("bot.label.phrase", { role: name, team }) : name;
+}
+
+/** What a bot search matches: what people see ("Manager · Ripal") and the
+ * real name ("Ripal PM"), so either finds it. */
+export function botSearchText(bot: { name: string; kind?: string; section?: string }): string {
+  return `${botLabelLine(bot)} ${bot.name}`;
+}
+
 /** A thread's title as people read it (fork). A bot-opened thread is titled
  * "@Opener" or "@Opener · topic" by the server: people read the topic, or
  * the opener's role when there is none. `fromOpener` marks a title read

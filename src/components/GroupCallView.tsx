@@ -8,6 +8,7 @@ import { Loader2, PhoneOff, X } from "lucide-react";
 
 import { currentCall, deferCallCleanup, endCall, useOnCall } from "@/lib/call";
 import { routeSpokenGroupMessage } from "@/lib/group-call";
+import { botLabelLine } from "@/lib/bot-label";
 import { track } from "@/lib/analytics";
 import { normalizeState } from "@/lib/mascot";
 import { speaker } from "@/lib/tts";
@@ -295,6 +296,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       const routed = routeSpokenGroupMessage(said, membersRef.current);
       if (defaultResponderRef.current.kind === "mentions" && !routed.addressed) {
         listen();
+        // bot-name: identity — routing matches the spoken words against the real names
         const names = membersRef.current.map((member) => member.name).join(", ");
         setNote("Say a member's name" + (names ? " — " + names : "") + " — or say everyone.");
         return;
@@ -364,7 +366,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         submitted: false,
       };
       spokenIds.current.add(approval.message.id);
-      const name = member?.name ?? approval.message.from?.name ?? "A group member";
+      const name = (member && botLabelLine(member)) ?? approval.message.from?.name ?? "A group member";
       const skillPrompt = approval.message.card?.skillRequest?.action === "update"
         ? `${name} wants to update a learned skill. Open the group thread to review the complete skill before replacing the current version. You can say no to deny it.`
         : `${name} wants to enable a new learned skill. Open the group thread to review the complete skill before enabling it. You can say no to deny it.`;
@@ -375,7 +377,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       const member = members.find((candidate) => candidate.id === question.from?.botId);
       askedQuestion.current = { requestId: question.card.requestId, member };
       spokenIds.current.add(question.id);
-      const name = member?.name ?? question.from?.name ?? "A group member";
+      const name = (member && botLabelLine(member)) ?? question.from?.name ?? "A group member";
       const detail = question.card.subtitle.trim();
       const choices = question.card.options.length
         ? " The options are " + question.card.options.join(", ") + "."
@@ -457,9 +459,9 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       : phase === "sending"
         ? "Bringing the group in"
         : phase === "speaking"
-          ? (speakingMember?.name ?? "Group member") + " is speaking"
+          ? (speakingMember ? botLabelLine(speakingMember) : "Group member") + " is speaking"
           : workingMember
-            ? workingMember.name + " is working"
+            ? botLabelLine(workingMember) + " is working"
             : "Working";
 
   return (
@@ -501,7 +503,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
                   motionKey={workingMember?.id === member.id ? 1 : 0}
                 />
                 <span className={cn("text-[13px] font-medium", focused ? "text-ink" : "text-ink-secondary")}>
-                  {member.name}
+                  {botLabelLine(member)}
                 </span>
               </div>
             );

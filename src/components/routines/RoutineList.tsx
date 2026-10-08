@@ -1,6 +1,7 @@
 import { FileText, Loader2, Repeat2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { botLabelLine } from "@/lib/bot-label";
 import type { Routine, RoutineRun } from "@/lib/routines";
 import { scheduleLabel } from "@/lib/schedule-label";
 import { latestRoutineRun, routineDateTime, routineNextLabel, routineRunLabel, routineRunTone, routineScheduleState } from "@/lib/routine-display";
@@ -27,7 +28,7 @@ export function RoutineList({ routines, runs, bots, loading, error, onOpen, onLo
         <div className="flex items-start gap-2">
           <button type="button" onClick={() => onOpen(routine)} className="min-w-0 flex-1 text-left hover:text-accent">
             <span className="block truncate text-[13px] font-semibold text-ink">{routine.name}</span>
-            <span className="mt-1 block text-[11.5px] leading-relaxed text-ink-secondary">{bot && `${bot.name} · `}{scheduleLabel(routine.schedule)}</span>
+            <span className="mt-1 block text-[11.5px] leading-relaxed text-ink-secondary">{bot && `${botLabelLine(bot)} · `}{scheduleLabel(routine.schedule)}</span>
           </button>
           <span className={cn("shrink-0 rounded-full bg-inset px-2 py-0.5 text-[10px]", routine.enabled && routine.nextRunAt != null ? "text-accent" : "text-ink-secondary")}>{routineScheduleState(routine)}</span>
         </div>

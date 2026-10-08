@@ -7,6 +7,7 @@
 import { Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
+import { botLabelLine } from "@/lib/bot-label";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { useStore } from "@/state/store";
 import { Card, Switch } from "./SettingsPrimitives";
@@ -265,13 +266,15 @@ export function SkillsSection() {
                     {skill.assignedBots.length === 0 ? (
                       <span>{t("skills.library.notAssigned")}</span>
                     ) : (
-                      skill.assignedBots.map((bot) => (
+                      skill.assignedBots.map((bot) => {
+                        const label = botLabelLine(state.bots.find((full) => full.id === bot.id) ?? bot);
+                        return (
                         <span key={bot.id} className="flex items-center gap-1 rounded-full bg-control px-2 py-0.5">
-                          <span className="max-w-40 truncate">{bot.name}</span>
+                          <span className="max-w-40 truncate">{label}</span>
                           <button
                             type="button"
-                            aria-label={t("skills.library.removeAssignment", { bot: bot.name })}
-                            title={t("skills.library.removeAssignment", { bot: bot.name })}
+                            aria-label={t("skills.library.removeAssignment", { bot: label })}
+                            title={t("skills.library.removeAssignment", { bot: label })}
                             disabled={Boolean(working || importing)}
                             onClick={() => void unassign(skill, bot.id)}
                             className="flex size-4 items-center justify-center rounded-full text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40"
@@ -279,7 +282,8 @@ export function SkillsSection() {
                             <X size={11} />
                           </button>
                         </span>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                   {bots.length > 0 && (
@@ -293,7 +297,7 @@ export function SkillsSection() {
                       >
                         <option value="">{t("skills.library.assignPickBot")}</option>
                         {bots.map((bot) => (
-                          <option key={bot.id} value={bot.id}>{bot.name}</option>
+                          <option key={bot.id} value={bot.id}>{botLabelLine(bot)}</option>
                         ))}
                       </select>
                       <button

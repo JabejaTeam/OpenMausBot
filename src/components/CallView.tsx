@@ -28,6 +28,7 @@ import { CALL_MODES, callModeHint, effectiveCallMode, setCallMode, useCallMode, 
 import { NO, YES } from "../../shared/call-consent";
 import { dismissKeyPrompt, hangUpLiveCall, isLiveCallRunning, startLiveCall, useLiveMedia } from "@/lib/live-call-media";
 import { t } from "@/lib/i18n";
+import { botLabel, botLabelLine, botLabelPhrase } from "@/lib/bot-label";
 import { speaker } from "@/lib/tts";
 import { localSystemVoiceActive } from "@/lib/local-voice";
 import { useSpeech } from "@/lib/tts/useSpeech";
@@ -55,7 +56,7 @@ export function CallButton({ bot, placement = "header" }: { bot: Bot; placement?
     <CallTargetButton
       placement={placement}
       targetId={bot.id}
-      targetName={bot.name}
+      targetName={botLabel(bot).name}
       threadId={bot.threadId}
       voices={[bot.voice]}
       setupBotId={bot.id}
@@ -159,12 +160,12 @@ export function CallTargetButton({
   const helpId = useId();
   const menuId = useId();
   const keyId = useId();
-  const elsewhereName = liveElsewhere ? state.bots.find((candidate) => candidate.id === media.botId)?.name : undefined;
+  const elsewhereBot = liveElsewhere ? state.bots.find((candidate) => candidate.id === media.botId) : undefined;
   const composer = placement === "composer";
   const label = active
     ? t("call.hangUpOn", { name: targetName })
     : liveElsewhere
-      ? elsewhereName ? t("call.live.pill", { name: elsewhereName }) : t("call.live.badge")
+      ? elsewhereBot ? t("call.live.pill", { name: botLabelPhrase(elsewhereBot) }) : t("call.live.badge")
       : liveMode
       ? t("call.live.callWith", { name: targetName })
       : !capabilitiesReady
@@ -712,6 +713,7 @@ function Call({ bot }: { bot: Bot }) {
   }, [bot.id, bot.threadId, dispatch, hush, listen, move, sayThenListen]);
 
   // ── narrate the work, speak the answer, read the approvals ───────────
+  const spokenName = botLabelLine(bot);
   useEffect(() => {
     // The request may be resolved from the normal approval UI or by another
     // client while this call is open. Do not keep treating future speech as
@@ -744,9 +746,9 @@ function Call({ bot }: { bot: Bot }) {
       };
       spokenIds.current.add(approval.message.id);
       const skillPrompt = approval.message.card?.skillRequest?.action === "update"
-        ? `${bot.name} wants to update a learned skill. Open this chat to review the complete skill before replacing the current version. You can say no to deny it.`
-        : `${bot.name} wants to enable a new learned skill. Open this chat to review the complete skill before enabling it. You can say no to deny it.`;
-      void sayThenListen(isSkillApproval(approval) ? skillPrompt : spokenApprovalPrompt(approval, bot.name));
+        ? `${spokenName} wants to update a learned skill. Open this chat to review the complete skill before replacing the current version. You can say no to deny it.`
+        : `${spokenName} wants to enable a new learned skill. Open this chat to review the complete skill before enabling it. You can say no to deny it.`;
+      void sayThenListen(isSkillApproval(approval) ? skillPrompt : spokenApprovalPrompt(approval, spokenName));
       return;
     }
     if (
@@ -760,7 +762,7 @@ function Call({ bot }: { bot: Bot }) {
       const choices = question.card.options.length
         ? ` The options are ${question.card.options.join(", ")}.`
         : "";
-      void sayThenListen(`${bot.name} asks: ${detail}${/[.!?]$/.test(detail) ? "" : "."}${choices}`);
+      void sayThenListen(`${spokenName} asks: ${detail}${/[.!?]$/.test(detail) ? "" : "."}${choices}`);
       return;
     }
     const fresh = messages.filter((m) => !spokenIds.current.has(m.id));
@@ -778,7 +780,7 @@ function Call({ bot }: { bot: Bot }) {
         if (stillMine && phaseRef.current === "speaking") move("working");
       });
     }
-  }, [messages, approval, question, phase, bot.busy, bot.name, hush, listen, move, say, sayThenListen]);
+  }, [messages, approval, question, phase, bot.busy, spokenName, hush, listen, move, say, sayThenListen]);
 
   // busy is the harness's word for "a turn is running"
   useEffect(() => {
@@ -828,7 +830,7 @@ function Call({ bot }: { bot: Bot }) {
       : phase === "sending"
         ? "One moment"
         : phase === "speaking"
-          ? bot.name
+          ? botLabel(bot).name
           : "Working";
 
   return (
@@ -844,7 +846,7 @@ function Call({ bot }: { bot: Bot }) {
       <BotAvatar bot={bot} state={mascotState} size={220} animated trackPointer />
 
       <div className="flex flex-col items-center gap-1.5 text-center">
-        <div className="text-[20px] font-medium text-ink">{bot.name}</div>
+        <div className="text-[20px] font-medium text-ink">{botLabel(bot).name}</div>
         <div className="flex items-center gap-2 text-[13.5px] text-ink-secondary">
           {(phase === "working" || phase === "sending") && <Loader2 size={13} className="animate-spin" />}
           {status}

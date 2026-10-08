@@ -3,6 +3,7 @@ import type { Dispatch } from "react";
 import type { Action, AppState, Bot, Group, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { botLabel, botLabelLine, botSearchText } from "@/lib/bot-label";
 import { orderedSidebarThreads, orderedThreadList, threadRecency, threadUpdatedLabel } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 
@@ -54,13 +55,19 @@ export function sidebarGroupActivityTasks(group: Group, bots: Bot[], queued: Rec
  * tree, so the bell, the pinned panel, and the picker's Attention section can
  * never disagree about what needs attention. */
 export type AttentionThread =
-  | { kind: "bot"; botId: string; botName: string; task: Task & { queued: boolean } }
+  | { kind: "bot"; botId: string; botName: string; botSearch: string; task: Task & { queued: boolean } }
   | { kind: "group"; groupId: string; groupName: string; groupThreadId: string; task: Task & { queued: boolean } };
 
 /** The name to show for one entry, whichever kind it is — shared so the
  * picker's search filter and the rendered rows can never disagree. */
 export function attentionOwnerName(entry: AttentionThread): string {
   return entry.kind === "bot" ? entry.botName : entry.groupName;
+}
+
+/** What the picker's search matches for an entry's owner: the shown name and,
+ * for a bot, its real name too (lib/bot-label botSearchText). */
+export function attentionOwnerSearch(entry: AttentionThread): string {
+  return entry.kind === "bot" ? entry.botSearch : entry.groupName;
 }
 
 /** The switch action for jumping to one entry — shared so the bell, the
@@ -103,7 +110,7 @@ export function attentionRowStatus(task: AttentionThread["task"]): { active: boo
 }
 
 type FlatAttentionEntry = Task & {
-  queued: boolean; botId?: string; botName?: string; groupId?: string; groupName?: string; groupThreadId?: string;
+  queued: boolean; botId?: string; botName?: string; botSearch?: string; groupId?: string; groupName?: string; groupThreadId?: string;
 };
 
 export function crossBotAttentionThreads(
@@ -117,15 +124,15 @@ export function crossBotAttentionThreads(
     ...bots
       .filter((bot) => bot.id !== exceptBotId && !bot.hidden)
       .flatMap((bot): FlatAttentionEntry[] => sidebarBotActivityTasks(bot, queued)
-        .map((task) => ({ ...task, botId: bot.id, botName: bot.name }))),
+        .map((task) => ({ ...task, botId: bot.id, botName: botLabelLine(bot), botSearch: botSearchText(bot) }))),
     ...groups
       .flatMap((group): FlatAttentionEntry[] => sidebarGroupActivityTasks(group, bots, queued)
         .map((task) => ({ ...task, groupId: group.id, groupName: group.name, groupThreadId: group.threadId }))),
   ];
-  return orderedSidebarThreads(flat, "").map(({ botId, botName, groupId, groupName, groupThreadId, ...task }): AttentionThread =>
+  return orderedSidebarThreads(flat, "").map(({ botId, botName, botSearch, groupId, groupName, groupThreadId, ...task }): AttentionThread =>
     groupId !== undefined
       ? { kind: "group", groupId, groupName: groupName!, groupThreadId: groupThreadId!, task }
-      : { kind: "bot", botId: botId!, botName: botName!, task });
+      : { kind: "bot", botId: botId!, botName: botName!, botSearch: botSearch!, task });
 }
 
 /** Every pinned thread across every visible bot and room, newest pin first.
@@ -139,7 +146,7 @@ export function crossBotPinnedThreads(bots: Bot[], groups: Group[], queued: Reco
       .filter((bot) => !bot.hidden)
       .flatMap((bot): FlatAttentionEntry[] => (bot.tasks ?? [])
         .filter((task) => task.pinned === true && !task.routineRunId)
-        .map((task) => ({ ...task, queued: Boolean(queued[task.threadId]?.length), botId: bot.id, botName: bot.name }))),
+        .map((task) => ({ ...task, queued: Boolean(queued[task.threadId]?.length), botId: bot.id, botName: botLabelLine(bot), botSearch: botSearchText(bot) }))),
     ...groups
       .flatMap((group): FlatAttentionEntry[] => {
         const activity = new Map(sidebarGroupActivityTasks(group, bots, queued).map((task) => [task.threadId, task]));
@@ -148,10 +155,10 @@ export function crossBotPinnedThreads(bots: Bot[], groups: Group[], queued: Reco
           .map((task) => ({ ...task, ...activity.get(task.threadId), queued: Boolean(queued[task.threadId]?.length), groupId: group.id, groupName: group.name, groupThreadId: group.threadId }));
       }),
   ];
-  return orderedThreadList(flat).map(({ botId, botName, groupId, groupName, groupThreadId, ...task }): AttentionThread =>
+  return orderedThreadList(flat).map(({ botId, botName, botSearch, groupId, groupName, groupThreadId, ...task }): AttentionThread =>
     groupId !== undefined
       ? { kind: "group", groupId, groupName: groupName!, groupThreadId: groupThreadId!, task }
-      : { kind: "bot", botId: botId!, botName: botName!, task });
+      : { kind: "bot", botId: botId!, botName: botName!, botSearch: botSearch!, task });
 }
 
 /** The one row shape for attention entries: title, bot name, status, jump.
@@ -225,7 +232,7 @@ export function SidebarBotActivity({ bot, density, pendingQueued, dispatch }: { 
       const teammateWait = !waiting && task.waitingForTeammates === true;
       const working = !waiting && !teammateWait && (task.busy || task.activity === "working");
       const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : task.queued ? t("task.queued") : t("task.unread");
-      const label = `${bot.name}: ${task.title} · ${status}${task.unread && (waiting || working || teammateWait || task.queued) ? ` · ${t("task.unread")}` : ""}`;
+      const label = `${botLabel(bot).name}: ${task.title} · ${status}${task.unread && (waiting || working || teammateWait || task.queued) ? ` · ${t("task.unread")}` : ""}`;
       const Icon = waiting ? CircleAlert : working ? Loader2 : teammateWait || task.queued ? Clock3 : BellDot;
       return <button key={task.threadId} type="button" data-sidebar-activity-row={task.threadId} aria-label={label} title={label}
         onClick={() => dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId })}

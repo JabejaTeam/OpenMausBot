@@ -4,6 +4,7 @@ import { BookOpen, X } from "lucide-react";
 
 import { BotAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
+import { botLabelLine } from "@/lib/bot-label";
 import type { Bot } from "@/state/store";
 
 export function BotInstructionsDialog({ bot, onClose, inline = false }: { bot: Bot; onClose: () => void; inline?: boolean }) {
@@ -79,7 +80,7 @@ export function BotInstructionsDialog({ bot, onClose, inline = false }: { bot: B
                 <span className="text-[11px] font-semibold uppercase tracking-[0.08em]">Bot instructions</span>
               </div>
               <h2 id="bot-instructions-title" className="mt-0.5 truncate text-[20px] font-semibold tracking-[-0.01em] text-ink">
-                {bot.name}
+                {botLabelLine(bot)}
               </h2>
               {bot.title && <p className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{bot.title}</p>}
             </div>

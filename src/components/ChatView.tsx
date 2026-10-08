@@ -134,6 +134,7 @@ import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
 import { startsTimeBlock } from "@/lib/time-separator";
 import { BotName, ChatHomeTeam, commDirection, SimpleChatHeader, SimpleCommLine } from "./SimpleChat";
+import { botLabel, botLabelLine } from "@/lib/bot-label";
 import { useSimpleUi } from "@/lib/simple-ui";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
@@ -149,6 +150,7 @@ const USER_COLLAPSE_LINES = 8;
 interface ChatRows {
   botId: string;
   threadId: string;
+  /** The bot's name as people read it (lib/bot-label). */
   botName: string;
   voiceId?: string;
   /** Speech settings, for the read-aloud button. */
@@ -812,6 +814,7 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
   return (
     <div className="mb-1 flex items-center gap-1.5 pl-0.5" data-testid="peer-label">
       <BotAvatar
+        // bot-name: identity
         bot={author ?? { name: peer.name, color: "blue" }}
         state={normalizeState(author?.mascotExpression) ?? "happy"}
         size={16}
@@ -905,7 +908,7 @@ function EmptyChat({ bot }: { bot: Bot }) {
     <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
       <BotAvatar bot={bot} state="idle" size={64} motion="none" motionKey={0} />
       {/* Simple mode renames in the bot's settings only. */}
-      {!advanced ? <div className="text-[17px] font-semibold text-ink">{bot.name}</div> : <RenameTitle
+      {!advanced ? <div className="text-[17px] font-semibold text-ink">{botLabel(bot).name}</div> : <RenameTitle
         value={bot.name}
         onCommit={(name) => {
           if (window.ogb?.remoteClient?.active) {
@@ -1158,12 +1161,14 @@ const MessagesList = memo(function MessagesList({
  * pin that no longer resolves renders nothing (edited away or deleted). */
 function PinnedBanner({
   bot,
+  bots,
   pinnedId,
   messages,
   onJump,
   onUnpin,
 }: {
   bot: Bot;
+  bots: readonly Bot[];
   pinnedId?: string;
   messages: Message[];
   onJump: (messageId: string) => void;
@@ -1172,8 +1177,9 @@ function PinnedBanner({
   const pinned = messages.find((m) => m.id === pinnedId);
   if (!pinned || pinned.kind !== "text") return null;
   const pinnedPeer = peerLine(pinned);
+  const named = (who: { botId?: string; name: string }) => botLabel(bots.find((b) => b.id === who.botId) ?? who).name;
   const sender =
-    pinned.role === "user" ? (pinnedPeer?.name ?? otherSenderName(pinned) ?? t("chat.you")) : (pinned.from?.name ?? bot.name);
+    pinned.role === "user" ? ((pinnedPeer && named(pinnedPeer)) ?? otherSenderName(pinned) ?? t("chat.you")) : (pinned.from ? named(pinned.from) : botLabel(bot).name);
   const text = citationPreviewText(pinnedPeer?.body ?? pinned.text ?? "").replace(/\s+/g, " ").trim();
   if (!text) return null;
   return (
@@ -1238,7 +1244,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const listed = !bot.tasks || (Boolean(openTask) && (openTask!.access !== "team" || threadChosen(bot.threadId)));
   const canWrite = useCanWriteIn(bot.threadId, listed);
 
-  const computerStarting = computerStartLine(state.computerStarts[bot.id], bot.name);
+  const computerStarting = computerStartLine(state.computerStarts[bot.id], botLabel(bot).name);
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const [findOpen, setFindOpen] = useState(false);
   const { replyTo, selectReply, clearReply, consumeReply, restoreReply } = useReplyDraft(
@@ -1338,8 +1344,8 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   branch.current = messages;
   const onBranch = useCallback((messageId: string) => branch.current.some((m) => m.id === messageId), []);
   const rows = useMemo<ChatRows>(
-    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, voiceId: bot.voice, tts, localVoice, busy, bots, mentionPeers, focus, showToolCalls, boss, locale, dispatch, onBranch }),
-    [bot.id, bot.threadId, bot.name, bot.voice, tts, localVoice, busy, bots, mentionPeers, focus, showToolCalls, boss, locale, dispatch, onBranch],
+    () => ({ botId: bot.id, threadId: bot.threadId, botName: botLabel(bot).name, voiceId: bot.voice, tts, localVoice, busy, bots, mentionPeers, focus, showToolCalls, boss, locale, dispatch, onBranch }),
+    [bot.id, bot.threadId, bot.name, bot.kind, bot.section, bot.voice, tts, localVoice, busy, bots, mentionPeers, focus, showToolCalls, boss, locale, dispatch, onBranch],
   );
   // Where this conversation works, for the place icon on screen and page tools.
   const place = effectivePlace(bot, bot.tasks?.find((task) => task.threadId === bot.threadId));
@@ -1409,10 +1415,10 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     const approval = pendingApprovals(messages)[0];
     return {
       busy: Boolean(bot.busy),
-      reply: latestReply(messages, () => bot.name),
-      approval: approval ? { id: approval.requestId, name: bot.name } : undefined,
+      reply: latestReply(messages, () => botLabel(bot).name),
+      approval: approval ? { id: approval.requestId, name: botLabel(bot).name } : undefined,
     };
-  }, [messages, bot.busy, bot.name]);
+  }, [messages, bot.busy, bot.name, bot.kind, bot.section]);
   // Wall-clock anchor for the working row's elapsed readout — the server
   // stamps the turn's real start (turnStartedAt), so switching threads keeps
   // the count truthful; Date.now() only covers servers without the stamp.
@@ -1484,7 +1490,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
                 onClick={() => dispatch({ type: "toggleSettings", open: true })}
                 className="flex shrink-0 items-center justify-center rounded-full"
                 title={t("chat.openProfile")}
-                aria-label={t("chat.openProfileAria", { name: bot.name })}
+                aria-label={t("chat.openProfileAria", { name: botLabel(bot).name })}
               >
                 <BotAvatar
                   bot={bot}
@@ -1521,7 +1527,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               data-chathead-pill
               onClick={() => dispatch({ type: "toggleSettings", open: true })}
               title={t("chat.openProfile")}
-              aria-label={t("chat.openProfileAria", { name: bot.name })}
+              aria-label={t("chat.openProfileAria", { name: botLabel(bot).name })}
               className={cn(CHATHEAD_PILL, "pr-3.5 hover:bg-raised-hover")}
             >
               <BotAvatar
@@ -1532,7 +1538,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
                 motionKey={mascotMotion?.nonce ?? 0}
                 animated={headerAnimated}
               />
-              <span className="min-w-0 truncate text-[14px] font-semibold text-ink">{bot.name}</span>
+              <span className="min-w-0 truncate text-[14px] font-semibold text-ink">{botLabel(bot).name}</span>
               {chiefOfStaffBadge(bot)}
               {bot.busy && <WorkingDots className="text-ink-secondary" />}
             </button>
@@ -1601,7 +1607,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       {state.notice && (
         <div className="w-full px-5">
           <div role="status" className="mb-2 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[13px] text-ink-secondary">
-            {state.notice.botName ? t("thread.goneShowing", { name: state.notice.botName }) : t("thread.gone")}
+            {state.notice.botName ? t("thread.goneShowing", { name: botLabel(bots.find((b) => b.name === state.notice!.botName) ?? { name: state.notice.botName }).name }) : t("thread.gone")}
           </div>
         </div>
       )}
@@ -1609,6 +1615,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       {/* Pinned message banner */}
       <PinnedBanner
         bot={bot}
+        bots={bots}
         pinnedId={bot.pinnedMessageId}
         messages={messages}
         onJump={(messageId) =>
@@ -1637,7 +1644,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           // off: a polite log re-reads every tick and chip while the bot
           // works; TranscriptAnnouncer below speaks once when it is done
           aria-live="off"
-          aria-label={t("chat.conversationWith", { name: bot.name })}
+          aria-label={t("chat.conversationWith", { name: botLabel(bot).name })}
         >
           {hiddenCount > 0 ? (
             <div className="flex justify-center pt-2">
@@ -1855,7 +1862,7 @@ function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
   const advancedOnly = advanced ? undefined : t("chat.advancedOnly");
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
   const hasMessages = messages.length > 0;
-  const transcript = () => formatTranscriptMarkdown({ title: bot.name, messages, botName: bot.name, isGroup: false });
+  const transcript = () => formatTranscriptMarkdown({ title: botLabelLine(bot), messages, botName: botLabelLine(bot), isGroup: false });
   const items: SidebarMenuItem[] = [
     {
       key: "find",

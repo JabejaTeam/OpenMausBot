@@ -15,6 +15,7 @@ import { CheckCircle2, ChevronRight, Loader2, Phone, X } from "lucide-react";
 
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { t } from "@/lib/i18n";
+import { botLabelPhrase } from "@/lib/bot-label";
 import { useStore, type Bot } from "@/state/store";
 import { BotAvatar } from "./Avatar";
 import { VoiceSettings } from "./VoiceSettings";
@@ -140,7 +141,7 @@ export function VoiceSetupDialog({
             <BotAvatar bot={bot} state={ready ? "happy" : "listening"} size={44} />
             <div className="min-w-0">
               <h2 id={titleId} className="truncate text-[20px] font-semibold tracking-[-0.01em] text-ink">
-                {t("call.voiceSetup.title", { name: bot.name })}
+                {t("call.voiceSetup.title", { name: botLabelPhrase(bot) })}
               </h2>
               <p id={subtitleId} className="mt-0.5 text-[13px] text-ink-secondary">
                 {t("call.voiceSetup.subtitle")}

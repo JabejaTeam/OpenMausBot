@@ -8,6 +8,7 @@ import { ChevronRight, FileText, Image as ImageIcon, X } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { botLabel, botLabelLine } from "@/lib/bot-label";
 import { attachmentBasename } from "@/lib/composer-attachments";
 import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { BOT_PROFILE_LIMITS } from "../../../shared/bot-profile";
@@ -129,7 +130,7 @@ export function SimpleBotPanel({
         <div className="flex flex-col items-center gap-2">
           <BotAvatar bot={bot} size={72} state={derived.activeState} />
           <h2 id="bot-settings-title" className="max-w-full truncate text-[17px] font-semibold text-ink">
-            {bot.name}
+            {botLabelLine(bot)}
           </h2>
         </div>
 
@@ -167,9 +168,13 @@ export function SimpleBotPanel({
                   id={`simple-bot-name-${bot.id}`}
                   className={simpleInputCls}
                   maxLength={BOT_PROFILE_LIMITS.name}
+                  // bot-name: identity (rename field)
                   value={bot.name}
                   onChange={(e) => patch({ name: e.target.value })}
                 />
+                {botLabelLine(bot) !== bot.name && (
+                  <p className="mt-1.5 text-[12px] text-ink-secondary">{t("botSettings.simple.nameShownAs", { label: botLabelLine(bot) })}</p>
+                )}
               </div>
               <div className="min-w-0">
                 <label htmlFor={`simple-bot-job-${bot.id}`} className={labelCls}>{t("botSettings.simple.job")}</label>
@@ -189,7 +194,7 @@ export function SimpleBotPanel({
               onPatch={patch}
               simple={{
                 label: t("botSettings.simple.instructions"),
-                placeholder: t("botSettings.simple.instructionsPlaceholder", { name: bot.name }),
+                placeholder: t("botSettings.simple.instructionsPlaceholder", { name: botLabel(bot).name }),
               }}
             />
 
@@ -208,7 +213,7 @@ export function SimpleBotPanel({
             </div>
 
             <div>
-              <div className={labelCls}>{t("botSettings.simple.beforeActs", { name: bot.name })}</div>
+              <div className={labelCls}>{t("botSettings.simple.beforeActs", { name: botLabel(bot).name })}</div>
               <div className="grid grid-cols-2 gap-3">
                 {([
                   { mode: "ask", title: t("botSettings.simple.ask"), hint: t("botSettings.simple.askHint"), offered: true },
@@ -296,7 +301,7 @@ export function SimpleBotPanel({
           <div role="tabpanel" className="mt-5">
             {library.length === 0 ? (
               <div className="px-4 py-12 text-center text-[13px] leading-relaxed text-ink-secondary">
-                {t("botSettings.simple.libraryEmpty", { name: bot.name })}
+                {t("botSettings.simple.libraryEmpty", { name: botLabel(bot).name })}
               </div>
             ) : (
               <div className="flex flex-col gap-1.5">

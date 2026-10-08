@@ -6,7 +6,7 @@ import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type M
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { activeLocale, t } from "@/lib/i18n";
-import { botLabel } from "@/lib/bot-label";
+import { botLabel, botLabelLine } from "@/lib/bot-label";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import {
@@ -155,8 +155,9 @@ export function Composer({
     ? members?.find((member) => member.id === approval?.message.from?.botId) ??
       members?.find((member) => member.id === group.busyBotId)
     : bot;
+  const busyMember = group ? members?.find((b) => b.id === group.busyBotId) : undefined;
   const busyName = group
-    ? (members?.find((b) => b.id === group.busyBotId)?.name ??
+    ? ((busyMember && botLabelLine(busyMember)) ??
       (group.working ? t("composer.busy.team") : t("composer.busy.aBot")))
     : (bot ? botLabel(bot).name : t("composer.busy.theBot"));
   // Per-thread draft: switching bots unmounts this component, so both the
@@ -358,10 +359,12 @@ export function Composer({
     const pool: MentionChoice[] = group
       ? [
           ...(!group.dm ? [{ id: "__everyone__", name: "everyone" }] : []),
+          // bot-name: identity — the mention text and the search key
           ...(members ?? []).map((member) => ({ id: member.id, name: member.name, bot: member })),
         ]
       : state.bots
           .filter((member) => member.id !== bot?.id && !member.hidden)
+          // bot-name: identity — the mention text and the search key
           .map((member) => ({ id: member.id, name: member.name, bot: member }));
     return mentionChoicesForQuery(pool, mention.query);
   }, [mention, dismissedAt, state.bots, bot?.id, group, members]);
@@ -384,7 +387,7 @@ export function Composer({
   const pickMention = (peer: MentionChoice) => {
     if (!mention) return;
     const after = text.slice(caret);
-    const next = `${text.slice(0, mention.start)}@${peer.name} ${after}`;
+    const next = `${text.slice(0, mention.start)}@${peer.name} ${after}`; // bot-name: identity
     editText(next);
     const newCaret = mention.start + peer.name.length + 2;
     setCaret(newCaret);
@@ -897,7 +900,7 @@ export function Composer({
                     <Users size={14} aria-hidden="true" />
                   </span>
                 )}
-                <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{peer.name}</span>
+                <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{peer.bot ? botLabelLine(peer.bot) : peer.name}</span>
                 <span className="shrink-0 text-xs text-ink-secondary">
                   {peer.bot ? t("composer.mention.agent") : t("composer.mention.channel")}
                 </span>
@@ -929,7 +932,7 @@ export function Composer({
           <div className="mb-2 px-1">
             <ReplyQuote
               message={replyTo}
-              fallbackName={bot?.name}
+              fallbackName={bot ? botLabel(bot).name : undefined}
               onClear={onClearReply}
             />
           </div>
@@ -1041,7 +1044,7 @@ export function Composer({
                   onSelect={setApprovalMode}
                   disabled={Boolean(modeBot.busy)}
                   trustedModesAvailable={trustedThreadAccess}
-                  onManageCommandAllowlist={ownerOrAdmin === true ? () => setCommandAllowlistTarget({ botId: modeBot.id, botName: modeBot.name, threadId: modeBot.threadId }) : undefined}
+                  onManageCommandAllowlist={ownerOrAdmin === true ? () => setCommandAllowlistTarget({ botId: modeBot.id, botName: botLabelLine(modeBot), threadId: modeBot.threadId }) : undefined}
                 />
               )}
               {modeBot && !remoteClient && !simpleUi && advanced && (

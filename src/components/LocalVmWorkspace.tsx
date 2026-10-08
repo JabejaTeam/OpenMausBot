@@ -32,6 +32,7 @@ import {
   type LocalVmWorkspaceStatus,
 } from "@/lib/local-vm-workspace";
 import { z } from "zod";
+import { botLabelLine, botLabelPhrase } from "@/lib/bot-label";
 
 const SLOT_CONTEXTS = ["local-vm-workspace:left", "local-vm-workspace:right"] as const;
 
@@ -255,7 +256,7 @@ function LocalVmPane({
 }: LocalVmPaneProps) {
   const contextId = SLOT_CONTEXTS[index];
   const botId = bot?.id ?? null;
-  const botName = bot?.name ?? "Local VM";
+  const botName = bot ? botLabelLine(bot) : "Local VM";
   const viewportRef = useRef<HTMLDivElement>(null);
   const operationRef = useRef<Promise<void>>(Promise.resolve());
   const obscuredRef = useRef(obscured);
@@ -438,7 +439,7 @@ function LocalVmPane({
             <option value="">Choose a Local VM bot</option>
             {bots.map((candidate) => (
               <option key={candidate.id} value={candidate.id} disabled={candidate.id === otherBotId}>
-                {candidate.name}
+                {botLabelLine(candidate)}
               </option>
             ))}
           </select>
@@ -495,7 +496,7 @@ function LocalVmPane({
             </div>
           ) : !status && !error ? (
             <div className="flex items-center gap-2 text-[12px] text-ink-secondary">
-              <Loader2 size={15} className="animate-spin" /> Checking {bot.name}'s VM…
+              <Loader2 size={15} className="animate-spin" /> Checking {botLabelLine(bot)}'s VM…
             </div>
           ) : status?.ready && nativeState.status !== "error" && !error ? (
             <div className="flex items-center gap-2 text-[12px] text-ink-secondary">
@@ -507,10 +508,10 @@ function LocalVmPane({
               <div className="text-[12px] leading-relaxed">
                 {error ??
                   (status?.container === "missing"
-                    ? `${bot.name}'s Local VM has not been created.`
+                    ? `${botLabelPhrase(bot)}'s Local VM has not been created.`
                     : status?.container === "stopped"
-                      ? `${bot.name}'s Local VM is stopped.`
-                      : `${bot.name}'s Local VM is not ready for a live view.`)}
+                      ? `${botLabelPhrase(bot)}'s Local VM is stopped.`
+                      : `${botLabelPhrase(bot)}'s Local VM is not ready for a live view.`)}
               </div>
               <div className="flex gap-2">
                 <button

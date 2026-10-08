@@ -16,6 +16,7 @@ import {
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { BeanBotAvatar } from "./office/BeanBotAvatar";
+import { botLabelLine } from "@/lib/bot-label";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody, type MascotBodyId } from "../../shared/mascot-bodies";
 
@@ -204,6 +205,8 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
   bot: {
     id?: string;
     name?: string;
+    kind?: string;
+    section?: string;
     color: MausColor;
     avatarUrl?: string | null;
     avatarCrop?: BotAvatarCrop;
@@ -257,9 +260,11 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
     imageFailed,
   });
 
+  const { name } = bot;
+  const shownName = name ? botLabelLine({ name, kind: bot.kind, section: bot.section }) : undefined;
   // fork: no mascot — every bot shows as its office bean (office/BeanBotAvatar)
   if (outcome !== "flatImage") {
-    return <BeanBotAvatar bot={bot} size={size} still={mascotProps.animated === false || mascotProps.motion === "none"} label={label ?? bot.name} />;
+    return <BeanBotAvatar bot={bot} size={size} still={mascotProps.animated === false || mascotProps.motion === "none"} label={label ?? shownName} />;
   }
 
   const radius = avatarCropRadius(profile.avatarCrop);
@@ -274,7 +279,7 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
     >
       <img
         src={profile.avatarUrl}
-        alt={label ?? (bot.name ? `${bot.name} avatar` : "Bot avatar")}
+        alt={label ?? (shownName ? `${shownName} avatar` : "Bot avatar")}
         width={size}
         height={size}
         draggable={false}

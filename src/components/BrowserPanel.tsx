@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, EllipsisVertical, Globe, Hand, Loader2, Maximize2, Minimize2, Plus, RotateCw, UserRound, X } from "lucide-react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
+import { botLabel } from "@/lib/bot-label";
 import { api, useStore, type Bot } from "@/state/store";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { BrowserViewport, type BrowserFrame } from "./BrowserViewport";
@@ -53,7 +54,7 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
   const reconnectCount = useRef(0);
   const connectionProfile = useRef("");
   const profileName = bot.browserProfile === "guest" ? "Temporary browser"
-    : state.config?.browserProfiles?.find((profile) => profile.id === bot.browserProfile)?.name ?? `${bot.name}’s own browser`;
+    : state.config?.browserProfiles?.find((profile) => profile.id === bot.browserProfile)?.name ?? `${botLabel(bot).name}’s own browser`;
   useEffect(() => { if (showProfiles) profilesDialog.current?.showModal(); else profilesDialog.current?.close(); }, [showProfiles]);
   useEffect(() => {
     // Typed text goes to the field the person picked, so keep control while they write it.
@@ -295,15 +296,15 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
         onReturnToToolbar={() => addressInput.current?.focus()}
         acknowledge={(seq) => { if (generation.current === frame.generation && viewer.current === frame.viewerId) void action({ type: "ack", seq }, frame.viewerId).catch(() => {}); }}
         onDecodeError={() => { if (generation.current === frame.generation && viewer.current === frame.viewerId) setError("A browser frame could not be decoded. Close and reopen the panel to reconnect."); }} />
-        : <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-ink-secondary">{connected && heldElsewhere ? <Hand size={24} /> : error && !reconnecting ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}<span>{heldElsewhere ? "Live view paused for human control" : reconnecting ? "Reconnecting…" : error ? "Browser disconnected" : busy ? t("browser.live.botBusy", { name: bot.name }) : "Opening the live browser…"}</span></div>}
+        : <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-ink-secondary">{connected && heldElsewhere ? <Hand size={24} /> : error && !reconnecting ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}<span>{heldElsewhere ? "Live view paused for human control" : reconnecting ? "Reconnecting…" : error ? "Browser disconnected" : busy ? t("browser.live.botBusy", { name: botLabel(bot).name }) : "Opening the live browser…"}</span></div>}
       {/* Status only, never a control: it floats over the top of the page,
           readable at any panel width, and every click passes through it. */}
       <div role="status" className="pointer-events-none absolute inset-x-0 top-2 flex justify-center px-3">
         {takeStatus === "slow" ? <span className={`${pill} border-hairline text-ink-secondary`}>
-          <Loader2 size={13} className="shrink-0 animate-spin" aria-hidden="true" /><span className="truncate">{t("browser.control.waiting", { name: bot.name })}</span>
+          <Loader2 size={13} className="shrink-0 animate-spin" aria-hidden="true" /><span className="truncate">{t("browser.control.waiting", { name: botLabel(bot).name })}</span>
         </span> : takeStatus === "stale" ? <span className={`${pill} border-accent-border text-accent-text`}>
-          <Hand size={13} className="shrink-0" aria-hidden="true" /><span className="truncate">{t("browser.control.stale", { name: bot.name })}</span>
-        </span> : !takeStatus && control.owned && control.controlling ? <span className={`${pill} border-accent-border text-accent-text`} aria-description={t("browser.control.yoursHint", { name: bot.name })}>
+          <Hand size={13} className="shrink-0" aria-hidden="true" /><span className="truncate">{t("browser.control.stale", { name: botLabel(bot).name })}</span>
+        </span> : !takeStatus && control.owned && control.controlling ? <span className={`${pill} border-accent-border text-accent-text`} aria-description={t("browser.control.yoursHint", { name: botLabel(bot).name })}>
           <Hand size={13} className="shrink-0" aria-hidden="true" /><span className="truncate">{t("browser.control.yours")}</span>
         </span> : null}
       </div>

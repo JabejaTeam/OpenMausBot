@@ -14,6 +14,7 @@ import { Check, MessageCircleQuestion } from "lucide-react";
 import { useStore, type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { botLabel } from "@/lib/bot-label";
 import {
   answerWithoutPreamble,
   formatQuestionAnswers,
@@ -53,7 +54,7 @@ export function QuestionCard({
    * same way as one in a 1:1 chat */
   threadId: string;
   /** who is asking, for the "Name has a question" line */
-  bot?: Pick<Bot, "name">;
+  bot?: Pick<Bot, "name" | "kind" | "section">;
   message: Message;
 }) {
   const { dispatch } = useStore();
@@ -137,7 +138,7 @@ export function QuestionCard({
     >
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-[15px] font-semibold text-ink">
-          {bot ? t("question.card.named", { name: bot.name }) : t("question.card.title")}
+          {bot ? t("question.card.named", { name: botLabel(bot).name }) : t("question.card.title")}
         </div>
         {questions.length > 1 && !settled && (
           <span className="shrink-0 text-[11px] tabular-nums text-ink-secondary">

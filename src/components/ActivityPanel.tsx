@@ -18,6 +18,7 @@ import {
   type ChipTone,
 } from "@/lib/activity";
 import { listenLiveFrames } from "@/lib/live-events";
+import { botLabel } from "@/lib/bot-label";
 
 const LIMIT = 300;
 
@@ -104,7 +105,7 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
   };
 
   return (
-    <aside aria-label={`${bot.name} activity`} className="animate-panel-in flex h-full w-[400px] max-w-full shrink-0 flex-col border-l border-hairline/40 bg-panel max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30">
+    <aside aria-label={`${botLabel(bot).name} activity`} className="animate-panel-in flex h-full w-[400px] max-w-full shrink-0 flex-col border-l border-hairline/40 bg-panel max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30">
       <div className={cn("flex items-center justify-between px-4 py-3", padClass)}>
         <span className="flex items-center gap-2 text-[15px] font-semibold text-ink">
           <ListChecks size={16} className="text-ink-secondary" /> Activity
@@ -130,14 +131,14 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
       </div>
 
       <p className="border-b border-hairline/40 px-4 pb-3 text-[12px] text-ink-secondary">
-        Every tool {bot.name} used and every approval it asked for, newest first.
+        Every tool {botLabel(bot).name} used and every approval it asked for, newest first.
       </p>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {error && <div className="px-4 py-3 text-[13px] text-danger">couldn&apos;t load: {error}</div>}
         {rows && rows.length === 0 && !error && (
           <div className="px-4 py-6 text-[13px] text-ink-secondary">
-            Nothing yet. Once {bot.name} runs a tool or asks for an approval, it shows up here.
+            Nothing yet. Once {botLabel(bot).name} runs a tool or asks for an approval, it shows up here.
           </div>
         )}
         {!rows && !error && <div className="px-4 py-6 text-[13px] text-ink-secondary">Loading…</div>}
