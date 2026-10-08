@@ -298,6 +298,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/mcp\/mine$/ },
   { methods: ["GET", "PUT"], path: /^\/api\/people\/me$/ },
   { methods: ["GET"], path: /^\/api\/people\/names$/ },
+  // fork: where this person was last, per agent (server/person-navigation.ts)
+  { methods: ["GET", "PUT"], path: /^\/api\/people\/me\/navigation$/ },
   // fork: who a conversation is shared with; only its person changes it (the route checks)
   { methods: ["GET", "PUT"], path: /^\/api\/threads\/[\w-]+\/shares$/ },
   // fork: everyone sees how the 3D office's teams look; changing it is admin

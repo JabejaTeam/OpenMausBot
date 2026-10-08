@@ -5,7 +5,7 @@
 // row, its lead (the PM); a bot without a team is its own row. No headings:
 // like Messages, the row you last wrote to is on top (lib/simple-ui-groups).
 import { useState } from "react";
-import { ChevronDown, ChevronLeft, PanelLeft } from "lucide-react";
+import { ChevronLeft, PanelLeft } from "lucide-react";
 import { useStore, visibleMessages, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -13,13 +13,13 @@ import { botLabel, botLabelLine } from "@/lib/bot-label";
 import { stateForBot } from "@/lib/mascot";
 import { hiddenBotsForMe, usePeople } from "@/lib/people";
 import { shownForMe } from "@/lib/sidebar-layout";
-import { lastSentAt, simpleSidebarLayout, simpleSidebarRows, teamToOpen, type SimpleGroup } from "@/lib/simple-ui-groups";
+import { lastSentAt, openTeamOf, simpleSidebarLayout, simpleSidebarRows, type SimpleGroup } from "@/lib/simple-ui-groups";
+import { lastVisited, useVisits } from "@/lib/navigation-memory";
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { groupPreview, preview } from "./Sidebar";
 import { BotThreads, setThreadColumn, useThreadColumn } from "./BotThreads";
 import { unreadForMe } from "@/lib/thread-channel";
-import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { WorkingDots } from "./WorkingIndicator";
 import { profileInitials } from "./SidebarProfileMenu";
@@ -64,17 +64,18 @@ function Row({
 
 /** A bot row (Grok look). Its threads live only in the thread column
  * (SimpleThreadColumn); the row just shows the unread dot. */
-function BotRow({ bot, title, active = false, teamUnread = false }: {
+function BotRow({ bot, title, teamUnread = false, onSelect }: {
   bot: Bot;
   /** the name shown instead of the bot's (a team's row shows the team) */
   title?: string;
-  /** shown selected although the bot itself is not (a teammate is open) */
-  active?: boolean;
   /** a teammate behind this row has something unread */
   teamUnread?: boolean;
+  /** what a click opens, when not this bot (a team opens where you were) */
+  onSelect?: () => void;
 }) {
   const { state, dispatch } = useStore();
-  const selected = state.activeView === "chat" && (state.selectedId === bot.id || active);
+  // a team's row is never the selection: its open member row is
+  const selected = !onSelect && state.activeView === "chat" && state.selectedId === bot.id;
   const activity = sidebarBotActivityTasks(bot, state.pendingQueued);
   const working = Boolean(bot.busy) || activity.some((task) => task.busy || task.activity === "working");
   const unread = unreadForMe(bot);
@@ -91,9 +92,39 @@ function BotRow({ bot, title, active = false, teamUnread = false }: {
       name={title ?? botLabel(bot).name}
       sub={working ? "" : preview(bot, visibleMessages(bot), state.instances)}
       subNode={working ? <span className="flex h-5 items-center" role="status"><WorkingDots size={3.5} /></span> : undefined}
-      onClick={() => dispatch({ type: "select", id: bot.id })}
+      onClick={onSelect ?? (() => dispatch({ type: "select", id: bot.id }))}
     />
   );
+}
+
+/** One member under an open team's row: small, named by role, the Manager
+ * first (lib/simple-ui-groups puts the chief on top). */
+function MemberRow({ bot }: { bot: Bot }) {
+  const { state, dispatch } = useStore();
+  const selected = state.activeView === "chat" && state.selectedId === bot.id;
+  const activity = sidebarBotActivityTasks(bot, state.pendingQueued);
+  const working = Boolean(bot.busy) || activity.some((task) => task.busy || task.activity === "working");
+  return (
+    <button
+      type="button"
+      data-simple-member={bot.id}
+      onClick={() => dispatch({ type: "select", id: bot.id })}
+      aria-current={selected ? "page" : undefined}
+      className={cn(
+        "flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors",
+        selected ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
+      )}
+    >
+      <BotAvatar bot={bot} state={working ? stateForBot(bot) : "happy"} size={22} animated={working} />
+      <span className="min-w-0 flex-1 truncate text-[14px]">{botLabel(bot).name}</span>
+      {working ? <WorkingDots size={3} /> : unreadForMe(bot) && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
+    </button>
+  );
+}
+
+/** A room under an open team: its first member's bloub, at member size. */
+function RoomMark({ members }: { members: Bot[] }) {
+  return members[0] ? <BotAvatar bot={members[0]} size={22} /> : <span className="size-[22px] shrink-0" />;
 }
 
 /** The unsectioned chief, big on top; its threads live in the thread column. */
@@ -163,10 +194,11 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
   const hero = layout.hero;
   // Like Messages: the team (or bot) you last wrote to on top, no headings
   const rows = simpleSidebarRows(layout.groups, (item) => lastSentAt(visibleMessages(item)));
-  // A teammate (picked from the thread column's switcher) lights up its team's row
-  const selectedTeam = teamToOpen(layout.groups, state.selectedId);
-  const teammateUnread = (group: SimpleGroup<Bot, Group>, lead: Bot) =>
-    group.bots.some((bot) => bot !== lead && unreadForMe(bot)) || group.rooms.some((room) => room.unread);
+  // The team you are in shows its members under its row; a closed team's
+  // row carries their unread dot. A team opens on the member you were on last.
+  const visits = useVisits();
+  const openTeam = openTeamOf(layout.groups, state.selectedId);
+  const teamUnread = (group: SimpleGroup<Bot, Group>) => group.bots.some(unreadForMe) || group.rooms.some((room) => room.unread);
   const chatView = state.activeView === "chat";
   const select = (id: string) => dispatch({ type: "select", id });
   const threadColumn = useThreadColumn();
@@ -211,8 +243,30 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {hero && <HeroBot bot={hero} />}
         {rows.map((row) => row.kind === "team" ? (
-          // the team's name: a message here goes to its lead (the PM)
-          <BotRow key={row.key} bot={row.lead} title={row.group.section} active={selectedTeam === row.group.id} teamUnread={teammateUnread(row.group, row.lead)} />
+          <div key={row.key}>
+            {/* the team's name; it opens on the member you were on last, else its Manager */}
+            <BotRow bot={row.lead} title={row.group.section} teamUnread={openTeam !== row.group.id && teamUnread(row.group)}
+              onSelect={() => select((lastVisited(row.group.bots, visits) ?? row.lead).id)} />
+            {openTeam === row.group.id && (
+              <div data-simple-team-members className="mb-1 ml-9 flex flex-col gap-0.5 pl-2">
+                {row.group.bots.map((bot) => <MemberRow key={bot.id} bot={bot} />)}
+                {row.group.rooms.map((room) => (
+                  <button
+                    key={room.id}
+                    type="button"
+                    onClick={() => select(room.id)}
+                    aria-current={chatView && state.selectedId === room.id ? "page" : undefined}
+                    className={cn("flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-[14px] transition-colors",
+                      chatView && state.selectedId === room.id ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/50 hover:text-ink")}
+                  >
+                    <RoomMark members={state.bots.filter((bot) => room.memberIds.includes(bot.id))} />
+                    <span className="min-w-0 flex-1 truncate">{room.name}</span>
+                    {room.unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         ) : row.kind === "bot" ? (
           <BotRow key={row.key} bot={row.bot} />
         ) : (
@@ -257,16 +311,11 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
 export function SimpleThreadColumn() {
   const { state, dispatch } = useStore();
   const shown = useThreadColumn();
-  // clip only while sliding or closed, so the team menu can hang past the column
+  // clip only while sliding or closed, so a menu can hang past the column
   // (reduced motion keeps a 1ms transition so transitionend still settles it)
   const [settled, setSettled] = useState(shown);
   const bot = state.activeView === "chat" ? state.bots.find((candidate) => candidate.id === state.selectedId) : undefined;
   if (!bot) return null;
-  // the bot's team, in the list's order: switch between them from the title
-  const hiddenForMe = hiddenBotsForMe();
-  const { groups } = simpleSidebarLayout(state.bots.filter((candidate) => shownForMe(candidate, hiddenForMe, "")), [], state.sections ?? []);
-  const team = groups.find((group) => group.section && group.bots.some((candidate) => candidate.id === bot.id))?.bots ?? [bot];
-  const title = <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{botLabel(bot).name}</span>;
   return (
     // stays mounted so it can slide: the width folds while the panel slides behind the list
     <div
@@ -287,30 +336,8 @@ export function SimpleThreadColumn() {
         )}
       >
         <div className="flex items-center gap-2 px-3 pb-1 pt-4">
-          {team.length > 1 ? (
-            <div className="min-w-0 flex-1">
-              <SidebarPopoverMenu
-                placement="below-start"
-                ariaLabel={t("simpleUi.switchBot")}
-                items={team.map((member) => ({
-                  key: member.id,
-                  label: botLabel(member).name,
-                  icon: <BotAvatar bot={member} size={24} animated={false} />,
-                  active: member.id === bot.id,
-                // where the team row's unread dot comes from
-                attention: member.id !== bot.id && unreadForMe(member),
-                attentionTone: "accent",
-                  onSelect: () => dispatch({ type: "select", id: member.id }),
-                }))}
-                renderTrigger={({ open }) => (
-                  <span className="flex w-full min-w-0 items-center gap-1 rounded-lg px-1 py-1 text-left hover:bg-raised/60" title={t("simpleUi.switchBot")}>
-                    {title}
-                    <ChevronDown size={15} aria-hidden="true" className={cn("shrink-0 text-ink-secondary transition-transform", open && "rotate-180")} />
-                  </span>
-                )}
-              />
-            </div>
-          ) : title}
+          {/* switching agents happens in the list: an open team shows its members */}
+          <span className="min-w-0 flex-1 truncate px-1 text-[15px] font-semibold text-ink">{botLabel(bot).name}</span>
           <button
             type="button"
             onClick={() => setThreadColumn(false)}

@@ -173,6 +173,30 @@ posixOnly("private conversations on a shared workspace", () => {
     expect((await api("GET", `/api/threads/${ids.adaThread}/messages`, undefined, BOSS)).status).toBe(200);
   });
 
+  it("opens everyone on the conversation they last had open, not the one that changed last", async () => {
+    // Ada starts a second conversation: that is where she is now
+    const second = await api("POST", `/api/bots/${ids.bot}/tasks`, { title: "Ada's second" }, ADA);
+    expect(second.status, JSON.stringify(second.body)).toBe(201);
+    const secondThread = second.body.task.threadId;
+    expect((await botAs(ADA)).threadId).toBe(secondThread);
+    // a reply landing in her first conversation does not move her there
+    expect((await api("POST", `/api/bots/${ids.bot}/messages`, { text: "later in the first", threadId: ids.adaThread }, ADA)).status).toBe(202);
+    expect(await waitFor(async () => {
+      const { body } = await api("GET", `/api/threads/${ids.adaThread}/messages`, undefined, ADA);
+      return (body.messages ?? []).filter((m: any) => m.role === "bot" && m.text).length >= 2;
+    }), log.slice(-2_000)).toBe(true);
+    expect((await botAs(ADA)).threadId).toBe(secondThread);
+    // opening the first (from any device) is remembered for all of hers
+    expect((await api("PUT", "/api/people/me/navigation", { botId: ids.bot, threadId: ids.adaThread }, ADA)).status).toBe(200);
+    expect((await botAs(ADA)).threadId).toBe(ids.adaThread);
+    const visits = (await api("GET", "/api/people/me/navigation", undefined, ADA)).body.visits;
+    expect(visits[ids.bot]).toMatchObject({ threadId: ids.adaThread });
+    expect(typeof visits[ids.bot].at).toBe("number");
+    // the boss's own place is untouched by hers, and nobody records a conversation that isn't there
+    expect((await botAs(BOSS)).threadId).toBe(ids.bossThread);
+    expect((await api("PUT", "/api/people/me/navigation", { botId: ids.bot, threadId: "no-such-thread" }, BOB)).status).toBe(404);
+  });
+
   it("keeps everything open to the owner on this machine", async () => {
     expect((await api("GET", `/api/threads/${ids.adaThread}/messages`)).status).toBe(200);
   });

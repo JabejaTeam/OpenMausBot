@@ -673,7 +673,6 @@
   "office.status.idle": "Idle",
   "office.away": "Away from desk",
   "simpleUi.dragTeam": "Drag to reorder teams",
-  "simpleUi.switchBot": "Switch to a teammate",
   "simpleUi.connectApps": "Connect apps",
   "settings.sidebarDensity.subtitle": "How much room each bot and thread takes in the sidebar, on this device only. Avatars only is the same as collapsing the sidebar from its header.",
   "settings.advancedMode.title": "Advanced mode",

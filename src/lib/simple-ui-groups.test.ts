@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lastSentAt, simpleSidebarLayout, simpleSidebarRows, teamLead, teamToOpen } from "./simple-ui-groups";
+import { lastSentAt, simpleSidebarLayout, simpleSidebarRows, teamLead, openTeamOf } from "./simple-ui-groups";
 
 describe("simpleSidebarLayout", () => {
   const bots = [
@@ -45,14 +45,13 @@ describe("team leads", () => {
     expect(groups.map((g) => teamLead(g)?.id ?? null)).toEqual(["pm", "solo", null]);
   });
 
-  it("opens the team of a hidden member, never for a lead or unassigned row", () => {
-    expect(teamToOpen(groups, "code")).toBe("section:A");
-    expect(teamToOpen(groups, "room")).toBe("section:A");
-    expect(teamToOpen(groups, "pm")).toBeNull();
-    expect(teamToOpen(groups, "solo")).toBeNull();
-    expect(teamToOpen(groups, "loose")).toBeNull();
-    expect(teamToOpen(groups, "free")).toBeNull();
-    expect(teamToOpen(groups, "nope")).toBeNull();
+  it("opens the team of any of its bots or rooms, its lead included, never an unassigned row", () => {
+    expect(openTeamOf(groups, "code")).toBe("section:A");
+    expect(openTeamOf(groups, "room")).toBe("section:A");
+    expect(openTeamOf(groups, "pm")).toBe("section:A");
+    expect(openTeamOf(groups, "loose")).toBeNull();
+    expect(openTeamOf(groups, "nope")).toBeNull();
+    expect(openTeamOf(groups, null)).toBeNull();
   });
 });
 

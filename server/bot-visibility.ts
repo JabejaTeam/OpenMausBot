@@ -227,6 +227,9 @@ export class VisibleSet {
   readonly threadRole?: (threadId: string) => ThreadRole | undefined;
   /** Fork: the person a thread belongs to (its channel), alongside threadRole. */
   readonly threadPerson?: (threadId: string) => string | undefined;
+  /** Fork: the conversation this viewer last had open with an agent
+   * (server/person-navigation.ts), alongside threadRole. */
+  readonly lastThread?: (botId: string) => string | undefined;
 
   constructor(
     bots: readonly VisibilityBot[],
@@ -235,12 +238,14 @@ export class VisibleSet {
     ownerOf?: (threadId: string) => ThreadOwner | undefined,
     threadRole?: (threadId: string) => ThreadRole | undefined,
     threadPerson?: (threadId: string) => string | undefined,
+    lastThread?: (botId: string) => string | undefined,
   ) {
     this.viewer = viewer;
     this.member = viewer.kind === "member";
     if (viewer.kind !== "all" && threadRole) {
       this.threadRole = threadRole;
       if (threadPerson) this.threadPerson = threadPerson;
+      if (lastThread) this.lastThread = lastThread;
     }
     const hides = viewer.kind === "admin" ? isPrivateValue : isRestricted;
     this.everything = viewer.kind === "all" || (!this.threadRole &&
@@ -403,7 +408,8 @@ const PAGE_FIELDS = ["messages", "hasMore", "activeLeafId"] as const;
 /** Fork: a bot or room record as one viewer receives it. Its task list keeps
  * only the threads they may open, each marked with its `access` and its
  * `person` (whose channel it is in). Its open thread becomes theirs: the one
- * of their own they used last. With no thread of their own it keeps the
+ * of their own they used last — the one they last had open (lastThread), else
+ * their latest. With no thread of their own it keeps the
  * record's id but carries no transcript (the client then offers a new
  * conversation). A record whose open thread they may open keeps it, unless
  * `page` is given: that is a fresh snapshot (GET /api/bots), which always
@@ -430,7 +436,10 @@ export function ownThreads<T extends object>(record: T, visible: VisibleSet, pag
   const mine = (threadId: string) => { const access = role(threadId); return access === "own" || access === "shared"; };
   const latest = tasks ? latestThreadFor(tasks, (threadId) => mine(threadId)) : undefined;
   const keep = !page && current && role(current) ? current : undefined;
-  const open = keep ?? latest?.threadId ?? (current && mine(current) ? current : undefined);
+  // the one they last had open comes first, while they may still open it
+  const last = typeof out.id === "string" ? visible.lastThread?.(out.id) : undefined;
+  const remembered = last && tasks?.some((task) => task.threadId === last) ? last : undefined;
+  const open = remembered ?? keep ?? latest?.threadId ?? (current && mine(current) ? current : undefined);
   // A snapshot (page given) always carries the open thread's transcript.
   if (open !== current || !open || page) {
     for (const field of PAGE_FIELDS) delete out[field];
@@ -440,7 +449,7 @@ export function ownThreads<T extends object>(record: T, visible: VisibleSet, pag
       out.threadId = open;
       Object.assign(out, page?.(open) ?? {});
     }
-    if ("busy" in out && open !== current) out.busy = Boolean(latest?.busy);
+    if ("busy" in out && open !== current) out.busy = Boolean(tasks?.find((task) => task.threadId === open)?.busy);
   }
   return out as T;
 }

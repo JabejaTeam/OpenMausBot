@@ -587,6 +587,8 @@ import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope, ty
 import { ThreadStarters } from "./thread-starters.ts";
 import { PrivateThreads, ThreadShares, threadOwnerPerson, threadRole, type ThreadAccessRecords } from "./thread-access.ts";
 import { createForkThreadRoutes } from "./routes/fork-threads.ts";
+import { createForkNavigationRoutes } from "./routes/fork-navigation.ts";
+import { PersonNavigation } from "./person-navigation.ts";
 import {
   activityCsv,
   activityEntries,
@@ -791,6 +793,8 @@ const threadStarters = new ThreadStarters(join(DATA_DIR, "thread-starters.json")
 // Fork: which threads their person marked private, and whom they shared
 // those with (server/thread-access.ts).
 const threadShares = new ThreadShares(join(DATA_DIR, "thread-shares.json"));
+// Fork: where each person was last, per agent (server/person-navigation.ts).
+const personNavigation = new PersonNavigation(join(DATA_DIR, "person-navigation.json"));
 const privateThreadIds = new PrivateThreads(join(DATA_DIR, "thread-private.json"));
 const threadAccessRecords: ThreadAccessRecords = {
   starter: (threadId) => threadStarters.get(threadId),
@@ -1001,6 +1005,13 @@ function connectorThreadPerson(threadId: string): string | undefined {
 /** The install owner: the first sign-in admin. Their connected apps are the
  * install's own Composio identity, so apps connected before people had
  * their own stay theirs. */
+/** Fork: whose navigation a request moves (server/person-navigation.ts): a
+ * session's person, the owner on this machine, nobody for a service. */
+function navigationPerson(auth: RequestAuth): string | undefined {
+  if (auth.kind === "session") return personKey(auth.session);
+  return auth.kind === "loopback" ? ownerPersonKey() ?? "owner" : undefined;
+}
+
 function ownerPersonKey(): string | undefined {
   const admin = signInAllowList().admins[0];
   return admin ? personKeyForEmail(admin) : undefined;
@@ -1626,7 +1637,8 @@ function visibleTo(viewer: Viewer): VisibleSet {
     const person = viewer.kind === "all" ? undefined : viewer.person;
     set = new VisibleSet(store.bots, store.groups, viewer, threadOwner,
       privateThreads() ? (threadId) => threadRole(person, threadId, threadAccessRecords) : undefined,
-      (threadId) => threadOwnerPerson(threadId, threadAccessRecords));
+      (threadId) => threadOwnerPerson(threadId, threadAccessRecords),
+      person ? (botId) => personNavigation.lastThread(person, botId) : undefined);
     if (visibleSets.size >= 1_000) visibleSets.clear();
     visibleSets.set(key, set);
   }
@@ -16378,6 +16390,18 @@ ROUTES.push(createForkPeopleRoutes({
   conversationExists: (threadId) => Boolean(store.botByThread(threadId) || store.groupByThread(threadId)),
   threadPerson: connectorThreadPerson,
 }));
+// Fork: where a person was last (server/routes/fork-navigation.ts).
+ROUTES.push(createForkNavigationRoutes({
+  personOf: navigationPerson,
+  navigation: personNavigation,
+  mayOpen: (auth, botId, threadId) => {
+    const bot = store.bot(botId);
+    if (!bot || !store.tasks(bot.id).some((task) => task.threadId === threadId)) return false;
+    if (auth.kind !== "session") return true;
+    const visible = visibleTo(viewerFor(auth));
+    return visible.bot(botId) && visible.thread(threadId);
+  },
+}));
 // Fork: marking a conversation private and sharing it (server/routes/fork-threads.ts).
 ROUTES.push(createForkThreadRoutes({
   personKey,
@@ -23770,6 +23794,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       // Who opened it decides who may answer its cards on a shared workspace.
       if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
+      const starter = navigationPerson(auth);
+      if (starter) personNavigation.remember(starter, bot.id, task.threadId);
       return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)$/);
@@ -23785,6 +23811,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (switchLimit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       const switched = store.switchTask(bot.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such task" });
+      const navigator = navigationPerson(auth);
+      if (navigator) personNavigation.remember(navigator, bot.id, m[2]);
       const switchedSettings = { ...wireBot(switched), tasks: store.tasks(switched.id).map((task) => wireTask(task, switched.modelSelection)) };
       // "0" is settings only, a positive page is a bounded transcript, and no
       // parameter is the whole thread — the one branch that materialises it.

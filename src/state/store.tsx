@@ -50,6 +50,7 @@ import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import { openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
 import { noteThreadChosen } from "@/lib/thread-channel";
+import { connectNavigationMemory, noteVisit } from "@/lib/navigation-memory";
 
 const MAX_ROUTINE_RUNS = 2_000;
 const ACTIVE_ROUTINE_RUN_STATUSES = new Set<RoutineRun["status"]>(["queued", "running", "waiting"]);
@@ -3454,6 +3455,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "select": {
           const bot = stateRef.current.bots.find((b) => b.id === action.id);
           const group = stateRef.current.groups.find((g) => g.id === action.id);
+          // fork: where this person was last (lib/navigation-memory)
+          if (bot) noteVisit(bot.id, bot.threadId);
           if (bot?.unread) {
             api(`/api/bots/${action.id}/read`, { method: "POST", body: JSON.stringify({ threadId: bot.threadId }) }).catch(() => {});
           } else if (group?.unread) {
@@ -3634,6 +3637,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : `/api/bots/${action.botId}/tasks/${action.threadId}?messages=${MESSAGE_PAGE_SIZE}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId } : {}) }))
             .then((r) => {
               if (!r?.bot || navigation.get(action.botId) !== revision) return;
+              // fork: the server remembered it (person-navigation); mirror it here
+              noteVisit(action.botId, r.bot.threadId, { remote: false });
               dispatch({ type: "taskSwitched", bot: r.bot });
             })
             .catch(showError);
@@ -3831,6 +3836,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (alive && answer) flushSync(() => rawDispatch({ type: "liveCallLookup", call: answer.call, since, seq }));
         })
         .catch(() => {});
+      connectNavigationMemory(api);
       const chat = () =>
         api(`/api/bots?messages=${MESSAGE_PAGE_SIZE}`).then(({ bots, groups, sections, computerControl, botQueuedMessages }) => {
           if (!alive) return;

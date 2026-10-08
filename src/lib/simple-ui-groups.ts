@@ -66,17 +66,15 @@ export function teamLead<B, R>(group: SimpleGroup<B, R>): B | null {
   return group.section ? (group.bots[0] ?? null) : null;
 }
 
-/** The team whose row stands for `id` (a bot or room hidden behind its lead):
- * null when it shows in the team list itself (a lead, an unassigned bot or
- * room, or unknown). */
-export function teamToOpen<B extends { id: string }, R extends { id: string }>(
+/** The team you are in: the one holding the open bot or room, which shows
+ * its members under its row. null outside a team (no section) or unknown. */
+export function openTeamOf<B extends { id: string }, R extends { id: string }>(
   groups: SimpleGroup<B, R>[],
   id: string | null | undefined,
 ): SimpleGroupId | null {
   if (!id) return null;
   const group = groups.find((g) => g.bots.some((bot) => bot.id === id) || g.rooms.some((room) => room.id === id));
-  if (!group?.section || teamLead(group)?.id === id) return null;
-  return group.id;
+  return group?.section ? group.id : null;
 }
 
 /** When the person last sent something here: their newest typed message
