@@ -28,8 +28,26 @@ export const BLOUB_STILL_AT = 1;
 const FRAME_MS = Math.max(MAX_STEP_MS, 1000 / 20);
 
 /** What shows through the eye holes. bloub uses the page colour; avatars sit
- * on many surfaces, so the eyes are plain white like the pastille's notch. */
-const PAPER = "#ffffff";
+ * on many surfaces, so the eyes are white — except on a body so light that
+ * white eyes all but vanish (crème, amber), which gets bloub's ink instead. */
+const EYE_LIGHT = "#ffffff";
+const EYE_DARK = "#0a0a0c";
+/** White eyes need at least this contrast with the body (WCAG ratio). Kept
+ * low on purpose: white eyes are bloub's look, dark ones only a rescue. */
+const MIN_EYE_CONTRAST = 1.9;
+
+function luminance(hex: string): number {
+  const channel = (i: number) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+}
+
+/** The eye colour for a body colour. */
+export function eyesFor(ink: string): string {
+  return 1.05 / (luminance(ink) + 0.05) >= MIN_EYE_CONTRAST ? EYE_LIGHT : EYE_DARK;
+}
 
 const R = RAYON;
 const VB = DEMI_VIEWBOX;
@@ -234,7 +252,7 @@ function useOnScreen(ref: React.RefObject<Element | null>, enabled: boolean): bo
 
 /** A dot's SVG attributes: a circle, or a path drawn at its place. */
 function dotAttrs(dot: BotFrame["dots"][number], ink: string): Record<string, string | number> {
-  const fill = dot.color ?? (dot.depth === undefined ? ink : mixHex(PAPER, ink, dot.depth));
+  const fill = dot.color ?? (dot.depth === undefined ? ink : mixHex(eyesFor(ink), ink, dot.depth));
   return dot.d
     ? { fill, opacity: dot.opacity, d: dot.d, transform: `translate(${dot.x} ${dot.y}) rotate(${dot.rot ?? 0}) scale(${R})` }
     : { fill, opacity: dot.opacity, cx: dot.x, cy: dot.y, r: dot.r };
@@ -440,7 +458,7 @@ function BloubAvatarComponent({ size, shape, expression, color, state = "idle", 
 
       <g data-b="alpha" opacity={frame.bodyAlpha}>
         {/* an opaque base in the body's shape, so nothing drawn behind shows through the eyes */}
-        <path data-b="body" d={frame.bodyPath} fill={PAPER} />
+        <path data-b="body" d={frame.bodyPath} fill={eyesFor(ink)} />
         <g mask={`url(#${maskId})`}>
           <rect x={-VB} y={-VB} width={VB * 2} height={VB * 2} fill={ink} />
         </g>

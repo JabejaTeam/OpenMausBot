@@ -7,7 +7,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BloubAvatar } from "./BloubAvatar";
+import { BloubAvatar, eyesFor } from "./BloubAvatar";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -70,5 +70,14 @@ describe("BloubAvatar", () => {
     flushSync(() => root.unmount());
     expect(cancel).toHaveBeenCalledTimes(1);
     root = createRoot(host);
+  });
+
+  it("gives a body too light for white eyes dark ones, and every other body white ones", () => {
+    expect(eyesFor("#f1efe9")).toBe("#0a0a0c"); // crème
+    expect(eyesFor("#f0b429")).toBe("#0a0a0c"); // amber
+    expect(eyesFor("#0a0a0c")).toBe("#ffffff"); // ink
+    expect(eyesFor("#3b93f0")).toBe("#ffffff"); // blue
+    expect(eyesFor("#e8483f")).toBe("#ffffff"); // red
+    expect(eyesFor("#3ecf8e")).toBe("#ffffff"); // green
   });
 });
