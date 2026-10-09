@@ -72,6 +72,36 @@ describe("BloubAvatar", () => {
     root = createRoot(host);
   });
 
+  it("draws the end of a morph even when no frame ran while it played (hidden window, stopped working)", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const queued: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => (queued.push(cb), queued.length));
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    const flushFrames = () => {
+      for (let i = 0; i < 20 && queued.length; i++) {
+        flushSync(() => queued.shift()!(now));
+        vi.advanceTimersByTime(60);
+        now += 60;
+      }
+    };
+    // the body's right edge: ~104 for a whole bloub, ~15 for thinking's dot
+    // (the exact outline breathes, so compare its size, not its path)
+    const bodyWidth = () => Number(host.querySelector("[data-b=body]")!.getAttribute("d")!.slice(1).split(" ")[0]);
+
+    flushSync(() => root.render(createElement(BloubAvatar, { size: 40, ...look, state: "thinking", animated: true })));
+    flushFrames();
+    expect(bodyWidth()).toBeLessThan(30);
+
+    // the bot stops working while no frame runs; the next frame comes long after
+    flushSync(() => root.render(createElement(BloubAvatar, { size: 40, ...look, state: "idle", animated: true })));
+    now += 10_000;
+    flushFrames();
+    expect(bodyWidth()).toBeGreaterThan(90);
+    vi.useRealTimers();
+  });
+
   it("gives a body too light for white eyes dark ones, and every other body white ones", () => {
     expect(eyesFor("#f1efe9")).toBe("#0a0a0c"); // crème
     expect(eyesFor("#f0b429")).toBe("#0a0a0c"); // amber

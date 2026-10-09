@@ -316,7 +316,10 @@ function BloubAvatarComponent({ size, shape, expression, color, state = "idle", 
   /** The last frame drawn (React's or painted), and the layout React drew. */
   const drawn = useRef<BotFrame | null>(null);
   const layout = useRef("");
-  const run = useRef<{ engine: BotEngine; morphUntil: number } | null>(null);
+  /** `settled`: the end of the last morph is on screen. A morph is time-based,
+   * so frames that never ran while it played (hidden window, throttled tab)
+   * would otherwise leave its first frame — thinking's dot — up for good. */
+  const run = useRef<{ engine: BotEngine; morphUntil: number; settled: boolean } | null>(null);
   const [liveFrame, setLiveFrame] = useState<BotFrame | null>(null);
 
   useEffect(() => {
@@ -327,7 +330,7 @@ function BloubAvatarComponent({ size, shape, expression, color, state = "idle", 
       return;
     }
     const { state: initial, radii: initialRadii, face: initialFace } = latest.current;
-    const current = { engine: new BotEngine(R, initial, initialRadii, initialFace), morphUntil: clockNow() + MORPH_WAKE };
+    const current = { engine: new BotEngine(R, initial, initialRadii, initialFace), morphUntil: clockNow() + MORPH_WAKE, settled: false };
     run.current = current;
     let aiming = false;
     // where it sits, re-read only after a scroll or resize (placeEpoch)
@@ -338,7 +341,7 @@ function BloubAvatarComponent({ size, shape, expression, color, state = "idle", 
     const following = (t: number) => t < lookUntil && STATE_BY_ID.get(latest.current.state)?.baseFace === true;
     const unsubscribe = subscribeSleeper({
       awake(t, isFocused) {
-        if (latest.current.state === "thinking" || t < current.morphUntil) return true;
+        if (latest.current.state === "thinking" || t < current.morphUntil || !current.settled) return true;
         if (!isFocused) return false;
         if (following(t)) {
           if (t < settleUntil || !box || box.epoch !== placeEpoch) return true;
@@ -376,7 +379,8 @@ function BloubAvatarComponent({ size, shape, expression, color, state = "idle", 
         // otherwise React lays the new elements out
         // at rest the body only breathes, by a fraction of a pixel at avatar
         // size: keep its outline and redraw just the eyes
-        const body = latest.current.state === "thinking" || t < current.morphUntil;
+        const body = latest.current.state === "thinking" || t < current.morphUntil || !current.settled;
+        if (t >= current.morphUntil) current.settled = true;
         if (svg.current && !next.arcs.length && layoutOf(next) === layout.current) paint(svg.current, next, latest.current.ink, body);
         else setLiveFrame(next);
       },
@@ -395,6 +399,7 @@ function BloubAvatarComponent({ size, shape, expression, color, state = "idle", 
     const t = clockNow();
     apply(current.engine, t);
     current.morphUntil = t + MORPH_WAKE;
+    current.settled = false;
     wake();
   };
   useEffect(() => changed((engine, t) => engine.setState(state, t)), [state]);
