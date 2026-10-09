@@ -221,15 +221,14 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
 };
 
 /**
- * The app's state for a bot -> bloub's. Thinking replaces the body with
- * bloub's three pulsing dots, so it shows only while the bot really works
- * (the caller animates it then); stateForBot also says "working" for a bot
- * that merely is about code, and that bot keeps its face when still.
- * Waiting on you and a failed tool both get bloub's blue notification
- * pastille: the bot keeps its shape, where "alert" would turn it into a "!".
+ * The app's state for a bot -> bloub's. A bot always keeps its own bloub, so
+ * it stays recognisable everywhere: working never becomes bloub's "thinking"
+ * (the body turns into three dots) — rows already say so with their status
+ * dot and working dots. Waiting on you and a failed tool both get bloub's
+ * blue notification pastille: the bot keeps its shape, where "alert" would
+ * turn it into a "!".
  */
-export function bloubStateFor(state: MausState | undefined, animated: boolean): BloubStateId {
-  if (state === "working" && animated) return "thinking";
+export function bloubStateFor(state: MausState | undefined): BloubStateId {
   if (state === "notifying" || state === "alerting") return "notify";
   return "idle";
 }
@@ -282,15 +281,14 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
   // fork: no mascot — every bot without a picture is its bloub (BloubAvatar)
   if (outcome !== "flatImage") {
     const look = bloubLookFor(bot);
-    // every bloub lives (blinks, looks around); `animated` says it works
-    const working = mascotProps.animated === true;
+    // every bloub lives (blinks, looks around)
     return (
       <BloubAvatar
         size={size}
         shape={look.shape}
         expression={look.expression}
         color={look.color}
-        state={bloubStateFor(mascotProps.state, working)}
+        state={bloubStateFor(mascotProps.state)}
         animated
         label={label ?? shownName}
       />

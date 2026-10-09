@@ -97,19 +97,18 @@ describe("BotAvatar's two avatar outcomes", () => {
 });
 
 describe("bloubStateFor", () => {
-  it("thinks only while animated work runs", () => {
-    expect(bloubStateFor("working", true)).toBe("thinking");
-    expect(bloubStateFor("working", false)).toBe("idle");
+  it("keeps the bot's own bloub while it works, never bloub's thinking dots", () => {
+    expect(bloubStateFor("working")).toBe("idle");
   });
 
   it("shows the notification pastille when the bot waits on you or a tool failed", () => {
-    expect(bloubStateFor("notifying", false)).toBe("notify");
-    expect(bloubStateFor("alerting", true)).toBe("notify");
+    expect(bloubStateFor("notifying")).toBe("notify");
+    expect(bloubStateFor("alerting")).toBe("notify");
   });
 
   it("rests on the stored expression otherwise", () => {
-    expect(bloubStateFor("curious", true)).toBe("idle");
-    expect(bloubStateFor(undefined, false)).toBe("idle");
+    expect(bloubStateFor("curious")).toBe("idle");
+    expect(bloubStateFor(undefined)).toBe("idle");
   });
 });
 
