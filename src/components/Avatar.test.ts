@@ -11,6 +11,7 @@ import {
   type MausAvatarProps,
 } from "./Avatar";
 import { MASCOT_BODIES } from "../../shared/mascot-bodies";
+import { robotStateFor } from "./RobotHeadAvatar";
 
 const render = (props: Partial<MausAvatarProps>) =>
   renderToStaticMarkup(createElement(MausAvatar, { color: "green", animated: false, ...props }));
@@ -76,23 +77,32 @@ describe("BotAvatar's two avatar outcomes", () => {
     expect(markup).not.toContain("radialGradient");
   });
 
-  // fork: the "gradient mascot" outcome draws the bot's bloub (an svg with a mask)
-  it("renders the bloub when the crop is mascot, image or not", () => {
+  // fork preview: the "gradient mascot" outcome draws the bot's robot head (a canvas)
+  it("renders the robot head when the crop is mascot, image or not", () => {
     const markup = renderBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: "mascot" });
     expect(markup).not.toContain("<img");
-    expect(markup).toContain("<svg");
-    expect(markup).toContain("<mask");
+    expect(markup).toContain("<canvas");
   });
 
-  it("falls back to the bloub when a flat crop has no valid image", () => {
+  it("falls back to the robot head when a flat crop has no valid image", () => {
     const markup = renderBot({ avatarUrl: undefined, avatarCrop: "circle" });
     expect(markup).not.toContain("<img");
-    expect(markup).toContain("<mask");
+    expect(markup).toContain("<canvas");
   });
 
-  it("paints the stored bloub colour, else the bot colour's nearest", () => {
-    expect(renderBot({ color: "blue" })).toContain('fill="#3b93f0"');
-    expect(renderBot({ color: "blue", bloub: { shape: "cercle", expression: "neutre", color: "rose" } })).toContain('fill="#e152b0"');
+  it("names the head after the bot", () => {
+    expect(renderBot({ name: "Pixel" })).toContain('aria-label="Pixel"');
+  });
+});
+
+describe("robotStateFor", () => {
+  it("works while busy, listens while waiting on you, shows a failed tool", () => {
+    expect(robotStateFor("idle", true)).toBe("working");
+    expect(robotStateFor("notifying", false)).toBe("listening");
+    expect(robotStateFor("alerting", false)).toBe("error");
+    expect(robotStateFor("sleeping", false)).toBe("sleeping");
+    expect(robotStateFor("curious", false)).toBe("idle");
+    expect(robotStateFor(undefined, false)).toBe("idle");
   });
 });
 

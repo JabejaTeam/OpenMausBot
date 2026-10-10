@@ -15,7 +15,7 @@ import {
 } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
-import { BloubAvatar } from "./BloubAvatar";
+import { RobotHeadAvatar, robotStateFor } from "./RobotHeadAvatar";
 import { botLabelLine } from "@/lib/bot-label";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody, type MascotBodyId } from "../../shared/mascot-bodies";
@@ -217,6 +217,8 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
     avatarFocusY?: number;
     mascotBody?: MascotBodyId | null;
     bloub?: BloubLook;
+    /** fork preview: a busy bot's head animates its working face. */
+    busy?: boolean;
   };
 };
 
@@ -281,15 +283,13 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
   // fork: no mascot — every bot without a picture is its bloub (BloubAvatar)
   if (outcome !== "flatImage") {
     const look = bloubLookFor(bot);
-    // every bloub lives (blinks, looks around)
+    // fork preview: robot heads instead of bloubs
     return (
-      <BloubAvatar
+      <RobotHeadAvatar
+        id={bot.id ?? name ?? ""}
         size={size}
-        shape={look.shape}
-        expression={look.expression}
         color={look.color}
-        state={bloubStateFor(mascotProps.state)}
-        animated
+        state={robotStateFor(mascotProps.state, bot.busy === true)}
         label={label ?? shownName}
       />
     );
