@@ -50,6 +50,12 @@ export interface RobotHeadProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'c
    * head grows to fill the room the antenna took.
    */
   antenna?: boolean;
+  /**
+   * fork: look at the pointer wherever it is on the page (eyes, and a little
+   * of the head), without the hop-on-click or full 3D that `interactive`
+   * brings. Costs nothing while the pointer is still.
+   */
+  followPointer?: boolean;
   /** Draw the soft shadow on the floor under the head. Default `true`. */
   floorShadow?: boolean;
   /** 0–1, offsets the blinks and glances so a row of heads does not move in unison. */

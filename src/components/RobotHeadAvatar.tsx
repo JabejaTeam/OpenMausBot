@@ -57,6 +57,7 @@ export const RobotHeadAvatar = memo(function RobotHeadAvatar({
         antenna={size >= 64}
         floorShadow={size >= 64}
         interactive={hovered}
+        followPointer
         seed={seedFor(id)}
         aria-label={label}
       />

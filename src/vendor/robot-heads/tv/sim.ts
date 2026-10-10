@@ -82,6 +82,9 @@ export class RobotSim {
   since = 0;
   pose: RobotPose = { yaw: 0, pitch: 0, roll: 0, x: 0, lift: 0, sx: 1, sy: 1, antennaX: 0, antennaZ: 0 };
   face: FaceParams;
+  /* fork: follow the pointer in coarse steps (billboard heads) */
+  coarse = false;
+  private followAt = { x: 0, y: 0 };
   /* the pointer, relative to the head's centre in CSS px, or null */
   pointer: { x: number; y: number } | null = null;
 
@@ -272,11 +275,27 @@ export class RobotSim {
     }
 
     if (follows && p) {
-      yaw = clamp(p.x / 260, -1, 1) * 0.55;
-      pitch = -clamp(p.y / 260, -1, 1) * 0.32;
-      roll = -yaw * 0.12 + (this.state === 'listening' ? 0.12 : 0);
       lookX = clamp(p.x / 120, -2.4, 2.4);
       lookY = clamp(p.y / 160, -1.4, 1.4);
+      if (this.coarse) {
+        /* fork: follow in the eyes' own steps — the LEDs only move whole
+           cells, and the head turns to match only when they do, so a
+           moving pointer costs a redraw per step, not per frame */
+        const held = this.followAt;
+        if (Math.abs(lookX - held.x) > 0.8) held.x = Math.round(lookX);
+        if (Math.abs(lookY - held.y) > 0.8) held.y = Math.round(lookY);
+        lookX = held.x;
+        lookY = held.y;
+        yaw = (lookX / 2.4) * 0.55;
+        pitch = -(lookY / 1.4) * 0.32;
+        /* a quick, critically damped turn: a few frames per step, no ripples */
+        freq = 3.5;
+        damping = 1;
+      } else {
+        yaw = clamp(p.x / 260, -1, 1) * 0.55;
+        pitch = -clamp(p.y / 260, -1, 1) * 0.32;
+      }
+      roll = -yaw * 0.12 + (this.state === 'listening' ? 0.12 : 0);
     }
 
     this.yaw.step(yaw, dt, freq, damping);

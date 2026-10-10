@@ -341,7 +341,7 @@ const QUANTUM_CSS = 0.4;
 /* the antenna bulb's brightness steps; finer ones are invisible on a bulb this size */
 const BULB_STEPS = 16;
 /* a billboard turned further than this (radians) from its rest pose is mid-spin */
-const FLIP_FROM = 0.7;
+const FLIP_FROM = 1.1;
 
 type Mat3 = ReturnType<typeof rotation>;
 
@@ -775,7 +775,7 @@ export class RobotRenderer {
     const ix = (h[0] = snapHeld(h[0], (poseIn.x + Math.sin(dyaw) * 0.08) / tStep));
     const iy = (h[1] = snapHeld(h[1], (poseIn.lift - (poseIn.pitch - rest.pitch) * 0.06) / tStep));
     const ir = (h[2] = snapHeld(h[2], (poseIn.roll - rest.roll) / aStep));
-    /* only a real spin narrows the card; a glance (|dyaw| under ~40°) keeps its width */
+    /* only a real spin narrows the card; a glance or following the pointer (|dyaw| under ~60°) keeps its width */
     const flip = Math.abs(dyaw) < FLIP_FROM ? 1 : Math.max(0.12, Math.abs(Math.cos(dyaw)) / Math.cos(FLIP_FROM));
     const isx = (h[3] = snapHeld(h[3], (poseIn.sx * Math.min(1, flip) - 1) / aStep));
     const isy = (h[4] = snapHeld(h[4], (poseIn.sy - 1) / aStep));

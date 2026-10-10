@@ -14,6 +14,10 @@ type Tick = (dt: number) => void;
 /** Where the pointer last was on the page, NaN while it is away. */
 export const pointer = { x: NaN, y: NaN };
 
+/** fork: bumped on every scroll or resize, so a head re-measures its box
+ * only then — never a layout read per frame. */
+export const layout = { epoch: 0 };
+
 interface Sub {
   fn: Tick;
   interval: number;
@@ -71,6 +75,11 @@ function listen() {
     pointer.y = e.clientY;
   }, { passive: true });
   document.addEventListener('pointerleave', away);
+  const moved = () => {
+    layout.epoch++;
+  };
+  window.addEventListener('scroll', moved, { passive: true, capture: true });
+  window.addEventListener('resize', moved, { passive: true });
   window.addEventListener('blur', away);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) stop();

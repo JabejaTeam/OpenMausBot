@@ -5,7 +5,7 @@ import { RobotSim, restPose } from './tv/sim';
 import { CTX, RobotRenderer, frameFor, type Palette } from './tv/render';
 import { linear } from './tv/light';
 import { parseColor } from './color';
-import { subscribe, pointer } from './ticker';
+import { layout, subscribe, pointer } from './ticker';
 import { MAX_STEP_MS } from '@/lib/office-motion';
 
 /* fork: update-rate LOD — heads up to 96 px move at 15 fps, which reads the
@@ -73,6 +73,7 @@ export const RobotHead = forwardRef<HTMLCanvasElement, RobotHeadProps>(function 
     speed = 1,
     paused = false,
     interactive = true,
+    followPointer = false,
     floorShadow = true,
     antenna = true,
     seed,
@@ -102,6 +103,10 @@ export const RobotHead = forwardRef<HTMLCanvasElement, RobotHeadProps>(function 
   speedRef.current = speed;
   const interactiveRef = useRef(interactive);
   interactiveRef.current = interactive;
+  const followRef = useRef(followPointer || interactive);
+  followRef.current = followPointer || interactive;
+  /* the box, measured once per scroll/resize (layout.epoch) */
+  const rect = useRef<{ epoch: number; x: number; y: number } | null>(null);
   const shadowRef = useRef(floorShadow);
   shadowRef.current = floorShadow;
   const antennaRef = useRef(antenna);
@@ -153,19 +158,25 @@ export const RobotHead = forwardRef<HTMLCanvasElement, RobotHeadProps>(function 
     return subscribe((dt) => {
       const s = sim.current!;
       const el = boxRef.current;
-      if (el && interactiveRef.current && Number.isFinite(pointer.x)) {
+      if (el && followRef.current && Number.isFinite(pointer.x)) {
         /* measured from the resting head's centre */
-        const box = el.getBoundingClientRect();
-        const f = frameRef.current;
-        const dx = pointer.x - (box.left + box.width / 2);
-        const dy = pointer.y - (box.top + f.cy - f.padTop);
-        s.pointer = Math.hypot(dx, dy) < 700 ? { x: dx, y: dy } : null;
+        let r = rect.current;
+        if (!r || r.epoch !== layout.epoch) {
+          const box = el.getBoundingClientRect();
+          const f = frameRef.current;
+          r = rect.current = { epoch: layout.epoch, x: box.left + box.width / 2, y: box.top + f.cy - f.padTop };
+        }
+        const dx = pointer.x - r.x;
+        const dy = pointer.y - r.y;
+        /* fork: a follower looks across the whole page; a plain interactive head within 700 px */
+        s.pointer = followPointer || Math.hypot(dx, dy) < 700 ? { x: dx, y: dy } : null;
       } else s.pointer = null;
+      s.coarse = size <= FLAT_MAX && !interactiveRef.current;
       s.update(dt * speedRef.current);
       paint(true);
     }, intervalFor(size, interactive));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [still, inView, interactive, size, stateKey, shapeKey, color, trimColor, screenColor, floorShadow, antenna]);
+  }, [still, inView, interactive, followPointer, size, stateKey, shapeKey, color, trimColor, screenColor, floorShadow, antenna]);
 
   const click = (e: MouseEvent<HTMLSpanElement>) => {
     if (interactive && !still) sim.current?.poke();
