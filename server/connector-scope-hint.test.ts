@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { connectorCallsIn } from "../shared/outbound.ts";
 import { scopeHint, withScopeHint } from "./connector-scope-hint.ts";
 
 const encode = (value: unknown) => new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value));
@@ -46,5 +47,18 @@ describe("connector scope hint (MOCA-273)", () => {
     expect(withScopeHint(ok, "application/json", ["GMAIL_SEND_EMAIL"])).toBe(ok);
     const unreadable = encode("ACCESS_TOKEN_SCOPE_INSUFFICIENT but not JSON");
     expect(withScopeHint(unreadable, "application/json", ["GMAIL_CREATE_FILTER"])).toBe(unreadable);
+  });
+
+  it("leaves a tool search alone that only mentions the scope error as a pitfall", () => {
+    // COMPOSIO_SEARCH_TOOLS calls no app, yet its known pitfalls can quote
+    // ACCESS_TOKEN_SCOPE_INSUFFICIENT. A note there told a bot its Drive
+    // connection was refused before it ever called Drive.
+    const search = encode({
+      jsonrpc: "2.0",
+      id: 3,
+      result: { content: [{ type: "text", text: JSON.stringify({ successful: true, data: { known_pitfalls: ["[GOOGLEDRIVE_GET_FILE_METADATA] insufficient scopes can return 403 PERMISSION_DENIED (ACCESS_TOKEN_SCOPE_INSUFFICIENT)."] } }) }] },
+    });
+    const slugs = connectorCallsIn("COMPOSIO_SEARCH_TOOLS", { queries: [{ use_case: "List files in a Google Drive folder" }] }).map((call) => call.slug);
+    expect(withScopeHint(search, "application/json", slugs)).toBe(search);
   });
 });

@@ -56,9 +56,12 @@ function annotateFrame(frame: unknown, slugs: readonly string[]): boolean {
 /**
  * The relayed MCP response, with the note added when a tool call came back
  * refused for a missing OAuth permission. Anything else, including a body it
- * cannot read, is returned byte for byte.
+ * cannot read, is returned byte for byte. `slugs` are the app calls the
+ * request made (connectorCallsIn): none, as for COMPOSIO_SEARCH_TOOLS whose
+ * pitfalls can quote the scope error, means no app refused anything.
  */
 export function withScopeHint(bytes: Uint8Array, contentType: string, slugs: readonly string[]): Uint8Array {
+  if (!slugs.length) return bytes;
   const text = new TextDecoder().decode(bytes);
   if (!SCOPE_ERROR.test(text)) return bytes;
   try {
