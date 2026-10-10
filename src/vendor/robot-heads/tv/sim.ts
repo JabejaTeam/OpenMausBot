@@ -31,6 +31,16 @@ function rng(seed: number) {
   };
 }
 
+/* fork: idle glances, blinks and hops land on a beat shared by every head
+   on the page (bloub does the same with its blinks). Each head still picks
+   its own moments, but they fall in the same frames, so a row of heads
+   costs the browser a few frames per beat instead of one per head per
+   event. Seconds of the page's clock. */
+const LOOK_BEAT = 2.8;
+const BLINK_BEAT = 1.4;
+const clockNow = () => (typeof performance === 'undefined' ? Date.now() : performance.now()) / 1000;
+const beatAfter = (at: number, beat: number) => Math.ceil(at / beat) * beat;
+
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const easeInOut = (p: number) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
 
@@ -86,10 +96,12 @@ export class RobotSim {
   private jump: Jump | null = null;
   private random: () => number;
   private lookAt = { yaw: 0, pitch: 0, x: 0, y: 0 };
-  private nextLook = 0.6;
-  private nextBlink = 1.5;
+  /* page-clock seconds (fork) */
+  private clock = clockNow();
+  private nextLook = beatAfter(this.clock + 0.6, LOOK_BEAT);
+  private nextBlink = 0;
   private blinkAge = -1;
-  private nextHop = 8;
+  private nextHop = 0;
   private nextSide = 4;
   private reactUntil = -1;
   private nextNod = 2.5;
@@ -98,8 +110,8 @@ export class RobotSim {
     this.random = rng(seed);
     this.state = this.shown = this.previous = state;
     this.face = { lookX: 0, lookY: 0, blink: 0, time: 0, side: 1, seed };
-    this.nextBlink = 1 + this.random() * 3;
-    this.nextHop = 6 + this.random() * 6;
+    this.nextBlink = beatAfter(this.clock + 1 + this.random() * 3, BLINK_BEAT);
+    this.nextHop = beatAfter(this.clock + 6 + this.random() * 6, LOOK_BEAT);
   }
 
   setState(s: RobotHeadState) {
@@ -107,7 +119,7 @@ export class RobotSim {
     this.state = s;
     this.since = 0;
     this.nextLook = 0;
-    this.nextHop = this.time + (s === 'happy' ? 0.2 : 3 + this.random() * 4);
+    this.nextHop = s === 'happy' ? this.clock + 0.2 : beatAfter(this.clock + 3 + this.random() * 4, LOOK_BEAT);
     if (s === 'happy') this.hop(0.22, 1);
   }
 
@@ -124,6 +136,7 @@ export class RobotSim {
 
   update(dt: number) {
     if (!(dt > 0)) return;
+    this.clock = clockNow();
     /* small steps keep the springs stable on a slow frame */
     const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
     for (let i = 0; i < steps; i++) this.step(dt / steps);
@@ -152,7 +165,7 @@ export class RobotSim {
     const p = this.pointer;
     const follows = p && (this.state === 'idle' || this.state === 'listening' || this.state === 'happy' || this.state === 'speaking');
 
-    if (t > this.nextLook) {
+    if (this.clock >= this.nextLook) {
       this.lookAt = {
         yaw: (rand() - 0.5) * 0.75,
         pitch: (rand() - 0.5) * 0.24,
@@ -161,7 +174,7 @@ export class RobotSim {
       };
       this.lookAt.x = clamp(Math.round(this.lookAt.yaw * 5), -2, 2);
       this.lookAt.y = rand() < 0.3 ? -1 : rand() < 0.2 ? 1 : 0;
-      this.nextLook = t + 1.4 + rand() * 2.6;
+      this.nextLook = beatAfter(this.clock + 1.4 + rand() * 2.6, LOOK_BEAT);
     }
 
     switch (this.state) {
@@ -171,9 +184,9 @@ export class RobotSim {
         roll = -this.lookAt.yaw * 0.16;
         lookX = this.lookAt.x;
         lookY = this.lookAt.y;
-        if (t > this.nextHop) {
+        if (this.clock >= this.nextHop) {
           this.hop(0.15 + rand() * 0.07, rand() < 0.35 ? (rand() < 0.5 ? 1 : -1) : 0);
-          this.nextHop = t + 7 + rand() * 7;
+          this.nextHop = beatAfter(this.clock + 7 + rand() * 7, LOOK_BEAT);
         }
         break;
       case 'thinking': {
@@ -221,18 +234,18 @@ export class RobotSim {
         pitch = -0.16;
         roll = Math.sin(t * 0.5) * 0.04;
         bob += Math.abs(Math.sin(t * 7)) * 0.012;
-        if (t > this.nextHop) {
+        if (this.clock >= this.nextHop) {
           this.hop(0.2, rand() < 0.5 ? 1 : -1);
-          this.nextHop = t + 5 + rand() * 3;
+          this.nextHop = beatAfter(this.clock + 5 + rand() * 3, LOOK_BEAT);
         }
         break;
       case 'happy':
         yaw = Math.sin(t * 2.2) * 0.18;
         roll = Math.sin(t * 4.4) * 0.12;
         pitch = 0.08;
-        if (t > this.nextHop) {
+        if (this.clock >= this.nextHop) {
           this.hop(0.17, rand() < 0.34 ? (rand() < 0.5 ? 1 : -1) : 0);
-          this.nextHop = t + 1.05 + rand() * 0.4;
+          this.nextHop = this.clock + 1.05 + rand() * 0.4;
         }
         break;
       case 'error': {
@@ -304,10 +317,10 @@ export class RobotSim {
     this.squash.step(squashTarget, dt, 3.2, 0.32);
 
     /* blinks */
-    if (t > this.nextBlink) {
+    if (this.clock >= this.nextBlink) {
       this.blinkAge = 0;
-      this.nextBlink = t + 2.2 + rand() * 3.5;
-      if (rand() < 0.2) this.nextBlink = t + 0.35;
+      this.nextBlink = beatAfter(this.clock + 2.2 + rand() * 3.5, BLINK_BEAT);
+      if (rand() < 0.2) this.nextBlink = this.clock + 0.35;
     }
     let blink = 0;
     if (this.blinkAge >= 0) {

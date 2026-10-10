@@ -340,6 +340,8 @@ const mix = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] 
 const QUANTUM_CSS = 0.4;
 /* the antenna bulb's brightness steps; finer ones are invisible on a bulb this size */
 const BULB_STEPS = 16;
+/* a billboard turned further than this (radians) from its rest pose is mid-spin */
+const FLIP_FROM = 0.7;
 
 type Mat3 = ReturnType<typeof rotation>;
 
@@ -385,6 +387,13 @@ function drawMesh(c: CanvasRenderingContext2D, mesh: Mesh, mat: Material, R: Mat
     c.fill();
     c.stroke();
   }
+}
+
+/* fork: snap with hysteresis — a value only leaves its step once it is
+   well past the edge, so a wobble round a boundary (an idle bob smaller
+   than a step, a spring's last ripples) never flickers between two steps */
+function snapHeld(held: number, steps: number): number {
+  return Math.abs(steps - held) > 0.8 ? Math.round(steps) : held;
 }
 
 /* the LED matrix, hashed coarsely: a level step under 1/32 never shows */
@@ -459,6 +468,8 @@ export class RobotRenderer {
   private screenBase: HTMLCanvasElement | null = null;
   private glass: HTMLCanvasElement | null = null;
   private lastKey = '';
+  /* the billboard's snapped pose, held against jitter (snapHeld) */
+  private hold = [0, 0, 0, 0, 0];
   private flat: HTMLCanvasElement | null = null;
   private flatKey = '';
   private flatLayersKey = '';
@@ -760,11 +771,14 @@ export class RobotRenderer {
     const reach = Math.hypot(shape.earX + 0.1, shape.hy + 0.06);
     const q = QUANTUM_CSS * dpr;
     const tStep = q / U, aStep = q / (reach * U);
-    const ix = Math.round((poseIn.x + Math.sin(dyaw) * 0.08) / tStep);
-    const iy = Math.round((poseIn.lift - (poseIn.pitch - rest.pitch) * 0.06) / tStep);
-    const ir = Math.round((poseIn.roll - rest.roll) / aStep);
-    const isx = Math.round((poseIn.sx * Math.max(0.12, Math.abs(Math.cos(dyaw))) - 1) / aStep);
-    const isy = Math.round((poseIn.sy - 1) / aStep);
+    const h = this.hold;
+    const ix = (h[0] = snapHeld(h[0], (poseIn.x + Math.sin(dyaw) * 0.08) / tStep));
+    const iy = (h[1] = snapHeld(h[1], (poseIn.lift - (poseIn.pitch - rest.pitch) * 0.06) / tStep));
+    const ir = (h[2] = snapHeld(h[2], (poseIn.roll - rest.roll) / aStep));
+    /* only a real spin narrows the card; a glance (|dyaw| under ~40°) keeps its width */
+    const flip = Math.abs(dyaw) < FLIP_FROM ? 1 : Math.max(0.12, Math.abs(Math.cos(dyaw)) / Math.cos(FLIP_FROM));
+    const isx = (h[3] = snapHeld(h[3], (poseIn.sx * Math.min(1, flip) - 1) / aStep));
+    const isy = (h[4] = snapHeld(h[4], (poseIn.sy - 1) / aStep));
     const key = `flat|${flatKey}|${ix},${iy},${ir},${isx},${isy}|${ctx.canvas.width}x${ctx.canvas.height}|${opts.floorShadow ? 1 : 0}`;
     if (key === this.lastKey) return false;
     this.lastKey = key;
