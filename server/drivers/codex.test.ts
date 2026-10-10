@@ -1327,8 +1327,12 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv).toContain("features.shell_snapshot=false");
     expect(seen.calls.find((call: { method: string }) => call.method === "thread/start").params.config["shell_environment_policy.exclude"]).toEqual([
+      // Fork (withOwnEnvNames): a custom server's values wait under names of
+      // its own, so those are what the shell loses; the person's OVERRIDDEN
+      // and GITHUB_PERSONAL_ACCESS_TOKEN names are never written at all.
       "USER_SECRET_*", "OMB_REMOTE_MCP_CONFIG_*",
-      "ELECTRON_RUN_AS_NODE", "GITHUB_PERSONAL_ACCESS_TOKEN", "OMB_COMMS_TOKEN", "OMB_CONNECTORS_TOKEN", "OMB_PHONE_TOKEN", "OVERRIDDEN",
+      "ELECTRON_RUN_AS_NODE", "OMB_COMMS_TOKEN", "OMB_CONNECTORS_TOKEN",
+      "OMB_MCP_ENV_NOTES_0", "OMB_MCP_ENV_NOTES_1", "OMB_MCP_ENV_NOTES_2", "OMB_MCP_ENV_NOTES_3", "OMB_PHONE_TOKEN",
     ]);
   });
 
