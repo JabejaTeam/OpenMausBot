@@ -94,6 +94,7 @@ import {
   CHANNELS_SECTION_ID,
   PINNED_SECTION_ID,
   PINNED_THREADS_SECTION_ID,
+  TOOLS_SECTION_ID,
   mergeSectionOrder,
   moveSection,
   orderedSidebarSections,
@@ -123,13 +124,14 @@ import { profileInitials, SidebarProfileMenu } from "./SidebarProfileMenu";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { botShowsUnread } from "@/lib/bot-unread";
-import { attentionJumpAction, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
+import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 import { SidebarPinnedThreadsPanel } from "./SidebarPinnedThreadsPanel";
 import { useLiveMedia } from "@/lib/live-call-media";
 import { LiveCallPill, liveBadgeFor } from "./LiveCallPill";
 import { ShortcutHint } from "./ShortcutHint";
 import { citationPreviewText } from "@/lib/citations";
+import { isClientCancellation } from "../../shared/client-cancel";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { useAdvancedMode } from "@/lib/interface-mode";
 
@@ -170,12 +172,13 @@ export function preview(bot: Bot, visible: Message[], instances: InstanceInfo[])
     return (last.card.requestId && last.card.tool && !last.card.questionRequest && approvalCardOutcome(last.card)) || last.card.title;
   }
   // a failed turn reads as the chat row says it, never "error: …"
-  if (last.kind === "activity" && last.tool) return activityPreview(last.tool, botEngine(bot, instances));
+  if (last.kind === "activity" && last.tool) return activityPreview(last.tool, botEngine(bot, instances), last.dataResult);
   if (last.kind === "screen") return t("sidebar.preview.screenFrame");
   if (last.kind === "connector" && last.connector) return sidebarConnectorPreview(last.connector, t);
   const peer = peerLine(last);
   // a teammate reads by role, as in the chat (lib/bot-label)
   if (peer) return `${botLabel({ ...peer, section: bot.section }).name}: ${peer.body}`;
+  if (last.role !== "user" && isClientCancellation(last.text ?? "")) return t("chat.turnStopped");
   return citationPreviewText(last.text ?? "");
 }
 
@@ -201,8 +204,12 @@ export function groupPreview(group: Group, bots: Bot[], instances: InstanceInfo[
   if (group.working) return t("sidebar.preview.teamWorking");
   const last = lastNonReceipt(group.messages);
   if (!last) return t("sidebar.preview.noMessages");
+  if (last.kind === "text" && last.role !== "user" && isClientCancellation(last.text ?? "")) {
+    const stopped = t("chat.turnStopped");
+    return last.from ? `${last.from.name}: ${stopped}` : stopped;
+  }
   const text = last.kind === "activity" && last.tool
-    ? activityPreview(last.tool, botEngine(bots.find((bot) => bot.id === last.from?.botId), instances))
+    ? activityPreview(last.tool, botEngine(bots.find((bot) => bot.id === last.from?.botId), instances), last.dataResult)
     : last.kind === "goal.run" && last.goalRun
       ? sidebarGoalRunPreview(last.goalRun)
       : last.kind === "connector" && last.connector
@@ -1923,6 +1930,13 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   usePeople();
   const now = useRelativeNow();
   const cloudOwner = useCloudOwner(state.config?.cloudHome === true);
+  // The Show me how tip ends when the server menu it points at closes,
+  // whatever was chosen (components/CloudHowTo.tsx); Add a Cloud… chosen
+  // there shows as the dialog opened from it (cloud_dialog_shown).
+  const endHowTo = useCallback(() => {
+    track("cloud_howto", { result: "closed" });
+    dispatch({ type: "cloudHowTo", open: false });
+  }, [dispatch]);
   const showThreads = useShowThreads();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const { capabilities } = useDesktopCapabilities();
@@ -2333,18 +2347,21 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         ) : null}
         {density !== "icons" && (
           // Everything between the lights and the buttons; the switcher's
-          // pill reads this slot's width (container `sidebar-top`). Below
-          // 164px, its 140px cap plus a 24px drag gap, the pill drops its name
-          // for icon + chevron rather than fill the slot up to the lights. On
-          // macOS at 320px the slot is 121px in Advanced, 189px in Simple.
+          // pill reads this slot's width (container `sidebar-top`). Once the
+          // slot can hold a truncated name (96px), a 24px drag gap stays and
+          // the name ellipsizes inside the 140px cap. Narrower than that, the
+          // name hides and the spacer may shrink to nothing. On macOS at
+          // 320px the slot is about 121px in Advanced and 189px in Simple.
           <div data-sidebar-top-slot className="@container/sidebar-top flex min-w-0 flex-1 items-center">
             {/* Empty, so it stays a drag region; it takes the slack, which
-                keeps the switcher beside the buttons. */}
-            <div data-sidebar-top-spacer className="min-w-0 flex-1" />
+                keeps the switcher beside the buttons. The 24px floor applies
+                only while the name is showing, so a 240px sidebar can still
+                fit icon and chevron. */}
+            <div data-sidebar-top-spacer className="min-w-0 flex-1 @min-[96px]/sidebar-top:min-w-6" />
             {/* Gives way first when the row is tight; only the switcher's own
                 button opts out of the drag region. */}
             <div data-sidebar-top-switcher className="flex min-w-0 max-w-[140px] items-center">
-              <DesktopWorkspaceSwitcher inline cloudHome={state.config?.cloudHome === true} owner={cloudOwner} />
+              <DesktopWorkspaceSwitcher inline cloudHome={state.config?.cloudHome === true} owner={cloudOwner} howTo={state.cloudHowTo} onMenuClosed={endHowTo} />
             </div>
           </div>
         )}
@@ -2358,7 +2375,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             type="button"
             onClick={toggleCollapsed}
             aria-label={density === "icons" ? t("sidebar.density.expand") : t("sidebar.density.collapseAria")}
-            className="flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             title={density === "icons" ? t("sidebar.density.expand") : t("sidebar.density.collapse")}
           >
             {density === "icons" ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
@@ -2367,13 +2384,16 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             <button
               type="button"
               onClick={() => setAttentionOpen((o) => !o)}
-              aria-label={t("attention.title")}
-              title={t("attention.title")}
-              className="relative flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+              aria-label={attentionTriggerLabel(attention.length)}
+              title={attentionTriggerLabel(attention.length)}
+              className="relative flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
               <Activity size={17} strokeWidth={2} />
               {attention.length > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[9.5px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
+              )}
+              {attentionHasRunningWork(attention) && (
+                <span data-header-activity="" className="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-success" aria-hidden="true" />
               )}
             </button>
             {attentionMotion.shown && (
@@ -2391,7 +2411,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                       onClick={() => setAttentionPinned(!attentionPinned)}
                       aria-label={t(attentionPinned ? "attention.unpin" : "attention.pin")}
                       title={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                      className="flex size-6 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
+                      className="flex size-6 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                     >
                       {attentionPinned ? <PinOff size={14} /> : <Pin size={14} />}
                     </button>
@@ -2411,7 +2431,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             ref={importReturnRef}
             onClick={() => setPlusOpen((o) => !o)}
             aria-label={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
-            className="flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             title={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
           >
             <Plus size={17} strokeWidth={2} />
@@ -2482,7 +2502,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         </div>
       </div>
 
-      {density === "icons" && <DesktopWorkspaceSwitcher compact cloudHome={state.config?.cloudHome === true} owner={cloudOwner} />}
+      {density === "icons" && <DesktopWorkspaceSwitcher compact cloudHome={state.config?.cloudHome === true} owner={cloudOwner} howTo={state.cloudHowTo} onMenuClosed={endHowTo} />}
       <OrganizationIdentity compact={density === "icons"} />
       {/* Search */}
       <div className={cn("pt-1 pb-3", density === "icons" ? "hidden" : "px-3")}>
@@ -2725,7 +2745,11 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
 
       {/* Footer */}
       <div className={cn("pb-3 pt-2", density === "icons" ? "px-2" : "px-3")}>
-        <SidebarFooterNav density={density} />
+        <SidebarFooterNav
+          density={density}
+          collapsed={sectionCollapsed(TOOLS_SECTION_ID)}
+          onToggleCollapsed={layoutInteractive ? () => toggleSection(TOOLS_SECTION_ID) : undefined}
+        />
         {density === "icons" && (
           <SidebarPhoneButton
             density={density}

@@ -1,4 +1,4 @@
-import type { ModelSelection } from "./wire.ts";
+import type { BotKind, ModelSelection } from "./wire.ts";
 
 export interface TeamSetupFields {
   name?: string;
@@ -10,6 +10,8 @@ export interface TeamSetupFields {
   section?: string;
   modelSelection?: ModelSelection;
   chiefOfStaff?: boolean;
+  /** Fork, create only: the bot's kind (code/pm) picks its Work rules. */
+  kind?: BotKind;
 }
 
 export interface TeamSetupOperation {
@@ -39,6 +41,9 @@ export interface TeamSetupRequest {
   operations: TeamSetupOperation[];
   newTeams: string[];
   deletion?: { botId: string; name: string; expectedRevision: string };
+  /** The Chief suggested this bot without being asked. It always waits on
+   * the card, and a "Not now" answer is remembered in its conversation. */
+  suggestion?: true;
   result?: TeamSetupResult;
   resumed?: boolean;
 }

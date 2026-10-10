@@ -9,6 +9,7 @@ import { harnessCapabilityLines, type DriverCapabilities } from "./harness-capab
 import { redactSecretsInText } from "./redact.ts";
 import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupFields, TeamSetupOperation, TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
+import { BOT_KINDS } from "../shared/wire.ts";
 
 const section = (value?: string) => value?.trim() || "";
 const teamName = z.string().trim().min(1).max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials");
@@ -22,6 +23,7 @@ const modelSelectionText = (selection: ModelSelection) =>
   `${selection.instanceId}/${selection.model}${selection.variant ? ` (variant ${selection.variant})` : " (no variant)"}${selection.effort ? ` (effort ${selection.effort})` : ""}`;
 const fieldsSchema = z.object({
   chiefOfStaff: z.boolean().optional(),
+  kind: z.enum(BOT_KINDS).optional(),
   name: z.string().optional(), title: z.string().optional(), description: z.string().optional(), soul: z.string().optional(),
   cwd: z.string().optional(),
   section: z.string().trim().max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials").optional(),
@@ -101,7 +103,7 @@ interface Options {
 }
 
 type RequestFrom = { botId: string; name: string; color: string };
-type SetupArgs = { botId: string; threadId: string; plan: unknown; from?: RequestFrom };
+type SetupArgs = { botId: string; threadId: string; plan: unknown; from?: RequestFrom; suggestion?: boolean };
 type DeletionArgs = { botId: string; threadId: string; targetBotId: string; reason: string; from?: RequestFrom };
 /** Server-only invocation lease. Never saved on a request or approval card. */
 type SubmitAuthority = { canCommit?: () => boolean };
@@ -131,13 +133,17 @@ export class TeamSetupRequestService {
   }
 
   private fields(input: z.infer<typeof fieldsSchema>, current?: BotRecord): TeamSetupFields {
-    const { section: targetSection, modelSelection, chiefOfStaff, cwd: rawCwd, ...profile } = input;
+    const { section: targetSection, modelSelection, chiefOfStaff, cwd: rawCwd, kind, ...profile } = input;
     const safe = Object.fromEntries(Object.entries(profile).map(([key, value]) => [key, redactSecretsInText(value!)]));
     const parsed = parseBotProfilePatch(safe, true);
     if (!parsed.ok) throw new TeamSetupError(parsed.error);
     const result: TeamSetupFields = { ...parsed.patch };
     if (targetSection !== undefined) result.section = targetSection;
     if (chiefOfStaff !== undefined) result.chiefOfStaff = chiefOfStaff;
+    if (kind !== undefined) {
+      if (current) throw new TeamSetupError("A bot's kind can only be chosen when creating it");
+      result.kind = kind;
+    }
     if (rawCwd !== undefined) {
       // Create-only, and the exact check the profile path runs: absolute,
       // exists, is a folder. An existing bot's folder keeps going through
@@ -228,7 +234,7 @@ export class TeamSetupRequestService {
     for (const operation of operations) if (operation.botId === chief.id) Object.assign(requesterScope, operation.fields);
     const request: TeamSetupRequest = { version: 1, requestId: newId(), botId: args.botId, threadId: args.threadId,
       reason: redactSecretsInText(parsed.data.reason), createdAt: Date.now(), requesterRevision: teamSetupRevision(chief, requesterScope),
-      newTeams: [...new Set(parsed.data.newTeams)], operations };
+      newTeams: [...new Set(parsed.data.newTeams)], operations, ...(args.suggestion ? { suggestion: true as const } : {}) };
     this.validate(request, false);
     return request;
   }
@@ -253,6 +259,23 @@ export class TeamSetupRequestService {
     return { ...this.propose(args), applied: false, state: "pending" as const };
   }
 
+  /** A specialist the Chief suggests on its own. Nobody asked for it, so it
+   * always waits on the card, even at Full Access. One suggestion is open
+   * per conversation, and after a "Not now" the conversation gets no more. */
+  suggest(args: SetupArgs) {
+    for (const message of this.options.store.messagesFor(args.threadId)) {
+      const card = message.card;
+      if (!card?.teamSetupRequest?.suggestion || card.teamSetupRequest.threadId !== args.threadId) continue;
+      if (card.answered === "deny" || card.teamSetupRequest.result?.state === "denied") {
+        throw new TeamSetupError("The user said not now to a suggested specialist in this conversation. Do not suggest another here unless they ask for one.", 409);
+      }
+      if (!card.answered && !card.dismissed && !card.expired) {
+        throw new TeamSetupError("A suggested specialist is already waiting for the user's answer in this conversation. Wait for it.", 409);
+      }
+    }
+    return { ...this.propose({ ...args, suggestion: true }), applied: false, state: "pending" as const };
+  }
+
   async submitDeletion(args: DeletionArgs & SubmitAuthority) {
     if (this.options.autoApply?.(args.botId, args.threadId)) return this.applyImmediately(this.prepareDeletion(args), args.from, args.canCommit);
     return { ...this.proposeDeletion(args), applied: false, state: "pending" as const };
@@ -263,6 +286,7 @@ export class TeamSetupRequestService {
     if (!permission.ok) throw new TeamSetupError(permission.error, permission.status);
     const chief = this.chief(request.botId);
     const lines = [`Why: ${request.reason}`];
+    if (request.suggestion) lines.push(`@${chief.name} is suggesting this. You did not ask for it.`);
     if (request.deletion) lines.push(`Delete @${request.deletion.name} (${request.deletion.botId}).`, "Permanently removes this bot, all its conversations, memory, instructions, skills, and any computer owned only by it. Generated project files and shared team computers remain. Active work or an unavailable provider can block deletion safely.");
     if (request.newTeams.length) {
       lines.push(`Create teams: ${request.newTeams.map((name) => JSON.stringify(name)).join(", ")}.`);
@@ -312,10 +336,12 @@ export class TeamSetupRequestService {
       lines.push("Existing execution permissions are unchanged.");
     }
     lines.push(immediate ? "Full Access applies this request in the current turn without another confirmation." : "After this decision the Chief continues once with the result.");
-    const title = request.deletion ? `Delete @${request.deletion.name}?` : `Apply setup for ${request.operations.length} ${request.operations.length === 1 ? "bot" : "bots"}?`;
+    const title = request.deletion ? `Delete @${request.deletion.name}?`
+      : request.suggestion ? `Add @${request.operations[0]?.fields.name} to the team?`
+        : `Apply setup for ${request.operations.length} ${request.operations.length === 1 ? "bot" : "bots"}?`;
     const detail = lines.join("\n");
     return {
-      title, subtitle: detail, options: [request.deletion ? "Delete bot" : "Apply setup", "Cancel"], requestId: request.requestId,
+      title, subtitle: detail, options: request.deletion ? ["Delete bot", "Cancel"] : request.suggestion ? ["Add bot", "Not now"] : ["Apply setup", "Cancel"], requestId: request.requestId,
       tool: request.deletion ? "delete_bot" : "set_up_team", teamSetupRequest: request,
     };
   }

@@ -22,11 +22,15 @@ import {
 } from "@/components/lazy-screens";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { UpdateBanner } from "@/components/UpdateBanner";
-import { ProIntroduction } from "@/components/ProIntroduction";
+import { AppNotices } from "@/components/AppNotices";
+import { CloudAddDialog } from "@/components/CloudAddDialog";
+import { CloudHowTo } from "@/components/CloudHowTo";
 import { DesktopCapabilitiesProvider, useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
 import { NoEngines } from "@/components/NoEngines";
 import { CloudEngineSignIn } from "@/components/CloudEngineSignIn";
+import { CloudIntent } from "@/components/CloudIntent";
+import { cloudIntentDue, cloudIntentShown, useCloudIntent } from "@/lib/cloud-intent";
 import { CloudSetup } from "@/components/CloudSetup";
 import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -59,14 +63,17 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     };
     const url = new URL(window.location.href);
     const requestedSettings = url.searchParams.get("desktop-settings");
+    const cloud = ["cloud", "cloud-settings", "cloud-add", "cloud-add-howto"].includes(requestedSettings ?? "");
     if (requestedSettings === "workspaces" || (requestedSettings === "organization" && window.ogb.organization && !remoteClient) ||
-      ((requestedSettings === "cloud" || requestedSettings === "cloud-settings") && window.ogb.cloudAccount && !remoteClient)) {
+      (cloud && window.ogb.cloudAccount && !remoteClient)) {
       url.searchParams.delete("desktop-settings");
       window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
       if (requestedSettings === "organization") dispatch({ type: "toggleAppSettings", open: true, section: "organization" });
       else if (requestedSettings === "cloud") dispatch(CLOUD_LINK_SETTINGS);
-      // The lending menu-bar item: Settings → OMB Cloud, with no automatic action.
+      // The lending menu-bar item: Settings → OpenMausBot Cloud, with no automatic action.
       else if (requestedSettings === "cloud-settings") dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
+      // Add a Cloud… in the server menu, plain or reached through Show me how.
+      else if (requestedSettings === "cloud-add" || requestedSettings === "cloud-add-howto") dispatch({ type: "openCloudAdd", source: requestedSettings === "cloud-add" ? "app_menu" : "app_howto" });
       else open();
     }
     return window.ogb.environments.onOpenSettings?.(open);
@@ -127,6 +134,14 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   // An OMB Cloud home with none of the person's own engines signed in yet:
   // its first run, and every bot until then, is the engine sign-in.
   const cloudSignIn = cloudSignInDue(viewer, state, engineReady);
+  // Before that, its first question: what should it do while you're away. A
+  // job given before any AI waits on the sign-in until an engine can run it.
+  const cloudIntent = useCloudIntent();
+  const cloudAsk = cloudIntentShown(cloudIntentDue({
+    viewer, connected: state.connected, enginesKnown: state.instances.length > 0,
+    onboarding: state.config?.onboarding, reopened: false,
+  }), cloudIntent);
+  const cloudJobWaiting = Boolean(viewer?.cloudHome && viewer.canSave && cloudIntent.pending);
 
   // App-wide shortcuts: ⌘N new bot · ⌘1–9 jump to bot · ⌘⇧[ / ⌘⇧] prev/next · ⌘/ or ? shortcuts cheat sheet.
   // Kept deliberately small; every panel already closes on Esc.
@@ -245,12 +260,17 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   // is absent in the browser.
   // "cloud" is openmausbot://cloud (the Cloud page's "Open in the app"):
   // OMB Cloud, marked as opened by the link so that view signs in or connects.
+  // "cloud-add": Add a Cloud… in the server menu (or openmausbot://cloud while
+  // a checkout this app opened is pending), "cloud-add-howto" the same reached
+  // through Show me how: the Add a Cloud dialog.
   useEffect(() => {
-    return window.ogb?.onOpenAppSettings?.(section => dispatch(section === "cloud" && window.ogb?.cloudAccount && !remoteClient
-      ? CLOUD_LINK_SETTINGS
-      : section === "cloud-settings" && window.ogb?.cloudAccount && !remoteClient
-        ? { type: "toggleAppSettings", open: true, section: "cloudAccount" }
-        : { type: "toggleAppSettings", open: true, ...(section === "organization" && window.ogb?.organization && !remoteClient ? { section } : {}) }));
+    return window.ogb?.onOpenAppSettings?.(section => dispatch((section === "cloud-add" || section === "cloud-add-howto") && window.ogb?.cloudAccount && !remoteClient
+      ? { type: "openCloudAdd", source: section === "cloud-add" ? "app_menu" : "app_howto" }
+      : section === "cloud" && window.ogb?.cloudAccount && !remoteClient
+        ? CLOUD_LINK_SETTINGS
+        : section === "cloud-settings" && window.ogb?.cloudAccount && !remoteClient
+          ? { type: "toggleAppSettings", open: true, section: "cloudAccount" }
+          : { type: "toggleAppSettings", open: true, ...(section === "organization" && window.ogb?.organization && !remoteClient ? { section } : {}) }));
   }, [dispatch]);
 
   // The viewer outlives ComputerPanel and can target any bot, so release control
@@ -281,7 +301,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     <div className="flex h-full flex-col">
       {/* fixed-position popup, bottom-left — outside the layout flow */}
       <UpdateBanner />
-      <ProIntroduction quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} />
+      {/* The one bottom-left card at a time: the card after the update, the
+          free trial's notice (here and on My Cloud), the My Cloud card, the star. */}
+      <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} viewer={viewer} />
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button
         type="button"
@@ -325,7 +347,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           onClose={() => setLocalVmWorkspaceBotId(null)}
           onOpenComputer={openComputerFromWorkspace}
         />
-      ) : cloudSignIn ? (
+      ) : cloudAsk ? (
+        <CloudIntent />
+      ) : cloudSignIn || cloudJobWaiting ? (
         <CloudEngineSignIn />
       ) : noEngines ? (
         <NoEngines />
@@ -376,6 +400,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {!remoteClient && state.inspectorOpen && bot && <InspectorPanel key={bot.threadId} bot={bot} />}
       {!remoteClient && state.activityOpen && bot && <ActivityPanel key={`activity:${bot.id}`} bot={bot} />}
       {state.appSettingsOpen && <SettingsModal />}
+      {/* Add a Cloud: the buying journey's one dialog, and Show me how's one step. */}
+      <CloudAddDialog />
+      <CloudHowTo />
       {/* On the person's Cloud: its setup checklist, and after it Move to
           Cloud's one-time card on an empty Cloud (desktop app only). */}
       <CloudSetup viewer={viewer} />
