@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lastSentAt, simpleSidebarLayout, simpleSidebarRows, teamLead, openTeamOf } from "./simple-ui-groups";
+import { simpleSidebarLayout, simpleSidebarRows, teamLead, openTeamOf } from "./simple-ui-groups";
 
 describe("simpleSidebarLayout", () => {
   const bots = [
@@ -55,30 +55,19 @@ describe("team leads", () => {
   });
 });
 
-describe("lastSentAt", () => {
-  it("is the newest message the person typed, not one through the API", () => {
-    expect(lastSentAt([
-      { role: "user", at: 5 },
-      { role: "bot", at: 9 },
-      { role: "user", at: 7, via: "api" },
-    ])).toBe(5);
-    expect(lastSentAt([{ role: "bot", at: 3 }])).toBe(0);
-  });
-});
-
 describe("simpleSidebarRows", () => {
-  it("puts the team or bot you last wrote to on top, a team counting all its members", () => {
+  it("puts the team or bot with the newest activity on top, a team counting all its members", () => {
     const groups = simpleSidebarLayout(
       [{ id: "pmA", section: "A", chiefOfStaff: true }, { id: "codeA", section: "A" }, { id: "pmB", section: "B", chiefOfStaff: true }, { id: "loose" }],
       [],
       ["A", "B"],
     ).groups;
-    const sent: Record<string, number> = { codeA: 30, pmB: 20, loose: 40 };
-    const rows = simpleSidebarRows(groups, (item) => sent[item.id] ?? 0);
+    const activity: Record<string, number> = { codeA: 30, pmB: 20, loose: 40 };
+    const rows = simpleSidebarRows(groups, (item) => activity[item.id] ?? 0);
     expect(rows.map((row) => row.key)).toEqual(["loose", "section:A", "section:B"]);
   });
 
-  it("keeps the groups' order for rows never written to", () => {
+  it("keeps the groups' order for rows without activity", () => {
     const groups = simpleSidebarLayout([{ id: "x", section: "X" }, { id: "y", section: "Y" }], [], ["X", "Y"]).groups;
     expect(simpleSidebarRows(groups, () => 0).map((row) => row.key)).toEqual(["section:X", "section:Y"]);
   });

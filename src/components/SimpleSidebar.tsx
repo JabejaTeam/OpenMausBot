@@ -13,13 +13,13 @@ import { botLabel, botLabelLine } from "@/lib/bot-label";
 import { stateForBot } from "@/lib/mascot";
 import { hiddenBotsForMe, usePeople } from "@/lib/people";
 import { shownForMe } from "@/lib/sidebar-layout";
-import { lastSentAt, openTeamOf, simpleSidebarLayout, simpleSidebarRows, type SimpleGroup } from "@/lib/simple-ui-groups";
+import { openTeamOf, simpleSidebarLayout, simpleSidebarRows, type SimpleGroup } from "@/lib/simple-ui-groups";
 import { lastVisited, useVisits } from "@/lib/navigation-memory";
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { groupPreview, preview } from "./Sidebar";
 import { BotThreads, setThreadColumn, useThreadColumn } from "./BotThreads";
-import { unreadForMe } from "@/lib/thread-channel";
+import { lastActivityForMe, unreadForMe } from "@/lib/thread-channel";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { WorkingDots } from "./WorkingIndicator";
 import { profileInitials } from "./SidebarProfileMenu";
@@ -192,8 +192,8 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
   const bots = state.bots.filter((bot) => shownForMe(bot, hiddenForMe, ""));
   const layout = simpleSidebarLayout(bots, state.groups, state.sections ?? []);
   const hero = layout.hero;
-  // Like Messages: the team (or bot) you last wrote to on top, no headings
-  const rows = simpleSidebarRows(layout.groups, (item) => lastSentAt(visibleMessages(item)));
+  // Like Messages: the team (or bot) with your newest conversation on top, no headings
+  const rows = simpleSidebarRows(layout.groups, lastActivityForMe);
   // The team you are in shows its members under its row; a closed team's
   // row carries their unread dot. A team opens on the member you were on last.
   const visits = useVisits();

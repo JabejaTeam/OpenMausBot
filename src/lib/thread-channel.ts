@@ -73,3 +73,19 @@ export function unreadForMe(bot: { unread?: boolean; tasks?: Pick<Task, "unread"
   if (!tasks.some((task) => task.access)) return Boolean(bot.unread) || tasks.some((task) => task.unread);
   return tasks.some((task) => task.unread && task.access === "own");
 }
+
+/** When the viewer last had something going on with a bot or room: the
+ * newest message (theirs or the bot's) in a conversation of theirs, own or
+ * shared. A teammate's conversation, a thread a bot opened (a delegation or
+ * bot⇄bot pair) and a routine run do not count. Without per-person threads
+ * (no `access`), every conversation is everyone's. 0 when there is none. */
+export function lastActivityForMe(item: {
+  tasks?: ReadonlyArray<Partial<Pick<Task, "updatedAt" | "access" | "routineRunId" | "openedBy">>>;
+}): number {
+  let newest = 0;
+  for (const task of item.tasks ?? []) {
+    if (task.routineRunId || task.openedBy || task.access === "team") continue;
+    newest = Math.max(newest, task.updatedAt ?? 0);
+  }
+  return newest;
+}
