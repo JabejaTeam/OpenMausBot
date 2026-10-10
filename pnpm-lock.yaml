@@ -38,6 +38,9 @@ importers:
       '@resvg/resvg-js':
         specifier: 2.6.2
         version: 2.6.2
+      '@soniox/react':
+        specifier: 2.3.0
+        version: 2.3.0(react@19.2.8)
       '@tanstack/react-virtual':
         specifier: ^3.14.13
         version: 3.14.13(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -1991,6 +1994,14 @@ packages:
   '@sindresorhus/is@7.2.0':
     resolution: {integrity: sha512-P1Cz1dWaFfR4IR+U13mqqiGsLFf1KbayybWwdd2vfctdV6hDpUkgCY0nKOLLTMSoRd/jJNjtbqzf13K8DCCXQw==}
     engines: {node: '>=18'}
+
+  '@soniox/client@2.3.0':
+    resolution: {integrity: sha512-iWj0qOuTGwVWkLsFiPc3Hgl4Nn9rOaWqJqfDy28SbngtUzjhCqCBrJE1sPtCrV6DHJymT8JyCC/hTd2eb30qAQ==}
+
+  '@soniox/react@2.3.0':
+    resolution: {integrity: sha512-E17TH85nUViWTGfMNeQeLIBBxQMUNq4fu31iHOyCxMHz8GnvoUq0PXQwBMdNDxuiK3VoVO3enp9vttBBJpYNRQ==}
+    peerDependencies:
+      react: '>=18.0.0'
 
   '@speed-highlight/core@1.2.24':
     resolution: {integrity: sha512-qeW2e1l78afw8VhRPfPQ1Gjj+KU5XFQ/OFV5ti6eTa9bruO7mJyZtA4vw0ofqmA3tKCkROE9xLk3VZoeRc98nw==}
@@ -6679,6 +6690,13 @@ snapshots:
   '@sindresorhus/is@4.6.0': {}
 
   '@sindresorhus/is@7.2.0': {}
+
+  '@soniox/client@2.3.0': {}
+
+  '@soniox/react@2.3.0(react@19.2.8)':
+    dependencies:
+      '@soniox/client': 2.3.0
+      react: 19.2.8
 
   '@speed-highlight/core@1.2.24': {}
 

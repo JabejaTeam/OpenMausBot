@@ -1,8 +1,17 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Plus, Square, Target, Users, X } from "lucide-react";
+import { ArrowUp, BookOpen, Check, ChevronDown, Clock, Mic, Paperclip, Plus, Square, Target, Users, X } from "lucide-react";
 import { useSimpleUi } from "@/lib/simple-ui";
-import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
+import { api, useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
+import {
+  claimHoldToTalk,
+  pickDictationEngine,
+  storeDictationEngine,
+  storedDictationEngine,
+  useHoldToTalk,
+  useSonioxDictation,
+  type DictationEngine,
+} from "@/lib/soniox-dictation";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { activeLocale, t } from "@/lib/i18n";
@@ -288,6 +297,18 @@ export function Composer({
   const mentionListRef = useRef<HTMLDivElement>(null);
   // what was typed before the mic went on — partials append after it
   const baseText = useRef("");
+  // Fork: live dictation through Soniox, beside Apple's on-device one. The
+  // mic starts the engine picked last; the arrow beside it picks another.
+  const textNow = useRef(text);
+  textNow.current = text;
+  const soniox = useSonioxDictation(api, { current: () => textNow.current, write: editText });
+  const appleDictation = capabilities.dictation.available && Boolean(window.ogb);
+  const [pickedEngine, setPickedEngine] = useState(storedDictationEngine);
+  const dictationEngine = pickDictationEngine(pickedEngine, { soniox: soniox.available === true, apple: appleDictation });
+  const sonioxOn = soniox.listening || soniox.connecting;
+  const dictating = recording || sonioxOn;
+  const [dictationMenuOpen, setDictationMenuOpen] = useState(false);
+  const pendingSonioxStart = useRef(0);
 
   // image paste is offered only when every bot that will actually answer
   // can open one. sendGroup routes to mentions, else the room default —
@@ -627,6 +648,8 @@ export function Composer({
     // stays machine-readable in the stored send and the model's context
     const composed = composeMessage(serializeThreadRefs(effectiveText, threads, currentBotId), attachments);
     if (!composed) return;
+    // a send ends a Soniox dictation, or its late words would refill the box
+    if (sonioxOn) soniox.cancel(false);
     const body = restoredRequestText(draftId) ?? composed;
     // The viewed Data result travels as its own field of the send, never in
     // the words: only for this bot's own thread, and never ahead of an
@@ -794,22 +817,68 @@ export function Composer({
     };
   }, [recording, editText]);
 
-  const toggleMic = () => {
-    if (!capabilities.dictation.available || !window.ogb) {
+  const startDictation = (engine: DictationEngine | null = dictationEngine) => {
+    if (dictating) return;
+    if (engine === "soniox") {
+      // The desktop app refuses a paired server's page the microphone (only
+      // its own page and My Cloud get it); say so instead of failing silently.
+      const refused = capabilities.dictation.reasonCode === "remote-server";
+      const id = ++pendingSonioxStart.current;
+      void (window.ogb?.permStatus?.() ?? Promise.resolve(undefined))
+        .catch(() => undefined)
+        .then((status) => {
+          // let go (or stopped) before the app answered: no start
+          if (id !== pendingSonioxStart.current) return;
+          if (status?.pageMic === "refused" || (status?.pageMic === undefined && refused)) {
+            setSpeechError(t("composer.dictation.appRefused"));
+            return;
+          }
+          soniox.start();
+        });
+    } else if (engine === "apple" && appleDictation) {
+      baseText.current = text.trim();
+      setRecording(true);
+    } else {
       setSpeechError(t("composer.dictation.unavailable"));
       return;
     }
-    baseText.current = text.trim();
-    setRecording((r) => !r);
+    inputRef.current?.focus();
   };
+  const stopDictation = () => {
+    pendingSonioxStart.current++;
+    if (recording) setRecording(false);
+    if (sonioxOn) soniox.stop();
+  };
+  const toggleMic = () => (dictating ? stopDictation() : startDictation());
+  const chooseDictationEngine = (engine: DictationEngine) => {
+    storeDictationEngine(engine);
+    setPickedEngine(engine);
+    setDictationMenuOpen(false);
+    startDictation(engine);
+  };
+  // ⌥⌘ held = dictate while the window has focus; released = stop, the text
+  // stays in the box. ⌥⌘ with another key is a shortcut and puts it back.
+  const holdOwner = useHoldToTalk(
+    !locked && dictationEngine !== null,
+    () => startDictation(),
+    stopDictation,
+    () => {
+      if (recording) {
+        setRecording(false);
+        editText(baseText.current);
+      }
+      pendingSonioxStart.current++;
+      if (sonioxOn) soniox.cancel();
+    },
+  );
 
   return (
     <div className="pointer-events-none relative px-5 pb-3">
       {/* No fill or hairline on this wrapper — those were the black frame
           in the pill's top corners. The dock overlays the transcript. */}
-      {speechError && (
+      {(speechError || soniox.error) && (
         <div className="pointer-events-auto mb-2 w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
-          {speechError}
+          {speechError || t("composer.dictation.sonioxFailed", { reason: soniox.error ?? "" })}
         </div>
       )}
       <div className="pointer-events-auto relative w-full">
@@ -1074,6 +1143,7 @@ export function Composer({
           <MentionTextarea
           wrapperClassName="@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full"
           inputRef={inputRef}
+          onFocus={() => claimHoldToTalk(holdOwner)}
           peers={group ? members ?? [] : state.bots.filter((member) => member.id !== bot?.id)}
           everyone={Boolean(group && !group.dm)}
           // the message is composed in the writer's language, not the UI's
@@ -1150,7 +1220,7 @@ export function Composer({
               }
               send();
             }
-            if (e.key === "Escape" && recording) setRecording(false);
+            if (e.key === "Escape" && dictating) stopDictation();
           }}
           // an upload in flight must not disable the box: a disabled element
           // drops keyboard focus and never gets it back, so the writer had to
@@ -1165,7 +1235,7 @@ export function Composer({
               ? t("composer.placeholder.approval")
               : attachmentPending
               ? t("composer.placeholder.attaching")
-              : recording
+              : dictating
               ? t("composer.placeholder.listening")
               : busy && canSteer
                 ? pendingCount > 0
@@ -1200,20 +1270,52 @@ export function Composer({
             <Square size={14} className="fill-current" />
           </button>
         )}
-        {!locked && !busy && !hasContent && capabilities.dictation.available && (
-          <button
-            onClick={toggleMic}
-            aria-label={recording ? t("composer.dictation.stop") : t("composer.dictation.start")}
-            className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full",
-              recording
-                ? "animate-pulse bg-danger/20 text-danger"
-                : "text-ink-secondary hover:bg-raised hover:text-ink",
+        {/* Fork: the mic dictates with the engine picked last (Soniox live,
+            or Apple on this Mac); the arrow picks the other. It stays while
+            there is text, so you can add to what you typed, and while a
+            dictation runs, so it can be stopped. */}
+        {!locked && dictationEngine !== null && (!busy || dictating) && (
+          <div className="relative flex items-center">
+            <button
+              onClick={toggleMic}
+              onPointerEnter={soniox.warm}
+              onFocus={soniox.warm}
+              aria-label={dictating ? t("composer.dictation.stop") : t("composer.dictation.start")}
+              className={cn(
+                "flex size-8 shrink-0 items-center justify-center rounded-full",
+                dictating
+                  ? "animate-pulse bg-danger/20 text-danger"
+                  : "text-ink-secondary hover:bg-raised hover:text-ink",
+              )}
+              title={dictating ? t("composer.dictation.stopHint") : t("composer.dictation.holdHint")}
+            >
+              <Mic size={18} />
+            </button>
+            <button
+              type="button"
+              disabled={dictating}
+              onClick={() => {
+                soniox.warm();
+                setDictationMenuOpen((open) => !open);
+              }}
+              aria-haspopup="menu"
+              aria-expanded={dictationMenuOpen}
+              aria-label={t("composer.dictation.menu")}
+              title={t("composer.dictation.menu")}
+              className="-ml-1 flex h-8 w-4 items-center justify-center rounded-full text-ink-secondary transition-colors hover:text-ink disabled:opacity-40"
+            >
+              <ChevronDown size={13} className={cn("transition-transform", dictationMenuOpen && "rotate-180")} />
+            </button>
+            {dictationMenuOpen && (
+              <DictationMenu
+                engine={dictationEngine}
+                soniox={soniox.available === true}
+                apple={appleDictation}
+                onChoose={chooseDictationEngine}
+                onClose={() => setDictationMenuOpen(false)}
+              />
             )}
-            title={recording ? t("composer.dictation.stopHint") : t("composer.dictation.hint")}
-          >
-            <Mic size={18} />
-          </button>
+          </div>
         )}
         {/* Calling the bot lives here, beside dictation, rather than in the
             chat header: it is another way to talk to it. Rooms keep their
@@ -1289,6 +1391,79 @@ export function Composer({
         }}
       />
       </div>
+    </div>
+  );
+}
+
+/** Fork: which engine the mic dictates with. Picking one remembers it and
+ * starts dictating. */
+function DictationMenu({
+  engine,
+  soniox,
+  apple,
+  onChoose,
+  onClose,
+}: {
+  engine: DictationEngine | null;
+  soniox: boolean;
+  apple: boolean;
+  onChoose: (engine: DictationEngine) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !ref.current?.parentElement?.contains(event.target)) onClose();
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [onClose]);
+  const entries: Array<{ id: DictationEngine; label: string; hint: string; here: boolean }> = [
+    { id: "soniox", label: t("composer.dictation.soniox"), hint: t("composer.dictation.sonioxHint"), here: soniox },
+    {
+      id: "apple",
+      label: t("composer.dictation.apple"),
+      hint: apple ? t("composer.dictation.appleHint") : t("composer.dictation.appleUnavailable"),
+      here: apple,
+    },
+  ];
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      aria-label={t("composer.dictation.menu")}
+      className="animate-pop-in absolute bottom-full right-0 z-30 mb-1.5 w-[280px] rounded-xl border border-hairline bg-panel p-1.5 text-left shadow-2xl"
+    >
+      {entries.map((entry) => (
+        <button
+          key={entry.id}
+          type="button"
+          role="menuitemradio"
+          aria-checked={engine === entry.id}
+          aria-disabled={entry.here ? undefined : true}
+          onClick={() => {
+            if (entry.here) onChoose(entry.id);
+          }}
+          className={cn(
+            "flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none hover:bg-raised focus-visible:bg-raised aria-disabled:cursor-default aria-disabled:hover:bg-transparent",
+            engine === entry.id && "bg-raised/60",
+          )}
+        >
+          <span className="min-w-0 flex-1">
+            <span className={cn("block text-[13px] font-medium", entry.here ? "text-ink" : "text-ink-tertiary")}>{entry.label}</span>
+            <span className="mt-0.5 block text-[11.5px] leading-[1.4] text-ink-secondary">{entry.hint}</span>
+          </span>
+          {engine === entry.id && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
+        </button>
+      ))}
     </div>
   );
 }

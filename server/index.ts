@@ -601,6 +601,7 @@ import { ThreadStarters } from "./thread-starters.ts";
 import { PrivateThreads, ThreadShares, threadOwnerPerson, threadRole, type ThreadAccessRecords } from "./thread-access.ts";
 import { createForkThreadRoutes } from "./routes/fork-threads.ts";
 import { createForkNavigationRoutes } from "./routes/fork-navigation.ts";
+import { createForkDictationRoutes } from "./routes/fork-dictation.ts";
 import { PersonNavigation } from "./person-navigation.ts";
 import {
   activityCsv,
@@ -16630,6 +16631,8 @@ ROUTES.push(createForkPeopleRoutes({
   conversationExists: (threadId) => Boolean(store.botByThread(threadId) || store.groupByThread(threadId)),
   threadPerson: connectorThreadPerson,
 }));
+// Fork: live dictation through Soniox (server/routes/fork-dictation.ts).
+ROUTES.push(createForkDictationRoutes({ sonioxKey: () => process.env.SONIOX_API_KEY?.trim() || undefined }));
 // Fork: where a person was last (server/routes/fork-navigation.ts).
 ROUTES.push(createForkNavigationRoutes({
   personOf: navigationPerson,
