@@ -105,6 +105,16 @@ describe("the email card", () => {
     expect(callForCard({ ...draft, replyThreadId: "t1" }, "draft")).toMatchObject({ tool: "GMAIL_CREATE_EMAIL_DRAFT", args: { thread_id: "t1" } });
   });
 
+  it("hands Gmail bare addresses when the card shows names", () => {
+    const named = { to: ["Brent Tanghe <brent@acfibota.be>", "c@d.be"], cc: ["Jan <jan@x.be>"], bcc: [" Eva <e@f.be> "], subject: "S", body: "B" };
+    expect(callForCard(named, "send").args).toMatchObject({
+      recipient_email: "brent@acfibota.be", extra_recipients: ["c@d.be"], cc: ["jan@x.be"], bcc: ["e@f.be"],
+    });
+    expect(draftInstead("GMAIL_SEND_EMAIL", { recipient_email: "Brent <brent@acfibota.be>", cc: ["Jan <jan@x.be>"] })).toMatchObject({
+      recipient_email: "brent@acfibota.be", cc: ["jan@x.be"],
+    });
+  });
+
   it("checks the person's edits", () => {
     const card: EmailCardData = { to: ["a@b.be"], cc: [], bcc: [], subject: "S", body: "B", requested: "send", status: "editable" };
     expect(cleanCardEdits({ to: "", subject: "S" }, card)).toEqual({ error: "Add at least one recipient" });

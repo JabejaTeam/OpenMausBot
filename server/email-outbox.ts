@@ -120,15 +120,25 @@ function strings(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string" && item.trim() !== "").map((item) => item.trim());
 }
 
+/** "Name <address>" → "address": Gmail via Composio only takes bare addresses. */
+function bare(value: string): string {
+  const angle = value.match(/<([^<>]+)>\s*$/);
+  return (angle ? angle[1]! : value).trim();
+}
+
+function addresses(value: unknown): string[] {
+  return strings(value).map(bare);
+}
+
 /** The draft an unattended send becomes: same people, words and thread. */
 export function draftInstead(tool: string, args: Args): Args {
-  const to = [...strings(args.recipient_email ?? args.to), ...strings(args.extra_recipients)];
+  const to = [...addresses(args.recipient_email ?? args.to), ...addresses(args.extra_recipients)];
   const body = tool === GMAIL_REPLY_TO_THREAD ? args.message_body : args.body;
   return {
     ...(to.length ? { recipient_email: to[0] } : {}),
     ...(to.length > 1 ? { extra_recipients: to.slice(1) } : {}),
-    ...(strings(args.cc).length ? { cc: strings(args.cc) } : {}),
-    ...(strings(args.bcc).length ? { bcc: strings(args.bcc) } : {}),
+    ...(strings(args.cc).length ? { cc: addresses(args.cc) } : {}),
+    ...(strings(args.bcc).length ? { bcc: addresses(args.bcc) } : {}),
     ...(typeof args.subject === "string" ? { subject: args.subject } : {}),
     ...(typeof body === "string" ? { body } : {}),
     ...(args.is_html === true ? { is_html: true } : {}),
@@ -221,11 +231,12 @@ export function callForCard(
   draft: Pick<EmailCardData, "to" | "cc" | "bcc" | "subject" | "body" | "replyThreadId">,
   action: "send" | "draft",
 ): { tool: string; args: Args } {
+  const to = draft.to.map(bare);
   const people = {
-    recipient_email: draft.to[0],
-    ...(draft.to.length > 1 ? { extra_recipients: draft.to.slice(1) } : {}),
-    ...(draft.cc.length ? { cc: draft.cc } : {}),
-    ...(draft.bcc.length ? { bcc: draft.bcc } : {}),
+    recipient_email: to[0],
+    ...(to.length > 1 ? { extra_recipients: to.slice(1) } : {}),
+    ...(draft.cc.length ? { cc: draft.cc.map(bare) } : {}),
+    ...(draft.bcc.length ? { bcc: draft.bcc.map(bare) } : {}),
   };
   if (action === "send" && draft.replyThreadId) {
     return {
@@ -250,8 +261,7 @@ const ADDRESS = /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/;
 
 /** An address as the card accepts it: bare, or "Name <address>". */
 export function validAddress(value: string): boolean {
-  const angle = value.match(/<([^<>]+)>\s*$/);
-  return ADDRESS.test((angle ? angle[1]! : value).trim());
+  return ADDRESS.test(bare(value));
 }
 
 /** The person's edits, checked. Returns an error line or the clean draft. */
