@@ -53,7 +53,10 @@ set -e; cd \$HOME/$DIR && docker build -q -t omb-fork-test -f fork/test.Dockerfi
 echo DEPLOY_OK
 REMOTE
 ssh "$HOST" "nohup bash \$HOME/omb-fork/deploy-$stamp.sh > \$HOME/$log 2>&1 &"
-until [ "$(ssh -o ConnectTimeout=10 "$HOST" "pgrep -f deploy-$stamp.sh >/dev/null && echo running || echo done" 2>/dev/null)" = done ]; do sleep 10; done
+# "[d]eploy-…": the shell ssh starts for this check has the pattern in its own
+# command line, so a plain pattern always matched itself and this loop never
+# ended (measured 2026-10-11: rollout done in 26 s, this side still waiting).
+until [ "$(ssh -o ConnectTimeout=10 "$HOST" "pgrep -f '[d]eploy-$stamp.sh' >/dev/null && echo running || echo done" 2>/dev/null)" = done ]; do sleep 3; done
 ssh "$HOST" "cat \$HOME/$log"
 ssh "$HOST" "grep -q DEPLOY_OK \$HOME/$log" || { echo "rollout failed; see ~/$log on $HOST" >&2; exit 1; }
 echo "live: $commit (backup ~/$LIVE.bak-$stamp)"
