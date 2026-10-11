@@ -108,12 +108,14 @@ export interface TaskRecord extends Omit<WireTask, TaskWireDerivedKeys> {
    * so only positively identified auto pins yield to Works on changes.
    * Clients see only whether a pin is an auto pin (WireTask.surfaceAuto). */
   surfaceSource?: "user" | "auto";
+  /** Fork: the card a code agent's work thread is about (server/work-topic.ts). */
+  workTopic?: string;
 }
 
 /** TaskRecord fields no client may see. Everything else must be on WireTask:
  * the exactness assertion below fails to compile when either side drifts,
  * so a new server field forces a decision — wire-visible or private here. */
-export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel" | "surfaceSource";
+export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel" | "surfaceSource" | "workTopic";
 /** WireTask fields computed by toWireTask and never stored on a TaskRecord. */
 export type TaskWireDerivedKeys = "surfaceAuto" | "followsBotModel";
 export type TaskWireProjection = Pick<TaskRecord, Exclude<keyof TaskRecord, TaskWirePrivateKeys>> & Pick<WireTask, TaskWireDerivedKeys>;
@@ -131,7 +133,7 @@ export const taskWireProjectionIsExact: TaskWireProjectionIsExact = true;
 export function toWireTask(task: TaskRecord, botModel: ModelSelection): WireTask {
   const { resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, handedMessages: _handedMessages,
     appliedCompactionId: _appliedCompactionId, contextFloor: _contextFloor, lastContextModel: _lastContextModel,
-    surfaceSource, ...stored } = task;
+    surfaceSource, workTopic: _workTopic, ...stored } = task;
   const wire: WireTask = { ...stored, modelSelection: structuredClone(task.modelSelection ?? botModel), followsBotModel: task.modelSelection === undefined };
   // Who pinned stays private. A client learns only whether the pin is the
   // machine's own record, so it never presents one as the person's choice.
@@ -2711,6 +2713,21 @@ export class Store {
   workThread(botId: string, fromBotId: string, fromThreadId: string): TaskRecord | undefined {
     return this.tasks(botId).find((t) => t.openedBy?.kind === "work" && t.openedBy.botId === fromBotId &&
       t.openedBy.threadId === fromThreadId && t.archivedAt === undefined);
+  }
+
+  /** Fork: the thread `fromBotId` opened on this bot for one card, from any
+   * of its conversations (the newest when there are several). */
+  workThreadOn(botId: string, fromBotId: string, topic: string): TaskRecord | undefined {
+    return this.tasks(botId).find((t) => t.openedBy?.kind === "work" && t.openedBy.botId === fromBotId &&
+      t.workTopic === topic && t.archivedAt === undefined);
+  }
+
+  /** Fork: record which card a work thread is about. */
+  setTaskWorkTopic(botId: string, threadId: string, topic: string): void {
+    const task = this.taskByThread(botId, threadId);
+    if (!task || task.workTopic === topic) return;
+    task.workTopic = topic;
+    this.saveBots();
   }
 
   /** A turn gets an independent snapshot without changing the selected task

@@ -139,3 +139,29 @@ it("resumes the sender with a parallel assignment's result while its sibling is 
   writeFileSync(f.gate, "go");
   await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((m: any) => m.text === "Both booked"), { timeout: 20_000 }).toBe(true);
 }), 60_000);
+
+it("gives a code agent one thread per card: another card runs beside it, a follow-up returns to its card", () => fixture(async f => {
+  await f.api(`/api/bots/${f.clerk.id}`, { kind: "code" }, "PATCH");
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Kaart aaaa1111: book the Q3 supplier invoices" } }], reply: "Supplier job started" },
+    { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Kaart bbbb2222: book the Q3 customer invoices" } }], reply: "Customer job started" },
+    { reply: "One done" }, { reply: "Both done" },
+    { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Kaart aaaa1111: also the credit notes" } }], reply: "Follow-up sent" },
+    { reply: "Credit notes done" },
+  ] };
+  f.plan[f.clerk.id] = { progress: "Collecting invoices", gateFile: f.gate, gateWhenIncludes: "supplier", reply: "Booked" };
+  f.save();
+  await f.say("Book the supplier invoices (card aaaa1111)");
+  await f.clerkWorking();
+  await f.say("And the customer invoices (card bbbb2222)");
+  // A different card is not queued behind the running one: both run at once, each in its own thread.
+  await expect.poll(() => f.clerkNodes().map((n: any) => n.status), { timeout: 15_000 }).toEqual(["running", "completed"]);
+  const [supplier, customer] = f.clerkNodes();
+  expect(customer.threadId).not.toBe(supplier.threadId);
+  writeFileSync(f.gate, "go");
+  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((m: any) => m.text === "Both done"), { timeout: 20_000 }).toBe(true);
+  await f.say("Also the credit notes for card aaaa1111");
+  await expect.poll(() => f.clerkNodes().length, { timeout: 20_000 }).toBe(3);
+  // Back on its own card's thread, not the newest one.
+  expect(f.clerkNodes()[2].threadId).toBe(supplier.threadId);
+}), 60_000);

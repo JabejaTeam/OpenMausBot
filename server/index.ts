@@ -344,6 +344,7 @@ import { CloudCreditProvider } from "./cloud-credit-provider.ts";
 import { TRIAL_CREDIT_OWN_AI } from "./trial-credit.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { readyToRun, selectDefaultModelSelection, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts";
+import { workTopicOf } from "./work-topic.ts";
 import { ensureThreadWorktree, removeThreadWorktree, threadWorktreePath, threadWorktreeSystemPrompt } from "./thread-worktrees.ts";
 import { kindInstructionsSystemPrompt, kindStartsFreshPerAssignment, kindTakesSharedContext, teamContextPrompt } from "./kind-instructions.ts";
 import { notePerson, personTurnPreamble, readPersonProfile, updatePersonProfile } from "./person-profiles.ts";
@@ -19016,11 +19017,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               // Outside a room this conversation has one thread with each
               // teammate: the first request opens it, everything after
               // continues it and runs once the work already there is done.
-              const workThread = destination ? undefined : store.workThread(target.botId, internalSender.id, address.threadId);
+              // Fork: a code agent keeps one thread per card the assignment
+              // names (work-topic.ts), from any of the sender's conversations;
+              // another card gets its own thread and runs beside it.
+              const fresh = kindStartsFreshPerAssignment(store.bot(target.botId)?.kind);
+              const topic = fresh && !destination ? workTopicOf(parsed.data.message) : undefined;
+              const workThread = destination ? undefined : topic
+                ? store.workThreadOn(target.botId, internalSender.id, topic)
+                : store.workThread(target.botId, internalSender.id, address.threadId);
               // Fork: parallel=true is a separate assignment, so a code agent
               // starts it in its own thread beside the one still running. Any
               // other assignment continues its last thread.
-              const fresh = kindStartsFreshPerAssignment(store.bot(target.botId)?.kind);
               const continued = workThread && (!fresh || (!parsed.data.parallel &&
                 !(parsed.data.rework && roomHandoffs.runningFrom(address.threadId, target.botId, workThread.threadId))))
                 ? workThread : undefined;
@@ -19030,6 +19037,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 if (!task) throw new Error("The recipient no longer exists");
                 target.threadId = task.threadId;
                 if (!continued) createdThread = task.threadId;
+                if (topic && !continued && !parsed.data.parallel) store.setTaskWorkTopic(target.botId, task.threadId, topic);
                 applyDelegatedLevel(internalSender, internalCapability.threadId, store.bot(target.botId)!, target.threadId);
                 inheritMailMode(address.threadId, task.threadId);
               }
@@ -19058,7 +19066,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               // A repeat lands on the request already made, possibly in a
               // thread the person archived meanwhile; a thread opened for it
               // is never used.
-              if (!duplicate && createdThread && fresh) roomHandoffs.markIndependent(node);
+              // Fork: a code agent's assignments run in their own threads (one
+              // per card), so each result may resume the sender on its own.
+              if (!duplicate && fresh) roomHandoffs.markIndependent(node);
               if (duplicate && createdThread) store.deleteTask(target.botId, createdThread);
               else if (createdThread) threadStarters.set(createdThread, openerFrom(address.threadId));
               createdThread = undefined; // The durable coordinator now owns this task.
