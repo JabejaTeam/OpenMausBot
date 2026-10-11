@@ -76,24 +76,13 @@ export function teamContextPrompt(bot: { section?: string | null; kind?: BotKind
   return kindTakesSharedContext(bot.kind) ? sectionContextSystemPrompt(bot.section) : "";
 }
 
-/** Code agents keep their work threads small: a parallel assignment, or one
- * that arrives once the last thread is full (continuesWorkThread), opens a
- * fresh work thread, so a fresh engine session and worktree. A follow-up while
- * one runs still steers that one (steerCorrection). */
+/** Code agents take a parallel assignment in a fresh work thread, so a fresh
+ * engine session and worktree. Every other assignment from the same
+ * conversation continues their last work thread, with the code it already read
+ * still in view; the engine's own auto-compaction keeps that thread in bounds.
+ * A follow-up while one runs still steers that one (steerCorrection). */
 export function kindStartsFreshPerAssignment(kind?: BotKind): boolean {
   return kind === "code";
-}
-
-/** Fork: how full a code agent's work thread may be before the next
- * assignment from the same conversation opens a fresh one. Below it the agent
- * continues where it was, with the code it just read still in view, instead of
- * finding and reading it all again (most follow-ups are rework on the same card). */
-export const WORK_THREAD_REUSE_MAX_TOKENS = 250_000;
-
-/** Whether a new assignment continues the conversation's last work thread
- * with this bot, given that thread's context size. */
-export function continuesWorkThread(kind: BotKind | undefined, contextTokens: number | undefined): boolean {
-  return !kindStartsFreshPerAssignment(kind) || (contextTokens ?? 0) < WORK_THREAD_REUSE_MAX_TOKENS;
 }
 
 /** The workspace rules for one bot, as system-prompt blocks. They come from

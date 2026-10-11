@@ -345,7 +345,7 @@ import { TRIAL_CREDIT_OWN_AI } from "./trial-credit.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { readyToRun, selectDefaultModelSelection, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts";
 import { ensureThreadWorktree, removeThreadWorktree, threadWorktreePath, threadWorktreeSystemPrompt } from "./thread-worktrees.ts";
-import { continuesWorkThread, kindInstructionsSystemPrompt, kindStartsFreshPerAssignment, kindTakesSharedContext, teamContextPrompt } from "./kind-instructions.ts";
+import { kindInstructionsSystemPrompt, kindStartsFreshPerAssignment, kindTakesSharedContext, teamContextPrompt } from "./kind-instructions.ts";
 import { notePerson, personTurnPreamble, readPersonProfile, updatePersonProfile } from "./person-profiles.ts";
 import { isBotKind } from "../shared/wire.ts";
 import { personKeyFor, personKeyForEmail } from "./person-key.ts";
@@ -19012,13 +19012,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               // continues it and runs once the work already there is done.
               const workThread = destination ? undefined : store.workThread(target.botId, internalSender.id, address.threadId);
               // Fork: parallel=true is a separate assignment, so a code agent
-              // starts it in its own thread beside the one still running. A
-              // later assignment continues its last thread until that is full.
-              const kind = store.bot(target.botId)?.kind;
-              const fresh = kindStartsFreshPerAssignment(kind);
+              // starts it in its own thread beside the one still running. Any
+              // other assignment continues its last thread.
+              const fresh = kindStartsFreshPerAssignment(store.bot(target.botId)?.kind);
               const continued = workThread && (!fresh || (!parsed.data.parallel &&
-                (roomHandoffs.runningFrom(address.threadId, target.botId, workThread.threadId)
-                  ? !parsed.data.rework : continuesWorkThread(kind, workThread.usage?.context?.tokens))))
+                !(parsed.data.rework && roomHandoffs.runningFrom(address.threadId, target.botId, workThread.threadId))))
                 ? workThread : undefined;
               if (!destination) {
                 const task = continued ?? store.createTask(target.botId, `@${internalSender.name} · work`, false, undefined,
