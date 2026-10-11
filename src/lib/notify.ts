@@ -15,6 +15,31 @@ export function requestNotificationPermission(): Promise<NotificationPermission>
   return Notification.requestPermission();
 }
 
+// Jabeja fork: a browser only asks for permission after a click, and the
+// per-bot toggle that used to ask is on by default — so a browser never
+// asked and every banner was dropped. The page asks once itself
+// (NotificationPermissionNotice) until it is answered or put off.
+const PROMPT_PUT_OFF_KEY = "omb-notification-prompt-put-off";
+
+/** Whether to offer turning notifications on: this page can show them, the
+ * browser has not been answered yet, and the person did not put it off. */
+export function notificationPromptDue(): boolean {
+  if (typeof Notification === "undefined" || Notification.permission !== "default") return false;
+  try {
+    return globalThis.localStorage?.getItem(PROMPT_PUT_OFF_KEY) !== "1";
+  } catch {
+    return true;
+  }
+}
+
+export function putOffNotificationPrompt(): void {
+  try {
+    globalThis.localStorage?.setItem(PROMPT_PUT_OFF_KEY, "1");
+  } catch {
+    // shown again next session; no harm
+  }
+}
+
 /** The identity a notification groups under: one bot, wherever it was
  * working. Keyed by bot rather than thread so a single bot running across
  * tasks and rooms coalesces into one stack instead of stacking banners. */

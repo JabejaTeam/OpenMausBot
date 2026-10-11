@@ -23,6 +23,7 @@ import {
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
+import { NotificationPermissionNotice } from "@/components/NotificationPermissionNotice";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { CloudHowTo } from "@/components/CloudHowTo";
 import { DesktopCapabilitiesProvider, useDesktopCapabilities } from "@/components/DesktopCapabilities";
@@ -304,6 +305,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {/* The one bottom-left card at a time: the card after the update, the
           free trial's notice (here and on My Cloud), the My Cloud card, the star. */}
       <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} viewer={viewer} />
+      {/* fork: ask once to turn notifications on, where the browser has not been answered */}
+      <NotificationPermissionNotice quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} />
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button
         type="button"

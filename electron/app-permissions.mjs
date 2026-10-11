@@ -142,16 +142,22 @@ export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeO
     (remoteClipboardWriteAllowed(permission, requesting, activeRemoteOrigin(), details) ||
       remoteClipboardWriteAllowed(permission, requesting, cloudHomeOrigin(), details));
   // Jabeja fork: the active remote server's page in the main window may use
-  // the microphone too (dictation, Live calls) — the server this person chose
-  // to pair with, by exact origin, under the Cloud's narrow rule: main frame,
-  // audio only, never the camera or screen capture.
-  const remoteMicrophone = (contents, permission, requesting, details) =>
-    Boolean(contents) && contents === mainContents() &&
-    cloudHomeMicrophoneAllowed(permission, requesting, activeRemoteOrigin(), details);
+  // the microphone (dictation, Live calls) and show notifications (a bot's
+  // answer while you are in another app) — the server this person chose to
+  // pair with, by exact origin, main frame only. The microphone keeps the
+  // Cloud's narrow rule: audio only, never the camera or screen capture.
+  const remotePage = (contents, permission, requesting, details) => {
+    if (!contents || contents !== mainContents()) return false;
+    if (permission === "notifications") {
+      const origin = webOrigin(activeRemoteOrigin());
+      return details?.isMainFrame !== false && Boolean(origin) && webOrigin(requesting) === origin;
+    }
+    return cloudHomeMicrophoneAllowed(permission, requesting, activeRemoteOrigin(), details);
+  };
   const allowed = (contents, permission, requesting, details) =>
     appPermissionAllowed(permission, requesting, rendererOrigin(), details) ||
     (asksAsCloud(contents, permission, requesting, details) && cloudHomeMicrophoneAllowed(permission, requesting, cloudHomeOrigin(), details)) ||
-    remoteMicrophone(contents, permission, requesting, details) ||
+    remotePage(contents, permission, requesting, details) ||
     clipboardWrite(contents, permission, requesting, details);
   return {
     // Only a request may wait (Electron answers it through the callback). A

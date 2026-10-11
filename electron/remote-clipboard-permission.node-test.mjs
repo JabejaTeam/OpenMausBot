@@ -54,8 +54,8 @@ test("the active paired server may write the clipboard, on request and on check"
 
 test("a remote page can never read the clipboard or gain another permission", () => {
   const h = harness(viewing("vps"));
-  // Jabeja fork: "media" (audio) is the one exception — see app-permissions.mjs remoteMicrophone.
-  for (const permission of ["clipboard-read", "notifications", "fullscreen", "geolocation", "camera", "display-capture", "openExternal", "unknown"]) {
+  // Jabeja fork: "media" (audio) and "notifications" are the exceptions — see app-permissions.mjs remotePage.
+  for (const permission of ["clipboard-read", "fullscreen", "geolocation", "camera", "display-capture", "openExternal", "unknown"]) {
     assert.equal(h.request(permission, `${VPS}/`, { isMainFrame: true, mediaTypes: ["audio"] }), false, `request ${permission}`);
     assert.equal(h.check(permission, VPS), false, `check ${permission}`);
   }

@@ -537,7 +537,7 @@ test("the base policy itself still grants a remote origin nothing", () => {
 // ── Jabeja fork: the paired server's page may use the microphone ──
 // The active remote server (bots.jabeja.be) gets the Cloud's narrow rule:
 // main frame of the main window, exact origin, audio only.
-test("the active remote server's main frame may use the microphone, and nothing more", () => {
+test("the active remote server's main frame may use the microphone and show notifications, and nothing more", () => {
   const PAIRED = "https://bots.jabeja.be";
   const state = { main: { getURL: () => `${PAIRED}/` }, active: PAIRED };
   const handlers = appPermissionHandlers({
@@ -558,8 +558,16 @@ test("the active remote server's main frame may use the microphone, and nothing 
   assert.equal(ask("media", { ...mic, isMainFrame: false }), false, "a subframe");
   assert.equal(ask("media", mic, { getURL: () => `${PAIRED}/` }), false, "another window");
   assert.equal(ask("media", { ...mic, requestingUrl: "https://evil.test/" }), false, "another origin");
-  for (const permission of ["notifications", "clipboard-read", "geolocation", "camera"]) assert.equal(ask(permission, mic), false, permission);
+  for (const permission of ["clipboard-read", "geolocation", "camera"]) assert.equal(ask(permission, mic), false, permission);
+  // notifications too: a bot's answer while this person is in another app
+  const page = { requestingUrl: `${PAIRED}/chat`, isMainFrame: true };
+  assert.equal(ask("notifications", page), true);
+  assert.equal(handlers.check(state.main, "notifications", PAIRED, { isMainFrame: true }), true);
+  assert.equal(ask("notifications", { ...page, isMainFrame: false }), false, "a subframe");
+  assert.equal(ask("notifications", page, { getURL: () => `${PAIRED}/` }), false, "another window");
+  assert.equal(ask("notifications", { ...page, requestingUrl: "https://evil.test/" }), false, "another origin");
   // switching to Local (or another server) takes it away at once
   state.active = null;
   assert.equal(ask("media", mic), false, "after switching to Local");
+  assert.equal(ask("notifications", page), false, "notifications after switching to Local");
 });
