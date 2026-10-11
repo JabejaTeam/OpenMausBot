@@ -88,7 +88,7 @@ export function kindStartsFreshPerAssignment(kind?: BotKind): boolean {
  * assignment from the same conversation opens a fresh one. Below it the agent
  * continues where it was, with the code it just read still in view, instead of
  * finding and reading it all again (most follow-ups are rework on the same card). */
-export const WORK_THREAD_REUSE_MAX_TOKENS = 150_000;
+export const WORK_THREAD_REUSE_MAX_TOKENS = 250_000;
 
 /** Whether a new assignment continues the conversation's last work thread
  * with this bot, given that thread's context size. */
