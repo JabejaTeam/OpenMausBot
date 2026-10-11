@@ -661,6 +661,9 @@ import {
 import { json, onJsonBody, onParsedBody, parsedBodyOf, readBody } from "./harness/http.ts";
 import { ROUTES, dispatchRoutes } from "./routes/table.ts";
 import { createForkPeopleRoutes } from "./routes/fork-people.ts";
+import { createForkPushRoutes } from "./routes/fork-push.ts";
+import { PushDevices } from "./push-devices.ts";
+import { ApnsSender, apnsConfigFromEnv, pushToPerson } from "./apns.ts";
 import { createForkOfficeRoutes } from "./routes/fork-office.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
@@ -815,6 +818,10 @@ const threadShares = new ThreadShares(join(DATA_DIR, "thread-shares.json"));
 // Fork: where each person was last, per agent (server/person-navigation.ts).
 const personNavigation = new PersonNavigation(join(DATA_DIR, "person-navigation.json"));
 const privateThreadIds = new PrivateThreads(join(DATA_DIR, "thread-private.json"));
+// Fork: iPhone pushes while the app is closed (server/apns.ts); off without OMB_APNS_* env.
+const pushDevices = new PushDevices(join(DATA_DIR, "push-devices.json"));
+const apnsConfig = apnsConfigFromEnv();
+const apnsSender = apnsConfig ? new ApnsSender(apnsConfig) : null;
 const threadAccessRecords: ThreadAccessRecords = {
   starter: (threadId) => threadStarters.get(threadId),
   shares: (threadId) => threadShares.get(threadId),
@@ -6509,7 +6516,11 @@ function notify(notification: Notification | null) {
   // nested rather than spread — the frame's own `kind` names the frame,
   // exactly like {kind:"message", message} and {kind:"bot", bot}
   // Fork: for the person whose message started this turn only (notify-audience.ts).
-  if (notification) broadcast({ kind: "notify", notification, forPerson: connectorThreadPerson(notification.threadId) });
+  if (!notification) return;
+  const forPerson = connectorThreadPerson(notification.threadId);
+  broadcast({ kind: "notify", notification, forPerson });
+  // Fork: the same notification as a push to that person's phones (server/apns.ts).
+  void pushToPerson({ sender: apnsSender, devices: pushDevices, isLive: (id) => sessions.isLive(id) }, forPerson, notification);
 }
 
 // Group threads: the fold needs to know WHO is talking — the turn engine
@@ -16678,6 +16689,8 @@ ROUTES.push(createForkPeopleRoutes({
   conversationExists: (threadId) => Boolean(store.botByThread(threadId) || store.groupByThread(threadId)),
   threadPerson: connectorThreadPerson,
 }));
+// Fork: a phone registers for pushes (server/routes/fork-push.ts).
+ROUTES.push(createForkPushRoutes({ personOf: actorKey, devices: pushDevices }));
 // Fork: live dictation through Soniox (server/routes/fork-dictation.ts).
 ROUTES.push(createForkDictationRoutes({ sonioxKey: () => process.env.SONIOX_API_KEY?.trim() || undefined }));
 // Fork: where a person was last (server/routes/fork-navigation.ts).

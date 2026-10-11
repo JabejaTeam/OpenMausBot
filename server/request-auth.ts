@@ -303,6 +303,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // fork: live dictation through Soniox — whether it is on, and a single-use key (server/routes/fork-dictation.ts)
   { methods: ["GET"], path: /^\/api\/dictation$/ },
   { methods: ["POST"], path: /^\/api\/dictation\/token$/ },
+  // fork: a phone registers its APNs token for its own person (server/routes/fork-push.ts)
+  { methods: ["POST", "DELETE"], path: /^\/api\/push\/device$/ },
   // fork: who a conversation is shared with; only its person changes it (the route checks)
   { methods: ["GET", "PUT"], path: /^\/api\/threads\/[\w-]+\/shares$/ },
   // fork: everyone sees how the 3D office's teams look; changing it is admin
