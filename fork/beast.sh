@@ -14,11 +14,19 @@ _beast_slug=$(basename "$_beast_root" | tr -c 'A-Za-z0-9_.\n-' '-')
 BEAST_DIR="omb-fork/wt/$_beast_slug"
 BEAST_CONTAINER="omb-fork-$_beast_slug"
 
+# What only the beast makes and keeps between runs. Named explicitly: macOS's
+# rsync is openrsync, which does not protect .gitignore'd paths from --delete
+# — every sync wiped dist, dist-server and release, so every build started
+# cold and an incremental tsc emit came out empty (found 2026-10-11).
+BEAST_KEEP=(node_modules dist dist-server dist-companion dist-electron dist-native release .deploy-ancestors)
+
 # Copy the working tree (tracked + untracked, not ignored) to this worktree's
 # folder on the beast.
 beast_sync() {
+  local keep=() name
+  for name in "${BEAST_KEEP[@]}"; do keep+=(--exclude "/$name"); done
   ssh "$BEAST_HOST" "mkdir -p \$HOME/$BEAST_DIR \$HOME/omb-fork/pnpm-store"
-  rsync -a --delete --filter=':- .gitignore' --exclude .git --exclude node_modules \
+  rsync -a --delete --filter=':- .gitignore' --exclude .git "${keep[@]}" \
     "$_beast_root/" "$BEAST_HOST:$BEAST_DIR/"
 }
 

@@ -55,7 +55,7 @@ trap '[ \$ok = 1 ] || echo DEPLOY_FAIL' EXIT
 cd \$HOME/$BEAST_DIR
 start=\$(date +%s)
 docker build -q -t omb-fork-test -f fork/test.Dockerfile fork >/dev/null
-docker run --rm $BEAST_RUN_FLAGS bash -c 'source fork/beast-prepare.sh && pnpm -s build:server >/dev/null && pnpm exec vite build >/dev/null && node scripts/build-npm-package.mjs'
+docker run --rm $BEAST_RUN_FLAGS bash fork/beast-build.sh
 echo $commit > release/npm/DEPLOYED_COMMIT
 echo "built in \$((\$(date +%s) - start)) s"
 
