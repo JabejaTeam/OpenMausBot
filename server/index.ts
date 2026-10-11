@@ -603,6 +603,7 @@ import { PrivateThreads, ThreadShares, threadOwnerPerson, threadRole, type Threa
 import { createForkThreadRoutes } from "./routes/fork-threads.ts";
 import { createForkNavigationRoutes } from "./routes/fork-navigation.ts";
 import { createForkDictationRoutes } from "./routes/fork-dictation.ts";
+import { notifyReaches } from "./notify-audience.ts";
 import { PersonNavigation } from "./person-navigation.ts";
 import {
   activityCsv,
@@ -6077,6 +6078,8 @@ interface SseClient {
   viewer: Viewer;
   /** The bots and rooms this stream has been shown (bot-visibility.ts). */
   seen: StreamSeen;
+  /** Fork: the signed-in person watching, for notifications meant for them (server/notify-audience.ts). */
+  person?: string;
 }
 const sseClients = new Set<SseClient>();
 
@@ -6255,6 +6258,8 @@ function broadcast(payload: Record<string, unknown>, options: { adminOnly?: bool
 function memberFrame(client: SseClient, seq: number, payload: Record<string, unknown>, clientFrame: string | null): string | null {
   // A frame kept from clients altogether stays kept: never the admin copy.
   if (clientFrame === null) return null;
+  // Fork: a notification rings only for the person it is for, admins included.
+  if (!notifyReaches(payload, client.person)) return null;
   if (client.viewer.kind === "all") return clientFrame;
   const visible = visibleTo(client.viewer);
   if (visible.everything) {
@@ -6502,7 +6507,8 @@ const providerLabel = (provider: string): string => {
 function notify(notification: Notification | null) {
   // nested rather than spread — the frame's own `kind` names the frame,
   // exactly like {kind:"message", message} and {kind:"bot", bot}
-  if (notification) broadcast({ kind: "notify", notification });
+  // Fork: for the person whose message started this turn only (notify-audience.ts).
+  if (notification) broadcast({ kind: "notify", notification, forPerson: connectorThreadPerson(notification.threadId) });
 }
 
 // Group threads: the fold needs to know WHO is talking — the turn engine
@@ -20496,7 +20502,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           groups: new Set(store.groups.filter((group) => visibleNow.group(group.id)).map((group) => group.id)),
         },
       };
-      if (auth.kind === "session") client.sessionId = auth.session.id;
+      if (auth.kind === "session") {
+        client.sessionId = auth.session.id;
+        client.person = actorKey(auth);
+      }
       res.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
