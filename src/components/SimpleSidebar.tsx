@@ -62,22 +62,34 @@ function Row({
   );
 }
 
+/** A bot is working when it or any of its threads is (SSOT for every row here). */
+export function botWorking(bot: Bot, queued: Record<string, unknown[]>): boolean {
+  return Boolean(bot.busy) || sidebarBotActivityTasks(bot, queued).some((task) => task.busy || task.activity === "working");
+}
+
+/** A team's row shows work when any member works — a Manager waiting on its
+ * Code agent is not working itself, but the team is. */
+export function anyMemberWorking(group: SimpleGroup<Bot, Group>, queued: Record<string, unknown[]>): boolean {
+  return group.bots.some((bot) => botWorking(bot, queued));
+}
+
 /** A bot row (Grok look). Its threads live only in the thread column
  * (SimpleThreadColumn); the row just shows the unread dot. */
-function BotRow({ bot, title, teamUnread = false, onSelect }: {
+function BotRow({ bot, title, teamUnread = false, teamWorking = false, onSelect }: {
   bot: Bot;
   /** the name shown instead of the bot's (a team's row shows the team) */
   title?: string;
   /** a teammate behind this row has something unread */
   teamUnread?: boolean;
+  /** a teammate behind this row is working (not only its lead) */
+  teamWorking?: boolean;
   /** what a click opens, when not this bot (a team opens where you were) */
   onSelect?: () => void;
 }) {
   const { state, dispatch } = useStore();
   // a team's row is never the selection: its open member row is
   const selected = !onSelect && state.activeView === "chat" && state.selectedId === bot.id;
-  const activity = sidebarBotActivityTasks(bot, state.pendingQueued);
-  const working = Boolean(bot.busy) || activity.some((task) => task.busy || task.activity === "working");
+  const working = teamWorking || botWorking(bot, state.pendingQueued);
   const unread = unreadForMe(bot);
   return (
     <Row
@@ -102,8 +114,7 @@ function BotRow({ bot, title, teamUnread = false, onSelect }: {
 function MemberRow({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
-  const activity = sidebarBotActivityTasks(bot, state.pendingQueued);
-  const working = Boolean(bot.busy) || activity.some((task) => task.busy || task.activity === "working");
+  const working = botWorking(bot, state.pendingQueued);
   return (
     <button
       type="button"
@@ -131,8 +142,7 @@ function RoomMark({ members }: { members: Bot[] }) {
 function HeroBot({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
-  const activity = sidebarBotActivityTasks(bot, state.pendingQueued);
-  const working = Boolean(bot.busy) || activity.some((task) => task.busy || task.activity === "working");
+  const working = botWorking(bot, state.pendingQueued);
   const unread = unreadForMe(bot);
   return (
     <div className="mb-2">
@@ -246,6 +256,7 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
           <div key={row.key}>
             {/* the team's name; it opens on the member you were on last, else its Manager */}
             <BotRow bot={row.lead} title={row.group.section} teamUnread={openTeam !== row.group.id && teamUnread(row.group)}
+              teamWorking={anyMemberWorking(row.group, state.pendingQueued)}
               onSelect={() => select((lastVisited(row.group.bots, visits) ?? row.lead).id)} />
             {openTeam === row.group.id && (
               <div data-simple-team-members className="mb-1 ml-9 flex flex-col gap-0.5 pl-2">
