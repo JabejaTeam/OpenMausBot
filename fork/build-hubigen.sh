@@ -19,9 +19,11 @@ pnpm install --frozen-lockfile
 pnpm package:prepare
 pnpm build:speech
 pnpm build:cua
-# targets and notarizing come from the config: an app folder, or with
-# HUBIGEN_RELEASE=1 (fork/release-hubigen.sh) a notarized dmg + zip
-pnpm exec electron-builder --config fork/hubigen-builder.mjs --mac --publish never
+# an app folder, or with HUBIGEN_RELEASE=1 (fork/release-hubigen.sh) what
+# people download (dmg) and what the updater fetches (zip); Apple chip only.
+# Targets on the command line: the config's would be added to upstream's.
+targets=$([ "${HUBIGEN_RELEASE:-}" = 1 ] && echo "dmg zip" || echo dir)
+pnpm exec electron-builder --config fork/hubigen-builder.mjs --mac $targets --arm64 --publish never
 app=$(ls -d release/mac*/"$name.app" | head -1)
 codesign --verify --deep --strict "$app"
 mkdir -p "$repo/release/$(dirname "${app#release/}")"

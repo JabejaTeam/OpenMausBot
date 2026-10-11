@@ -11,6 +11,8 @@ const name = product.name;
 // Upstream's version plus our release number: 0.1.104-hubigen.3. The updater
 // orders these right, also across an upstream bump (0.1.105-hubigen.4).
 const version = `${pkg.version}-hubigen.${product.release}`;
+// Targets come from fork/build-hubigen.sh's command line: `extends` adds this
+// config's target list to upstream's (arm64 + x64) instead of replacing it.
 const release = process.env.HUBIGEN_RELEASE === "1";
 
 export default {
@@ -23,8 +25,6 @@ export default {
   // latest-mac.yml there), never upstream's releases.
   publish: [{ provider: "generic", url: product.updateFeed }],
   mac: {
-    // a release is what people download (dmg) and what the updater fetches (zip)
-    target: release ? [{ target: "dmg", arch: ["arm64"] }, { target: "zip", arch: ["arm64"] }] : [{ target: "dir", arch: ["arm64"] }],
     icon: "fork/hubigen/icon.icns",
     identity: "Jabeja (4DK89S8Z2F)",
     // Apple's notary service, with the App Store Connect key in
