@@ -18,7 +18,8 @@ mkdir -p node_modules/.cache
 # pinned: a new version is a deliberate, measured step
 ROLLDOWN_VITE=7.1.12
 
-inputs_hash() { find "$@" -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-32; }
+# tests never reach the build: changing one must not rebuild anything
+inputs_hash() { find "$@" -type f ! -name '*.test.ts' ! -name '*.test.tsx' ! -name '*.test.mjs' -print0 2>/dev/null | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-32; }
 web_hash=$(inputs_hash src shared public index.html vite.config.ts tsconfig.json package.json pnpm-lock.yaml \
   scripts/testing/duration-sequencer.ts server/testing/host-timeout.ts)-rolldown-$ROLLDOWN_VITE
 server_hash=$(inputs_hash server shared enterprise scripts electron package.json pnpm-lock.yaml \
