@@ -107,8 +107,10 @@ export function attachUpdaterWindow(mainWindow) {
 }
 
 export function startUpdater() {
-  // dev / unsigned builds can't auto-update — leave the banner dormant
-  if (!app.isPackaged) {
+  // dev / unsigned builds can't auto-update — leave the banner dormant.
+  // Jabeja fork: neither can the Hubigen build (fork/hubigen-builder.yml) —
+  // it is unsigned, and upstream's releases would replace it with OpenMausBot.
+  if (!app.isPackaged || app.getName() === "Hubigen") {
     updaterCoordinator = null;
     setState({ status: "idle" });
     return;

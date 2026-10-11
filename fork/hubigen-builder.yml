@@ -1,0 +1,22 @@
+# Jabeja fork only: the Hubigen Mac app — this fork's desktop app under its
+# own name, icon and bundle id, so it sits beside (or replaces) upstream's
+# OpenMausBot without sharing its settings or update channel. Everything else
+# comes from upstream's electron-builder.yml, untouched, so fork-sync never
+# conflicts here. Build: fork/build-hubigen.sh
+extends: electron-builder.yml
+appId: be.jabeja.hubigen
+productName: Hubigen
+artifactName: Hubigen-${version}-${arch}.${ext}
+# No update channel: upstream's releases would replace Hubigen with
+# OpenMausBot (electron/updater.mjs stays idle in this build too).
+publish: null
+mac:
+  icon: fork/hubigen/icon.icns
+  identity: "Jabeja (4DK89S8Z2F)"
+  extendInfo:
+    NSMicrophoneUsageDescription: Hubigen uses the microphone for voice dictation into the composer.
+    NSSpeechRecognitionUsageDescription: Hubigen transcribes your voice on-device to type messages for you.
+    NSAccessibilityUsageDescription: Hubigen uses Accessibility when you let a bot control this Mac.
+    NSScreenCaptureUsageDescription: Hubigen uses Screen Recording so bots can see this Mac before acting.
+dmg:
+  artifactName: Hubigen-${version}-${arch}.dmg
