@@ -67,7 +67,7 @@ export class PushDevices {
   forPerson(person: string, isLive: (sessionId: string) => boolean): PushDevice[] {
     const out: PushDevice[] = [];
     let dropped = false;
-    for (const device of [...this.devices.values()]) {
+    for (const device of this.devices.values()) {
       if (device.person !== person) continue;
       if (!isLive(device.sessionId)) {
         this.devices.delete(device.token);
