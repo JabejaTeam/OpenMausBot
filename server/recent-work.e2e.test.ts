@@ -97,8 +97,9 @@ it("carries a bot's recent 1:1 work into a room turn, tells the room, logs the t
     await runControlOmb(["send", "--bot", lead.id, "--text", "And now?"], { env });
     await runControlOmb(["wait", "--bot", lead.id, "--timeout", "30"], { env });
     const second = given();
-    expect(second).toContain("Your recent work");
-    expect(second).toContain('room "Standup" · you said: "');
+    // Fork: a 1:1 turn gets the team-wide brief (server/recent-conversations.ts)
+    expect(second).toContain("Recent conversations");
+    expect(second).toMatch(/- today \d{2}:\d{2} · you · room "Standup" · .*last answer: "/);
     // the room turn was logged too, sourced to the room
     expect(dailyLogs(fixture.info.dataDir).find((log) => log.path.includes(lead.id))!.text).toContain('from room "Standup"');
   } finally {

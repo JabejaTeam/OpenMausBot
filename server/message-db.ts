@@ -818,6 +818,56 @@ export function latestSaidByBot(threadIds: readonly string[], botId: string, sin
   }));
 }
 
+/** Fork: one conversation's newest exchange — what a person last asked and
+ * what was last answered — for the team-wide recent-conversations brief. */
+export interface ThreadExchange {
+  threadId: string;
+  /** the newest of the two lines */
+  at: number;
+  /** the head of the newest line a person sent, whitespace folded */
+  asked?: string;
+  /** the sign-in name (email) of whoever sent it */
+  askedBy?: string;
+  /** the head of the newest line a bot said, whitespace folded */
+  said?: string;
+}
+
+/** For each of the given threads that moved since `since`, the newest line
+ * a person sent and the newest line its bot said; newest thread first. A
+ * line relayed from another bot (peerAsk) is not a person asking. As in
+ * latestSaidByBot, a line carrying another bot's `from` (a room member, a
+ * mirrored teammate report) is not this conversation's answer: a 1:1 line
+ * carries no `from`, a room line by `botId` carries its own. */
+export function latestExchanges(threadIds: readonly string[], botId: string, since: number, limit = 20): ThreadExchange[] {
+  if (!threadIds.length) return [];
+  const placeholders = threadIds.map(() => "?").join(", ");
+  const rows = db()
+    .prepare(
+      "SELECT thread_id, role, at, head, sender FROM (" +
+        "SELECT m.thread_id, m.role, m.at, substr(m.text, 1, 400) AS head, json_extract(m.json, '$.sender.name') AS sender, " +
+        "ROW_NUMBER() OVER (PARTITION BY m.thread_id, m.role ORDER BY m.at DESC) AS rn " +
+        "FROM messages m " +
+        `WHERE m.kind = 'text' AND m.text IS NOT NULL AND m.at >= ? AND m.thread_id IN (${placeholders}) ` +
+        "AND ((m.role = 'bot' AND (json_extract(m.json, '$.from.botId') IS NULL OR json_extract(m.json, '$.from.botId') = ?)) " +
+        "OR (m.role = 'user' AND json_extract(m.json, '$.peerAsk') IS NULL))" +
+        ") WHERE rn = 1",
+    )
+    .all(since, ...threadIds, botId) as Array<{ thread_id: string; role: string; at: number; head: string; sender: string | null }>;
+  const byThread = new Map<string, ThreadExchange>();
+  for (const row of rows) {
+    const entry = byThread.get(row.thread_id) ?? { threadId: row.thread_id, at: 0 };
+    const head = row.head.replace(/\s+/g, " ").trim();
+    if (row.role === "bot") entry.said = head;
+    else {
+      entry.asked = head;
+      if (row.sender) entry.askedBy = row.sender;
+    }
+    entry.at = Math.max(entry.at, row.at);
+    byThread.set(row.thread_id, entry);
+  }
+  return [...byThread.values()].sort((a, b) => b.at - a.at).slice(0, limit);
+}
+
 export interface MemoryFileStat {
   path: string;
   mtimeMs: number;

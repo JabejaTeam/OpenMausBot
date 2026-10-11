@@ -276,6 +276,7 @@ import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type C
 import { readMessageText, recallMessages, recentMessages, searchMessagesAsync, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
+import { recentConversations, recentConversationsPrompt } from "./recent-conversations.ts";
 import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentText, type Incident, type IncidentKind } from "./incidents.ts";
 
 /** A session_read answer competes with the transcript for the context
@@ -1749,6 +1750,29 @@ function recentWorkSources(bot: BotRecord) {
     groups: store.groups.filter((group) => !group.memberIds.includes(bot.id) || roomFeedsBot(group, bot)),
     taskByThread: (botId: string, threadId: string) => store.taskByThread(botId, threadId),
   };
+}
+
+/** Fork: the viewer a turn's person is, so the thread-access SSOT
+ * (VisibleSet.thread) decides what a brief may show them — the same rule the
+ * sidebar and every route apply. */
+function personViewer(person: string): Viewer {
+  const lists = signInAllowList();
+  const admin = lists.admins.find((email) => personKeyForEmail(email) === person);
+  if (admin || person === ownerPersonKey()) return { kind: "admin", ...(admin ? { email: admin } : {}), person };
+  const member = lists.members.find((email) => personKeyForEmail(email) === person);
+  return { kind: "member", ...(member ? { email: member } : {}), person };
+}
+
+/** Fork (server/recent-conversations.ts): the Recent work brief. For a turn
+ * a person started it spans the team and only what that person may see;
+ * otherwise (routine, webhook, another bot) it stays upstream's own-only. */
+function recentConversationsBrief(bot: BotRecord, threadId: string, person: string | undefined): string {
+  const include = recentWorkFilter().include;
+  const access = person ? visibleTo(personViewer(person)) : undefined;
+  const canSee = (id: string) => (!include || include(id)) && (!access || access.thread(id));
+  return recentConversationsPrompt(recentConversations(bot, store.bots, recentWorkSources(bot), {
+    widen: Boolean(person), canSee, currentThreadId: threadId, userName: cfg.profile?.name?.trim() || "User",
+  }));
 }
 
 /** The automatic-recall block for a turn (server/recall.ts), or "". Notes
@@ -11306,7 +11330,7 @@ async function startTurn(
         teamAvailabilityPart(coordinationPrompt ? sectionPeers : []),
         // what the bot said lately in its other conversations, so a task
         // never redoes — or forgets — what another one already did
-        { id: "recent", label: "Recent work", text: kindTakesSharedContext(bot.kind) ? recentWorkPrompt(recentWork(recentWorkSources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId, ...recentWorkFilter() })) : "" },
+        { id: "recent", label: "Recent work", text: kindTakesSharedContext(bot.kind) ? recentConversationsBrief(bot, threadId, opts?.automationSource ? undefined : turnPerson) : "" },
         { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace, enabled: bot.memoryEnabled !== false }) },
         // liveBot was captured before awaited setup work; an assignment PUT
         // in that window must still reach this turn's prompt.

@@ -11,6 +11,7 @@ import { closeMessageDb,
   indexMemoryFile,
   indexedMemoryFiles,
   insertMessage,
+  latestExchanges,
   latestSaidByBot,
   readMessageText,
   recentMessages,
@@ -200,6 +201,30 @@ describe("message-db", () => {
     ]);
     expect(latestSaidByBot(["dm", "room"], "me", now - 48 * hour, 1).map((row) => row.threadId)).toEqual(["dm"]);
     expect(latestSaidByBot([], "me", 0)).toEqual([]);
+  });
+
+  it("latestExchanges (fork): per thread the newest line a person asked and a bot said, inside the window", () => {
+    const now = Date.UTC(2026, 9, 10, 18);
+    const hour = 3_600_000;
+    insertMessage("team", msg("t1", "check the Drive folder", { at: now - 3 * hour, sender: { name: "wiebren@jabeja.be", id: "p_a" } }));
+    insertMessage("team", msg("t2", "Read it: four exports.\n\nTask set for Monday.", { role: "bot", at: now - 2 * hour }));
+    insertMessage("team", msg("t3", "ok next", { at: now - hour, sender: { name: "wiebren@jabeja.be", id: "p_a" } }));
+    // a line another bot relayed is not a person asking
+    insertMessage("relay", msg("r1", "Addressed teammate request", { at: now - hour, peerAsk: { botId: "b1", name: "Ripal PM" } }));
+    insertMessage("relay", msg("r2", "Done, merged.", { role: "bot", at: now - 30 * 60_000 }));
+    insertMessage("stale", msg("s1", "last week", { at: now - 72 * hour }));
+    insertMessage("team", { ...msg("chip", "ran tests", { at: now }), role: "bot", kind: "activity" });
+    // a room: another bot's newer line is not this bot's answer there
+    insertMessage("room", msg("o1", "I'll take the deploy", { role: "bot", at: now - 2 * hour, from: { botId: "me", name: "Me", color: "#000" } }));
+    insertMessage("room", msg("o2", "hello from the helper", { role: "bot", at: now - 10 * 60_000, from: { botId: "them", name: "Them", color: "#111" } }));
+
+    expect(latestExchanges(["team", "relay", "room", "stale", "unknown"], "me", now - 48 * hour)).toEqual([
+      { threadId: "relay", at: now - 30 * 60_000, said: "Done, merged." },
+      { threadId: "team", at: now - hour, asked: "ok next", askedBy: "wiebren@jabeja.be", said: "Read it: four exports. Task set for Monday." },
+      { threadId: "room", at: now - 2 * hour, said: "I'll take the deploy" },
+    ]);
+    expect(latestExchanges(["team", "relay"], "me", now - 48 * hour, 1).map((row) => row.threadId)).toEqual(["relay"]);
+    expect(latestExchanges([], "me", 0)).toEqual([]);
   });
 
   it("recall names the bot behind a line another bot delivered with ask_bot", () => {
