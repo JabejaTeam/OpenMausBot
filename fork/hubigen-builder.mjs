@@ -27,6 +27,10 @@ export default {
   // Updates only from Hubigen's own feed (the generic provider reads
   // latest-mac.yml there), never upstream's releases.
   publish: [{ provider: "generic", url: product.updateFeed }],
+  // The "-hubigen.N" in the version is ours, not a pre-release channel:
+  // inferred, it set `channel: hubigen` in app-update.yml and the app looked
+  // for hubigen-mac.yml, while the build writes latest-mac.yml.
+  detectUpdateChannel: false,
   mac: {
     ...upstream.mac,
     target: release ? [{ target: "dmg", arch: ["arm64"] }, { target: "zip", arch: ["arm64"] }] : [{ target: "dir", arch: ["arm64"] }],

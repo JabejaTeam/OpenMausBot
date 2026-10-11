@@ -22,7 +22,10 @@ set -a; . "$HOME/.config/hubigen/notary.env"; set +a
 for v in APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do [ -n "${!v:-}" ] || { echo "$v missing in ~/.config/hubigen/notary.env" >&2; exit 1; }; done
 [ -f "$APPLE_API_KEY" ] || { echo "no key file at $APPLE_API_KEY" >&2; exit 1; }
 
-# the release number is part of the version, so it is committed first
+# the release number is part of the version: claim it on fork main BEFORE the
+# long build, so a session that pushes meanwhile cannot make two builds share
+# a number (happened twice on 2026-10-11 when the push came last)
+git fetch -q fork && git rebase -q fork/main
 node -e '
   const fs = require("fs"); const f = "shared/product.json";
   const p = JSON.parse(fs.readFileSync(f, "utf8")); p.release += 1;
@@ -30,6 +33,7 @@ node -e '
 name=$(node -p 'require("./shared/product.json").name')
 version="$(node -p 'require("./package.json").version')-hubigen.$(node -p 'require("./shared/product.json").release')"
 git commit -q -m "release: $name $version" shared/product.json
+git push -q fork HEAD:main || { echo "could not claim release $version on fork main; nothing built" >&2; exit 1; }
 
 rm -f release/"$name"-*.dmg release/"$name"-*.zip release/*.blockmap release/latest-mac.yml
 HUBIGEN_RELEASE=1 bash fork/build-hubigen.sh
@@ -42,6 +46,7 @@ feed=$(node -p 'require("./shared/product.json").updateFeed')
 grep -qx "provider: generic" "release/mac-arm64/$name.app/Contents/Resources/app-update.yml" \
   && grep -qx "url: $feed" "release/mac-arm64/$name.app/Contents/Resources/app-update.yml" \
   || { echo "app-update.yml does not point at $feed:" >&2; cat "release/mac-arm64/$name.app/Contents/Resources/app-update.yml" >&2; exit 1; }
+! grep -q "^channel:" "release/mac-arm64/$name.app/Contents/Resources/app-update.yml" || { echo "app-update.yml names a channel; the app would not read latest-mac.yml" >&2; exit 1; }
 ! grep -q -- "-x64\." release/latest-mac.yml || { echo "latest-mac.yml lists x64 files" >&2; exit 1; }
 # The app inside is notarized by the build; the dmg people download is checked
 # by macOS too, so it gets its own ticket. Stapling changes the file, so its
@@ -71,5 +76,4 @@ rsync -a release/index.html "$VPS:$SITE/index.html"
 rsync -a fork/hubigen/icon-1024.png "$VPS:$SITE/icon.png"
 # older versions go: the feed and the page only point at this one
 ssh "$VPS" "find $SITE/mac -maxdepth 1 -name '$name-*' ! -name '$name-$version-*' -delete"
-git push -q fork HEAD:main
 echo "released $name $version: $(node -p 'require("./shared/product.json").downloads')"
