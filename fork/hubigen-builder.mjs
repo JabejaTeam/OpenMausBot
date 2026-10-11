@@ -36,9 +36,9 @@ export default {
     target: release ? [{ target: "dmg", arch: ["arm64"] }, { target: "zip", arch: ["arm64"] }] : [{ target: "dir", arch: ["arm64"] }],
     icon: "fork/hubigen/icon.icns",
     identity: "Jabeja (4DK89S8Z2F)",
-    // Apple's notary service, with the App Store Connect key in
-    // APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER (release only)
-    notarize: release,
+    // Notarizing is fork/release-hubigen.sh's, once, on the dmg: its ticket
+    // covers the app inside. Here too would be a second ~5 minute round trip.
+    notarize: false,
     extendInfo: {
       NSMicrophoneUsageDescription: `${name} uses the microphone for voice dictation into the composer.`,
       NSSpeechRecognitionUsageDescription: `${name} transcribes your voice on-device to type messages for you.`,

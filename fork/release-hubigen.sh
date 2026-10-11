@@ -14,6 +14,7 @@
 #   fork/release-hubigen.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+step() { echo "[$(date +%H:%M:%S)] $*"; }
 VPS=jabeja-vps-root
 SITE=/opt/hubigen-download/public
 
@@ -35,11 +36,11 @@ version="$(node -p 'require("./package.json").version')-hubigen.$(node -p 'requi
 git commit -q -m "release: $name $version" shared/product.json
 git push -q fork HEAD:main || { echo "could not claim release $version on fork main; nothing built" >&2; exit 1; }
 
+step "build $version"
 rm -f release/"$name"-*.dmg release/"$name"-*.zip release/*.blockmap release/latest-mac.yml
 HUBIGEN_RELEASE=1 bash fork/build-hubigen.sh
 dmg="$name-$version-arm64.dmg"
 [ -f "release/$dmg" ] && [ -f release/latest-mac.yml ] || { echo "build left no $dmg or latest-mac.yml" >&2; exit 1; }
-xcrun stapler validate "release/mac-arm64/$name.app"
 # the app must look for updates on Hubigen's own feed, and that feed list
 # only this Mac's files (releases 1–3 shipped upstream's GitHub feed)
 feed=$(node -p 'require("./shared/product.json").updateFeed')
@@ -48,9 +49,16 @@ grep -qx "provider: generic" "release/mac-arm64/$name.app/Contents/Resources/app
   || { echo "app-update.yml does not point at $feed:" >&2; cat "release/mac-arm64/$name.app/Contents/Resources/app-update.yml" >&2; exit 1; }
 ! grep -q "^channel:" "release/mac-arm64/$name.app/Contents/Resources/app-update.yml" || { echo "app-update.yml names a channel; the app would not read latest-mac.yml" >&2; exit 1; }
 ! grep -q -- "-x64\." release/latest-mac.yml || { echo "latest-mac.yml lists x64 files" >&2; exit 1; }
-# The app inside is notarized by the build; the dmg people download is checked
-# by macOS too, so it gets its own ticket. Stapling changes the file, so its
-# entry in latest-mac.yml is recomputed.
+# The zip is what installed apps update from; it is final now, so it goes up
+# while Apple checks the dmg. The feed still names the old version until the
+# end, so nobody is offered a half-uploaded one.
+ssh "$VPS" "mkdir -p $SITE/mac"
+step "upload zip (background) + notarize dmg"
+rsync -a release/"$name-$version"-arm64.zip release/"$name-$version"-arm64.zip.blockmap "$VPS:$SITE/mac/" &
+zip_upload=$!
+# One notarization, on the dmg people download: Apple checks everything in it,
+# the app included, so the app needs no round trip of its own. Stapling
+# changes the dmg, so its entry in latest-mac.yml is recomputed.
 xcrun notarytool submit "release/$dmg" --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
 xcrun stapler staple "release/$dmg"
 node --input-type=module -e '
@@ -66,14 +74,20 @@ node --input-type=module -e '
   }
   writeFileSync(file, stringify(feed));' release/latest-mac.yml "$dmg"
 spctl -a -t install "release/$dmg"
+# and the app in it passes Gatekeeper on the dmg's ticket
+mnt=$(mktemp -d)
+hdiutil attach -nobrowse -quiet -mountpoint "$mnt" "release/$dmg"
+spctl -a "$mnt/$name.app" || { hdiutil detach -quiet "$mnt"; echo "Gatekeeper refuses the app in $dmg" >&2; exit 1; }
+hdiutil detach -quiet "$mnt"
 
 # the files first, the feed last: an updater never sees a version whose zip is not there yet
-ssh "$VPS" "mkdir -p $SITE/mac"
-rsync -a release/"$name-$version"-arm64.{dmg,zip} release/"$name-$version"-arm64.*.blockmap "$VPS:$SITE/mac/"
+step "upload dmg"
+wait "$zip_upload" || { echo "zip upload failed" >&2; exit 1; }
+rsync -a release/"$dmg" release/"$dmg".blockmap "$VPS:$SITE/mac/"
 rsync -a release/latest-mac.yml "$VPS:$SITE/mac/latest-mac.yml"
 sed -e "s/{{name}}/$name/g" -e "s/{{version}}/$version/g" -e "s/{{dmg}}/$dmg/g" fork/hubigen/download.html > release/index.html
 rsync -a release/index.html "$VPS:$SITE/index.html"
 rsync -a fork/hubigen/icon-1024.png "$VPS:$SITE/icon.png"
 # older versions go: the feed and the page only point at this one
 ssh "$VPS" "find $SITE/mac -maxdepth 1 -name '$name-*' ! -name '$name-$version-*' -delete"
-echo "released $name $version: $(node -p 'require("./shared/product.json").downloads')"
+step "released $name $version: $(node -p 'require("./shared/product.json").downloads')"
