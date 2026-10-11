@@ -73,7 +73,8 @@ describe("bot-first sidebar", () => {
       const markup = renderToStaticMarkup(createElement(Capture));
       const row = findElement(tree, "data-sidebar-bot-row", bot.id)!;
       expect(String(row.props.className).split(" ")).toEqual(expect.arrayContaining([...spacing]));
-      expect(markup).toContain(`width="${size}" height="${size}"`); // the picture, or the bloub svg
+      // the picture or bloub svg (attributes), or the robot head (its box's style)
+      expect(markup).toMatch(new RegExp(`width="${size}" height="${size}"|width:${size}px;height:${size}px`));
     }
   });
 

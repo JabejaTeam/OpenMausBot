@@ -36,7 +36,7 @@ if (!files.length) {
   execFileSync(vitest, ["list", "--filesOnly", `--json=${out}/files.json`], { stdio: "ignore" });
   files = JSON.parse(readFileSync(`${out}/files.json`, "utf8")).map((entry) => relative(root, entry.file));
 }
-const db = { files: {}, tests: {}, whole: {}, perFile: 150, perJob: 2_000,
+const db = { files: {}, tests: {}, whole: {}, order: {}, perFile: 150, perJob: 2_000,
   ...(existsSync(dbPath) ? JSON.parse(readFileSync(dbPath, "utf8")) : {}) };
 const known = Object.values(db.files).sort((a, b) => a - b);
 const fallback = known.length ? known[Math.floor(known.length / 2)] : 3000;
@@ -58,7 +58,31 @@ const small = [];
 for (const file of files) {
   const ms = estimate(file);
   if (ms <= target) { small.push(file); continue; }
-  if (db.whole[file]) { jobs.push({ files: [file], ms }); continue; }
+  // An order-dependent file (its tests lean on each other's state) can still
+  // run in consecutive chunks of its own order, each with its own setup:
+  // server/index.test.ts passes that way in 21 s instead of 100 s whole
+  // (measured 2026-10-11). "never" means even that failed once.
+  if (db.whole[file]) {
+    const order = db.order[file] ?? [];
+    if (db.whole[file] === "never" || order.length < 2) { jobs.push({ files: [file], ms }); continue; }
+    const of = Math.min(Math.ceil(ms / target), order.length);
+    const chunks = [];
+    let chunk = [];
+    let acc = 0;
+    const testMs = (test) => db.tests[file]?.[test] ?? 300;
+    const per = order.reduce((sum, test) => sum + testMs(test), 0) / of;
+    for (const test of order) {
+      chunk.push(test);
+      acc += testMs(test);
+      if (acc >= per && chunks.length < of - 1) { chunks.push(chunk); chunk = []; acc = 0; }
+    }
+    if (chunk.length) chunks.push(chunk);
+    // the first chunk also takes every test not in the recorded order (new ones)
+    const later = chunks.slice(1).flat();
+    chunks.forEach((names, i) => jobs.push({ files: [file], filter: i === 0 ? pattern(later, true) : pattern(names),
+      label: `${i + 1}/${chunks.length} in order`, ordered: true, ms: ms / chunks.length }));
+    continue;
+  }
   const of = Math.ceil(ms / target);
   const bins = Array.from({ length: of }, () => 0);
   const assign = {};
@@ -126,6 +150,9 @@ function read(results) {
     for (const result of report.testResults) {
       const file = relative(root, result.name);
       const entry = files.get(file) ?? { ms: 0, tests: {}, failed: [] };
+      // the report lists a file's tests in file order: an unfiltered run is
+      // the one that knows the whole order
+      if (!job.filter) entry.order = result.assertionResults.map((test) => test.fullName);
       entry.ms += Math.max(0, result.endTime - result.startTime);
       for (const test of result.assertionResults) {
         const key = test.fullName;
@@ -150,6 +177,7 @@ for (const [file, entry] of measured) {
   if (entry.crashed) continue;
   db.files[file] = entry.ms;
   db.tests[file] = { ...db.tests[file], ...entry.tests };
+  if (entry.order?.length && !entry.failed?.length && entry.failed !== null) db.order[file] = entry.order;
 }
 // Overheads, from the jobs themselves: a job of one file shows vitest's own
 // startup; a job of many files shows what each file costs beyond its tests.
@@ -176,7 +204,11 @@ if (reruns.length) phase("rerun", since);
 const real = failures(second).filter(([file]) => !third.has(file) || failures(third).some(([again]) => again === file))
   .map(([file, entry]) => [file, third.get(file) ?? entry]);
 const orderDependent = wholeRuns.map((job) => job.files[0]).filter((file) => !real.some(([again]) => again === file));
-for (const file of orderDependent) db.whole[file] = true;
+// Failed in chunks, passed whole: random slices → try chunks in order next
+// time; chunks in order → never split again.
+const inOrder = new Set(jobs.filter((job) => job.ordered).map((job) => job.files[0]));
+for (const file of orderDependent) db.whole[file] = inOrder.has(file) ? "never" : "ordered";
+for (const [file, entry] of third) if (entry.order?.length && !entry.failed?.length && entry.failed !== null) db.order[file] = entry.order;
 if (orderDependent.length) writeFileSync(dbPath, JSON.stringify(db));
 const flaky = failed.map(([file]) => file).filter((file) => !real.some(([again]) => again === file) && !orderDependent.includes(file));
 
@@ -189,7 +221,7 @@ console.log(`overhead: ${secs(db.perJob)} per job, ${secs(db.perFile)} per file`
 console.log(`workers busy ${Math.round((busy / (workers * runWall)) * 100)}% of the suite phase`);
 console.log(`slowest jobs: ${first.sort((a, b) => b.ms - a.ms).slice(0, 5).map((r) => `${secs(r.ms)} ${r.job.files.length > 1 ? `${r.job.files.length} files` : r.job.files[0]}${r.job.label ? ` [${r.job.label}]` : ""}`).join(", ")}`);
 if (flaky.length) console.log(`FLAKY under parallel load (passed alone): ${flaky.join(" ")}`);
-if (orderDependent.length) console.log(`ORDER-DEPENDENT (failed alone, passed as a whole file; no longer sliced): ${orderDependent.join(" ")}`);
+if (orderDependent.length) console.log(`ORDER-DEPENDENT (failed in slices, passed as a whole file; next: in order, or never if that failed): ${orderDependent.join(" ")}`);
 for (const [file, entry] of real) {
   console.log(`\nFAIL ${file}${entry.crashed ? ` (crashed, see ${out}/job-${entry.crashed}.log)` : ""}`);
   for (const test of entry.failed ?? [{ key: "(file)", message: entry.message ?? "" }]) console.log(`  × ${test.key}\n${test.message.split("\n").slice(0, 12).map((line) => `    ${line}`).join("\n")}`);
