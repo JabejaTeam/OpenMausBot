@@ -14,6 +14,10 @@
 # costs a wrong rollout, a needless one a few seconds.
 set -euo pipefail
 source "$(dirname "$0")/beast-prepare.sh"
+# Jabeja fork: what ships is Hubigen. This folder is a synced copy (no .git),
+# so rename it before hashing and building (fork/rebrand.mjs); the next sync
+# puts upstream's text back and the same rename gives the same hash.
+node fork/rebrand.mjs .
 mkdir -p node_modules/.cache
 # pinned: a new version is a deliberate, measured step
 ROLLDOWN_VITE=7.1.12
