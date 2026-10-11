@@ -95,7 +95,10 @@ for attempt in 1 2 3; do
     echo "Rebase conflict with $main: resolve it only if it is clearly mechanical, otherwise report it."; exit 1
   fi
   if [ "$(git rev-parse HEAD)" != "$before" ] && [ -f package.json ] && grep -q '"typecheck"' package.json; then
-    if ! npm run -s typecheck; then echo "The typecheck fails on top of the work merged meanwhile: fix it, commit, land again."; exit 1; fi
+    # The team's typecheck command when the machine has one (the same one the pre-commit hook runs).
+    tc="$HOME/.config/omb-team/bin/omb-typecheck"
+    if [ -x "$tc" ]; then "$tc" .; else npm run -s typecheck; fi
+    if [ $? -ne 0 ]; then echo "The typecheck fails on top of the work merged meanwhile: fix it, commit, land again."; exit 1; fi
   fi
   if git -C "$repo" merge -q --ff-only "$branch" 2>/dev/null; then
     echo "Merged $(git rev-parse --short HEAD) into $main."; exit 0
