@@ -1,11 +1,15 @@
 # Jabeja fork only: the Hubigen Mac app — this fork's desktop app under its
-# own name, icon and bundle id, so it sits beside (or replaces) upstream's
-# OpenMausBot without sharing its settings or update channel. Everything else
+# own name, icon and bundle id, replacing upstream's OpenMausBot (same data
+# folder and sign-ins, but no update channel). Everything else
 # comes from upstream's electron-builder.yml, untouched, so fork-sync never
 # conflicts here. Build: fork/build-hubigen.sh
 extends: electron-builder.yml
 appId: be.jabeja.hubigen
 productName: Hubigen
+# electron/fork-build.mjs reads this; the internal app name stays
+# "openmausbot", so Hubigen shares OpenMausBot's data folder and sign-ins.
+extraMetadata:
+  jabejaBuild: hubigen
 artifactName: Hubigen-${version}-${arch}.${ext}
 # No update channel: upstream's releases would replace Hubigen with
 # OpenMausBot (electron/updater.mjs stays idle in this build too).

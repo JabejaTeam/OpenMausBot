@@ -20,6 +20,7 @@ import {
   stagedInstallFile,
 } from "./package-install-command.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
+import { HUBIGEN_BUILD } from "./fork-build.mjs";
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
 
 const require = createRequire(import.meta.url);
@@ -110,7 +111,7 @@ export function startUpdater() {
   // dev / unsigned builds can't auto-update — leave the banner dormant.
   // Jabeja fork: neither can the Hubigen build (fork/hubigen-builder.yml) —
   // it is unsigned, and upstream's releases would replace it with OpenMausBot.
-  if (!app.isPackaged || app.getName() === "Hubigen") {
+  if (!app.isPackaged || HUBIGEN_BUILD) {
     updaterCoordinator = null;
     setState({ status: "idle" });
     return;
