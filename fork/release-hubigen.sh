@@ -36,6 +36,13 @@ HUBIGEN_RELEASE=1 bash fork/build-hubigen.sh
 dmg="$name-$version-arm64.dmg"
 [ -f "release/$dmg" ] && [ -f release/latest-mac.yml ] || { echo "build left no $dmg or latest-mac.yml" >&2; exit 1; }
 xcrun stapler validate "release/mac-arm64/$name.app"
+# the app must look for updates on Hubigen's own feed, and that feed list
+# only this Mac's files (releases 1–3 shipped upstream's GitHub feed)
+feed=$(node -p 'require("./shared/product.json").updateFeed')
+grep -qx "provider: generic" "release/mac-arm64/$name.app/Contents/Resources/app-update.yml" \
+  && grep -qx "url: $feed" "release/mac-arm64/$name.app/Contents/Resources/app-update.yml" \
+  || { echo "app-update.yml does not point at $feed:" >&2; cat "release/mac-arm64/$name.app/Contents/Resources/app-update.yml" >&2; exit 1; }
+! grep -q -- "-x64\." release/latest-mac.yml || { echo "latest-mac.yml lists x64 files" >&2; exit 1; }
 # The app inside is notarized by the build; the dmg people download is checked
 # by macOS too, so it gets its own ticket. Stapling changes the file, so its
 # entry in latest-mac.yml is recomputed.
@@ -47,6 +54,7 @@ node --input-type=module -e '
   import { parse, stringify } from "yaml";
   const [file, dmg] = process.argv.slice(1);
   const feed = parse(readFileSync(file, "utf8"));
+  feed.files = feed.files.filter((entry, i) => feed.files.findIndex((other) => other.url === entry.url) === i);
   for (const entry of feed.files) if (entry.url === dmg) {
     entry.sha512 = createHash("sha512").update(readFileSync("release/" + dmg)).digest("base64");
     entry.size = statSync("release/" + dmg).size;
