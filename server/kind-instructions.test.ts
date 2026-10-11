@@ -2,7 +2,7 @@ import { rmSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
-  KIND_INSTRUCTIONS_FILE, KIND_INSTRUCTIONS_MAX_BYTES, kindInstructionsSystemPrompt, kindTakesSharedContext, readKindInstructions, writeKindInstructions,
+  KIND_INSTRUCTIONS_FILE, KIND_INSTRUCTIONS_MAX_BYTES, WORK_THREAD_REUSE_MAX_TOKENS, continuesWorkThread, kindInstructionsSystemPrompt, kindTakesSharedContext, readKindInstructions, writeKindInstructions,
 } from "./kind-instructions.ts";
 import { clientBotPatchViolation } from "./request-auth.ts";
 import { Store } from "./store.ts";
@@ -51,6 +51,13 @@ describe("workspace rules by kind of bot", () => {
     expect(kindTakesSharedContext("code")).toBe(false);
     expect(kindTakesSharedContext("pm")).toBe(true);
     expect(kindTakesSharedContext(undefined)).toBe(true);
+  });
+
+  it("lets a code agent continue its work thread until that thread is full", () => {
+    expect(continuesWorkThread("code", undefined)).toBe(true);
+    expect(continuesWorkThread("code", WORK_THREAD_REUSE_MAX_TOKENS - 1)).toBe(true);
+    expect(continuesWorkThread("code", WORK_THREAD_REUSE_MAX_TOKENS)).toBe(false);
+    expect(continuesWorkThread("pm", 900_000)).toBe(true);
   });
 
   it("clears a scope with empty text and refuses oversized text", () => {

@@ -79,7 +79,7 @@ it("queues a follow-up to finished work in the same thread", () => fixture(async
   expect(follow).toMatchObject({ threadId: first.threadId, status: "completed" });
 }), 60_000);
 
-it("gives a code agent every new assignment in a fresh thread, without the one before", () => fixture(async f => {
+it("continues a code agent's last work thread for the next assignment, with the one before in view", () => fixture(async f => {
   await f.api(`/api/bots/${f.clerk.id}`, { kind: "code" }, "PATCH");
   f.plan[f.chief.id] = { turns: [
     { steps: [{ arguments: f.assign }], reply: "Asked the Bookkeeper" },
@@ -89,7 +89,7 @@ it("gives a code agent every new assignment in a fresh thread, without the one b
   ] };
   f.plan[f.clerk.id] = { turns: [
     { reply: "Booked Q3" },
-    { reply: "Rebooked in EUR", expectContextIncludes: ["Rebook USD invoices in EUR"], expectContextExcludes: ["Book the Q3 supplier invoices", "Booked Q3"] },
+    { reply: "Rebooked in EUR", expectContextIncludes: ["Rebook USD invoices in EUR"] },
   ] };
   f.save();
   await f.say("Have the Bookkeeper book Q3");
@@ -98,7 +98,7 @@ it("gives a code agent every new assignment in a fresh thread, without the one b
   await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((m: any) => m.text === "Rebooked in EUR"), { timeout: 20_000 }).toBe(true);
   const [first, follow] = f.clerkNodes();
   expect(follow.status, JSON.stringify(follow)).toBe("completed");
-  expect(follow.threadId).not.toBe(first.threadId);
+  expect(follow.threadId).toBe(first.threadId);
 }), 60_000);
 
 it("starts a parallel assignment to a code agent in its own thread beside the one still running", () => fixture(async f => {
