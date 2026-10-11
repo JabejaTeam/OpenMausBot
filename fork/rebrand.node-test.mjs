@@ -43,7 +43,7 @@ test("identifiers stay", () => {
   ]) assert.equal(rebrandText(text), text, text);
 });
 
-test("a tree is renamed in its shipped parts only, and a git checkout is refused", () => {
+test("a tree is renamed in its shipped parts only, and the repo itself is refused", () => {
   const root = mkdtempSync(path.join(tmpdir(), "rebrand-"));
   for (const dir of ["src", "server", "electron/resources", "public", "src/node_modules/x"]) mkdirSync(path.join(root, dir), { recursive: true });
   writeFileSync(path.join(root, "src/a.ts"), 'export const n = "OpenMausBot";');
@@ -57,6 +57,5 @@ test("a tree is renamed in its shipped parts only, and a git checkout is refused
   assert.equal(readFileSync(path.join(root, "src/a.test.ts"), "utf8"), 'expect("OpenMausBot")');
   assert.equal(readFileSync(path.join(root, "server/s.ts"), "utf8"), "in Hubigen.");
   assert.equal(existsSync(path.join(root, "enterprise")), false, "enterprise/ is not shipped");
-  mkdirSync(path.join(root, ".git"));
-  assert.throws(() => rebrandTree(root), /git checkout/);
+  assert.throws(() => rebrandTree(path.join(import.meta.dirname, "..")), /this repo/);
 });

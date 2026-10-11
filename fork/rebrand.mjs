@@ -16,7 +16,7 @@
 // It also drops enterprise/ from the copy (see rebrandTree).
 //
 //   node fork/rebrand.mjs <build-copy>      rewrites the copy in place
-// Refuses a git checkout: run it on a copy, never on the repo itself.
+// Refuses the repo it lives in: run it on a copy, never on the repo itself.
 import { copyFileSync, existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,7 +54,7 @@ function* files(root, rel) {
 }
 
 export function rebrandTree(root) {
-  if (existsSync(path.join(root, ".git"))) throw new Error(`${root} is a git checkout; rebrand a build copy, never the repo`);
+  if (path.resolve(root) === path.resolve(here, "..")) throw new Error(`${root} is this repo; rebrand a build copy, never the repo`);
   const changed = [];
   for (const tree of TREES) {
     for (const rel of files(root, tree)) {
