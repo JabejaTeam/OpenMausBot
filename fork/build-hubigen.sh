@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Jabeja fork only: build the Hubigen Mac app for this Mac's architecture,
+# Jabeja fork only: build the Hubigen Mac app (Apple chip),
 # signed with Jabeja's Developer ID. Built from a COPY of this repo that
 # fork/rebrand.mjs renamed to the product in shared/product.json; the repo
 # itself keeps upstream's text. Not notarized yet: fine for a Mac that builds
@@ -9,7 +9,6 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 repo=$PWD
-arch=$([ "$(uname -m)" = arm64 ] && echo arm64 || echo x64)
 name=$(node -p 'require("./shared/product.json").name')
 copy="${TMPDIR:-/tmp}/hubigen-build"
 mkdir -p "$copy"
@@ -20,12 +19,17 @@ pnpm install --frozen-lockfile
 pnpm package:prepare
 pnpm build:speech
 pnpm build:cua
-pnpm exec electron-builder --config fork/hubigen-builder.mjs --mac dir "--$arch" --publish never
+# targets and notarizing come from the config: an app folder, or with
+# HUBIGEN_RELEASE=1 (fork/release-hubigen.sh) a notarized dmg + zip
+pnpm exec electron-builder --config fork/hubigen-builder.mjs --mac --publish never
 app=$(ls -d release/mac*/"$name.app" | head -1)
 codesign --verify --deep --strict "$app"
 mkdir -p "$repo/release/$(dirname "${app#release/}")"
 rm -rf "$repo/release/${app#release/}"
 ditto "$app" "$repo/release/${app#release/}"
+if [ "${HUBIGEN_RELEASE:-}" = 1 ]; then
+  rsync -a release/"$name"-*.dmg release/"$name"-*.zip release/*.blockmap release/latest-mac.yml "$repo/release/"
+fi
 echo "built release/${app#release/} ($(git -C "$repo" rev-parse --short HEAD))"
 if [ "${1:-}" = "--install" ]; then
   osascript -e "quit app \"$name\"" 2>/dev/null || true
