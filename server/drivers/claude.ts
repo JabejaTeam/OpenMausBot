@@ -1445,7 +1445,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // a retry relaunches the whole CLI; the backoff is scaled down in tests
       // so a fake's transient failures don't stall real seconds
       const retryScale = Number(process.env.FAKE_CLAUDE_RETRY_SCALE ?? "1");
-      const sessionId = !turn.sessionReset && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+      // Fork: a "fork:<id>" cursor starts this thread as a copy of session <id>.
+      const cursorText = !turn.sessionReset && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+      const forkSession = cursorText?.startsWith("fork:") ?? false;
+      const sessionId = forkSession ? cursorText!.slice("fork:".length) : cursorText;
       const newSessionId = sessionId ? null : newId();
 
       const args = [
@@ -1728,7 +1731,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // the harness wants resumed. Clearing a cursor alone does not opt out
       // of legacy reuse: an explicit rebuild must discard the idle context.
       const live = sessions.get(threadId);
-      if (!turn.sessionReset && live && !live.turn && !live.closing && live.child.exitCode === null && live.argsKey === argsKey && (!sessionId || sessionId === live.sessionId)) {
+      if (!turn.sessionReset && !forkSession && live && !live.turn && !live.closing && live.child.exitCode === null && live.argsKey === argsKey && (!sessionId || sessionId === live.sessionId)) {
         if (live.idleTimer) clearTimeout(live.idleTimer);
         live.turn = { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false, awaitingInit: true, pendingSteers: new Set(), deferred: null, continuationGrace: null, continuationSilence: null };
         active.set(threadId, { stop: () => {
@@ -1864,7 +1867,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (authSettingsPath) {
           writeFileSync(authSettingsPath, JSON.stringify(settings), { mode: 0o600 });
         }
-        if (sessionId) args.push("--resume", sessionId);
+        if (sessionId) args.push("--resume", sessionId, ...(forkSession ? ["--fork-session"] : []));
         else args.push("--session-id", newSessionId!);
       } catch (error) {
         cleanupUnownedLaunch();

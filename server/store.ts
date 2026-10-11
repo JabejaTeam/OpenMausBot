@@ -110,12 +110,16 @@ export interface TaskRecord extends Omit<WireTask, TaskWireDerivedKeys> {
   surfaceSource?: "user" | "auto";
   /** Fork: the card a code agent's work thread is about (server/work-topic.ts). */
   workTopic?: string;
+  /** Fork: a parallel assignment's thread started as a copy of this card thread. */
+  forkOf?: string;
+  /** Fork: that copy's result was handed to the card thread it came from. */
+  forkReported?: boolean;
 }
 
 /** TaskRecord fields no client may see. Everything else must be on WireTask:
  * the exactness assertion below fails to compile when either side drifts,
  * so a new server field forces a decision — wire-visible or private here. */
-export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel" | "surfaceSource" | "workTopic";
+export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel" | "surfaceSource" | "workTopic" | "forkOf" | "forkReported";
 /** WireTask fields computed by toWireTask and never stored on a TaskRecord. */
 export type TaskWireDerivedKeys = "surfaceAuto" | "followsBotModel";
 export type TaskWireProjection = Pick<TaskRecord, Exclude<keyof TaskRecord, TaskWirePrivateKeys>> & Pick<WireTask, TaskWireDerivedKeys>;
@@ -133,7 +137,7 @@ export const taskWireProjectionIsExact: TaskWireProjectionIsExact = true;
 export function toWireTask(task: TaskRecord, botModel: ModelSelection): WireTask {
   const { resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, handedMessages: _handedMessages,
     appliedCompactionId: _appliedCompactionId, contextFloor: _contextFloor, lastContextModel: _lastContextModel,
-    surfaceSource, workTopic: _workTopic, ...stored } = task;
+    surfaceSource, workTopic: _workTopic, forkOf: _forkOf, forkReported: _forkReported, ...stored } = task;
   const wire: WireTask = { ...stored, modelSelection: structuredClone(task.modelSelection ?? botModel), followsBotModel: task.modelSelection === undefined };
   // Who pinned stays private. A client learns only whether the pin is the
   // machine's own record, so it never presents one as the person's choice.
@@ -2720,6 +2724,37 @@ export class Store {
   workThreadOn(botId: string, fromBotId: string, topic: string): TaskRecord | undefined {
     return this.tasks(botId).find((t) => t.openedBy?.kind === "work" && t.openedBy.botId === fromBotId &&
       t.workTopic === topic && t.archivedAt === undefined);
+  }
+
+  /** Fork: start `threadId` as a copy of `from`'s Claude session (the driver
+   * resumes a "fork:" cursor with --fork-session), so a parallel assignment
+   * knows everything the card thread knows. The copy's record says the
+   * session holds none of its own messages yet, so its assignment is handed on
+   * the first turn. False when `from` has no Claude session to copy. */
+  seedForkTask(botId: string, threadId: string, from: TaskRecord): boolean {
+    const task = this.taskByThread(botId, threadId);
+    const cursor = from.resumeCursors.claude;
+    if (!task || from.lastInstanceId !== "claude" || typeof cursor !== "string" || cursor.startsWith("fork:")) return false;
+    const session = `fork:${cursor}`;
+    task.resumeCursors = { claude: session };
+    task.lastInstanceId = "claude";
+    task.handedMessages = { claude: { session, config: from.handedMessages?.claude?.config, ids: [] } };
+    task.forkOf = from.threadId;
+    this.saveBots();
+    return true;
+  }
+
+  /** Fork: the copies of this card thread whose results it has not been
+   * handed yet (markForkReported records the handing). */
+  unreportedForks(botId: string, threadId: string): TaskRecord[] {
+    return this.tasks(botId).filter((t) => t.forkOf === threadId && !t.forkReported);
+  }
+
+  markForkReported(botId: string, threadId: string): void {
+    const task = this.taskByThread(botId, threadId);
+    if (!task || task.forkReported) return;
+    task.forkReported = true;
+    this.saveBots();
   }
 
   /** Fork: record which card a work thread is about. */

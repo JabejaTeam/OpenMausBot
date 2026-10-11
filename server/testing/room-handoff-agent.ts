@@ -138,6 +138,7 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
       model: argv.includes("--model") ? arg("--model") : undefined,
       permissionMode: argv.includes("--permission-mode") ? arg("--permission-mode") : undefined,
       snapshotMode: argv.includes("--system-prompt-snapshot") ? arg("--system-prompt-snapshot") : undefined,
+      resume: argv.includes("--resume") ? arg("--resume") : undefined, forkSession: argv.includes("--fork-session"),
       resumed, system, prompt, evidence, ...(mounted ? { mcpServers: Object.keys(mounted) } : {}), ...launch?.evidence }) + "\n");
   }
 }

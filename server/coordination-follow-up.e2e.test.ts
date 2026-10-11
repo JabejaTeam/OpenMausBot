@@ -165,3 +165,36 @@ it("gives a code agent one thread per card: another card runs beside it, a follo
   // Back on its own card's thread, not the newest one.
   expect(f.clerkNodes()[2].threadId).toBe(supplier.threadId);
 }), 60_000);
+
+it("starts a parallel assignment on a card as a copy of that card's thread, and tells the card's thread what it did", () => fixture(async f => {
+  await f.api(`/api/bots/${f.clerk.id}`, { kind: "code" }, "PATCH");
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Kaart aaaa1111: build the invoice list" } }], reply: "List started" },
+    { reply: "List done" },
+    { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Kaart aaaa1111: add a CSV export", parallel: true } }], reply: "Export started" },
+    { reply: "Export done" },
+    { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Kaart aaaa1111: sort the list by date" } }], reply: "Sort started" },
+    { reply: "Sort done" },
+  ] };
+  f.plan[f.clerk.id] = { turns: [
+    { reply: "Invoice list built in commit aaa111" },
+    { reply: "CSV export built in commit bbb222" },
+    { reply: "Sorted", expectContextIncludes: ["CSV export built in commit bbb222"] },
+  ] };
+  f.save();
+  const done = (text: string) => expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((m: any) => m.text === text), { timeout: 20_000 }).toBe(true);
+  await f.say("Build the invoice list (card aaaa1111)");
+  await done("List done");
+  await f.say("And a CSV export, in parallel");
+  await done("Export done");
+  const [list, exportJob] = f.clerkNodes();
+  expect(exportJob.threadId).not.toBe(list.threadId);
+  const turns = f.evidence().filter((t: any) => t.botId === f.clerk.id);
+  // The copy resumed the card thread's own session under a new id.
+  expect(turns[1]).toMatchObject({ forkSession: true, resume: turns[0].resume ?? expect.any(String) });
+  expect(turns[1].threadId).toBe(exportJob.threadId);
+  await f.say("Sort it by date");
+  await done("Sort done");
+  // The next assignment on the card continues the card's thread, which now knows what the copy did.
+  expect(f.clerkNodes()[2].threadId).toBe(list.threadId);
+}), 60_000);

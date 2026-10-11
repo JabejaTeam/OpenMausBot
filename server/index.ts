@@ -9149,6 +9149,22 @@ const handoffs = new Handoffs({
     .filter((m) => m.role === "bot" && m.kind === "text" && !m.from && m.turnId === turnId).map((m) => m.id),
 });
 
+/** Fork: the results of a card thread's finished parallel copies it has not
+ * seen yet, as a block to put before its next assignment, and mark them
+ * handed. "" when there are none. */
+function forkResultsNote(botId: string, threadId: string): string {
+  const lines: string[] = [];
+  for (const fork of store.unreportedForks(botId, threadId)) {
+    const done = [...roomHandoffs.nodes.values()].filter((n) => n.threadId === fork.threadId && n.status === "completed" && n.result);
+    if (!done.length || roomHandoffs.activeDirect(fork.threadId)) continue;
+    for (const n of done) lines.push(`- "${n.text.split("\n")[0]!.slice(0, 160)}": ${n.result!.slice(0, 1500)}`);
+    store.markForkReported(botId, fork.threadId);
+  }
+  return lines.length
+    ? `[Parallel work on this card that ran beside you since your last assignment; its code is already merged, so your rebase brings it in:\n${lines.join("\n")}]\n\n`
+    : "";
+}
+
 /** Consume one delegated-turn watch and mirror exactly one terminal state.
  * Some harness paths settle a busy bot without a provider turn.completed
  * event, so they call this same finalizer explicitly. */
@@ -19038,6 +19054,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 target.threadId = task.threadId;
                 if (!continued) createdThread = task.threadId;
                 if (topic && !continued && !parsed.data.parallel) store.setTaskWorkTopic(target.botId, task.threadId, topic);
+                // Fork: a parallel assignment on a card starts as a copy of the
+                // card's thread, so it knows everything that thread knows.
+                if (topic && !continued && parsed.data.parallel && workThread) store.seedForkTask(target.botId, task.threadId, workThread);
                 applyDelegatedLevel(internalSender, internalCapability.threadId, store.bot(target.botId)!, target.threadId);
                 inheritMailMode(address.threadId, task.threadId);
               }
@@ -19060,8 +19079,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                   continue;
                 }
               }
+              // Fork: the card's thread learns what its parallel copies did
+              // since its last assignment (their code is already merged).
+              const forkNote = continued && topic && !parsed.data.parallel ? forkResultsNote(target.botId, continued.threadId) : "";
               const { node, duplicate } = roomHandoffs.enqueue(address, internalCapability.generation, internalCapability.roomHandoffId,
-                target, target.botId, parsed.data.message, approvalGranted, parsed.data.rework, [...store.messagesFor(address.threadId)].reverse().find(m => m.role === "user" && m.kind === "text")?.text ?? "",
+                target, target.botId, forkNote + parsed.data.message, approvalGranted, parsed.data.rework, [...store.messagesFor(address.threadId)].reverse().find(m => m.role === "user" && m.kind === "text")?.text ?? "",
                 requestBatchKey);
               // A repeat lands on the request already made, possibly in a
               // thread the person archived meanwhile; a thread opened for it

@@ -376,7 +376,9 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
 // exits only when stdin ends. `slow` leaves a gap between the tool result
 // and the reply so a test can steer into it.
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
-const sessionId = argAfter("--resume") ?? argAfter("--session-id") ?? "fake-session";
+// --fork-session continues --resume's conversation under a new session id, like the real CLI.
+const sessionId = process.argv.includes("--fork-session") ? `fork-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  : argAfter("--resume") ?? argAfter("--session-id") ?? "fake-session";
 const model = argAfter("--model") ?? "claude-fake";
 // The mode init reports: what was asked for, unless auto is unavailable for
 // this model, in which case the real CLI silently runs Manual ("default").
