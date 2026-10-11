@@ -97,3 +97,11 @@ it("refuses to land uncommitted work, or work whose typecheck fails on top of ne
   expect(result.out).toContain("typecheck");
   expect(git(repo, "rev-parse", "HEAD")).toBe(before);
 });
+
+it("hands out a land command that works in a copy made before the command existed", async () => {
+  const one = await ensureThreadWorktree(repo, BOT, "t1");
+  const script = threadWorktreeLandCommand(repo, "t1").match(/bash "([^"]+)"/)![1]!;
+  rmSync(script, { force: true });
+  threadWorktreeSystemPrompt(repo, one, "t1");
+  expect(existsSync(script)).toBe(true);
+});

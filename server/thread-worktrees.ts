@@ -73,7 +73,6 @@ export async function ensureThreadWorktree(repo: string, botId: string, threadId
     }
   }
   await copyDependencies(repo, path);
-  writeLandScript();
   return path;
 }
 
@@ -143,6 +142,8 @@ export function threadWorktreeSystemPrompt(repo: string, path: string, threadId:
   let main: string;
   try { main = projectBranch(repo); } catch { return ""; }
   const branch = threadWorktreeBranch(threadId);
+  // The command below must work in every turn, also in a copy made before it existed.
+  writeLandScript();
   return `\n\nYour own copy of the project. This conversation works in its own git worktree, ${path}, on branch ${branch}. The shared project folder is ${repo} (branch ${main}). Other conversations work in their own copies at the same time, so never edit files in the shared folder; it only receives merged work, and its dev preview shows only that.
 - Starting an assignment: if \`git status\` is clean, run \`git rebase ${main}\` first so you build on the latest merged work. If package-lock.json changed, run \`npm ci\`.
 - Finishing an assignment, in this order:
