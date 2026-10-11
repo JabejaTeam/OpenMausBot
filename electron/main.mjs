@@ -111,7 +111,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 const DEFAULT_COMPOSIO_BROKER_URL = "https://openmausbot-composio.milindsoni201.workers.dev";
 let SERVER_PORT = 8799;
-const APP_ICON = path.join(__dirname, "resources/app-icon.png");
+// Jabeja fork: the Hubigen build (fork/hubigen-builder.yml) shows its own
+// mark in the Dock, windows and tray, not OpenMausBot's.
+const APP_ICON = path.join(__dirname, app.getName() === "Hubigen" ? "resources/hubigen-icon.png" : "resources/app-icon.png");
 let desktopViewerWindow = null;
 let desktopViewerOwner = null;
 let desktopViewerContextId = null;
