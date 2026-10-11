@@ -967,7 +967,7 @@ it("runs a threadWorktrees teammate in its own copy while the project folder is 
     expect(task.cwd).toBe(join(f.session.info.dataDir, "worktrees", f.specialist.id, node.threadId));
     expect(execFileSync("git", ["-C", task.cwd, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim()).toBe(`omb/${node.threadId}`);
     const turn = f.evidence().find((entry: any) => entry.botId === f.specialist.id);
-    expect(turn.system).toContain(`merge --ff-only omb/${node.threadId}`);
+    expect(turn.system).toMatch(new RegExp(`land\\.sh" ".+" omb/${node.threadId}`));
     writeFileSync(sourceGate, "release the folder");
     expect((await f.cli("wait", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--timeout", "30")).status).toBe("settled");
   } finally { removeTempDir(folder); }

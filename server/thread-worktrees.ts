@@ -8,7 +8,7 @@
 // fast-forwarding that branch, so the shared folder only ever holds merged
 // work — and is what its dev preview shows.
 import { execFile, execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -42,10 +42,25 @@ export function projectBranch(repo: string): string {
   return git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
 }
 
+/** node_modules at the root and one level down come along, so the copy can
+ * typecheck without a fresh install: cloned copy-on-write on macOS, hard-linked
+ * elsewhere (instant, no extra disk; an `npm ci` in the copy replaces its own
+ * links and never touches the shared folder). A copy that cannot be made, for
+ * instance across filesystems, is left out: the thread then installs itself. */
+async function copyDependencies(repo: string, path: string): Promise<void> {
+  const flags = process.platform === "darwin" ? "-cR" : "-al";
+  const dirs = ["", ...readdirSync(repo).filter((name) => !name.startsWith(".") && name !== "node_modules" &&
+    statSync(join(repo, name)).isDirectory() && existsSync(join(path, name)))];
+  for (const dir of dirs) {
+    const source = join(repo, dir, "node_modules");
+    const target = join(path, dir, "node_modules");
+    if (existsSync(source) && !existsSync(target)) await run("cp", [flags, source, target]).catch(() => undefined);
+  }
+}
+
 /** Create (once) the thread's worktree and return its path. Untracked .env*
  * files at the repo root are copied (they hold the local settings a checkout
- * lacks); node_modules at the root and one level down are cloned
- * copy-on-write on macOS, so the copy can build without a fresh install. */
+ * lacks), and so are its dependencies (copyDependencies). */
 export async function ensureThreadWorktree(repo: string, botId: string, threadId: string): Promise<string> {
   const path = threadWorktreePath(botId, threadId);
   if (existsSync(join(path, ".git"))) return path;
@@ -57,16 +72,52 @@ export async function ensureThreadWorktree(repo: string, botId: string, threadId
       copyFileSync(join(repo, name), join(path, name));
     }
   }
-  if (process.platform === "darwin") {
-    const dirs = ["", ...readdirSync(repo).filter((name) => !name.startsWith(".") && name !== "node_modules" &&
-      statSync(join(repo, name)).isDirectory() && existsSync(join(path, name)))];
-    for (const dir of dirs) {
-      const source = join(repo, dir, "node_modules");
-      const target = join(path, dir, "node_modules");
-      if (existsSync(source) && !existsSync(target)) await run("cp", ["-cR", source, target]);
-    }
-  }
+  await copyDependencies(repo, path);
+  writeLandScript();
   return path;
+}
+
+/** Landing a thread's work, as one command the thread runs once it committed:
+ * rebase onto the project branch, typecheck again when that brought in other
+ * merged work, fast-forward the project branch, print the merged hash. Retries
+ * when the project branch moves on in between. One step instead of several
+ * turns of the engine, and the one place the landing rules live. */
+const LAND_SCRIPT = `#!/usr/bin/env bash
+# OpenMausBot: land this worktree's branch on the shared folder's branch.
+# Usage: land.sh <shared folder> <branch>   (run inside the worktree)
+set -uo pipefail
+repo=$1; branch=$2
+main=$(git -C "$repo" rev-parse --abbrev-ref HEAD) || exit 1
+if [ -n "$(git status --porcelain)" ]; then echo "Uncommitted changes: commit first (the pre-commit hook runs the checks)."; exit 1; fi
+for attempt in 1 2 3; do
+  before=$(git rev-parse HEAD)
+  if ! git rebase -q "$main"; then
+    git rebase --abort >/dev/null 2>&1
+    echo "Rebase conflict with $main: resolve it only if it is clearly mechanical, otherwise report it."; exit 1
+  fi
+  if [ "$(git rev-parse HEAD)" != "$before" ] && [ -f package.json ] && grep -q '"typecheck"' package.json; then
+    if ! npm run -s typecheck; then echo "The typecheck fails on top of the work merged meanwhile: fix it, commit, land again."; exit 1; fi
+  fi
+  if git -C "$repo" merge -q --ff-only "$branch" 2>/dev/null; then
+    echo "Merged $(git rev-parse --short HEAD) into $main."; exit 0
+  fi
+done
+echo "$main kept moving while landing: run this again."; exit 1
+`;
+
+function landScriptPath(): string {
+  return join(THREAD_WORKTREES_DIR, "land.sh");
+}
+
+function writeLandScript(): void {
+  const path = landScriptPath();
+  if (existsSync(path) && readFileSync(path, "utf8") === LAND_SCRIPT) return;
+  writeFileSync(path, LAND_SCRIPT, { mode: 0o755 });
+}
+
+/** The command a thread runs in its worktree to land its committed work. */
+export function threadWorktreeLandCommand(repo: string, threadId: string): string {
+  return `bash "${landScriptPath()}" "${repo}" ${threadWorktreeBranch(threadId)}`;
 }
 
 /** Remove a thread's worktree when nothing in it would be lost: no
@@ -96,8 +147,7 @@ export function threadWorktreeSystemPrompt(repo: string, path: string, threadId:
 - Starting an assignment: if \`git status\` is clean, run \`git rebase ${main}\` first so you build on the latest merged work. If package-lock.json changed, run \`npm ci\`.
 - Finishing an assignment, in this order:
   1. Commit your work on ${branch}. The commit runs the checks your workspace rules call done (a pre-commit hook); fix what it reports and commit again.
-  2. \`git rebase ${main}\`. If that brought in new commits, run those checks again.
-  3. \`git -C "${repo}" merge --ff-only ${branch}\`. If it refuses because ${main} moved on, repeat from step 2.
+  2. Land it in one command: \`${threadWorktreeLandCommand(repo, threadId)}\`. It rebases onto ${main}, typechecks again when that brought in other merged work, fast-forwards ${main} and prints the merged hash; if it reports a problem, fix that and run it again.
   Report the merged commit hash. Work is done only when it is merged.
 - A rebase conflict with someone else's work: resolve it only when the fix is clearly mechanical; otherwise stop and report the conflict to whoever gave you the assignment.
 - Never switch branches or commit in the shared folder.`;

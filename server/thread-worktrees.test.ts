@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 
-import { ensureThreadWorktree, removeThreadWorktree, threadWorktreePath, threadWorktreeSystemPrompt } from "./thread-worktrees.ts";
+import { ensureThreadWorktree, removeThreadWorktree, threadWorktreeLandCommand, threadWorktreePath, threadWorktreeSystemPrompt } from "./thread-worktrees.ts";
 
 const BOT = "bot-wt";
 let repo: string;
@@ -36,11 +36,12 @@ it("gives each thread its own copy on its own branch with the local settings", a
   expect(one).not.toBe(two);
   expect(git(one, "rev-parse", "--abbrev-ref", "HEAD")).toBe("omb/t1");
   expect(readFileSync(join(one, ".env.local"), "utf8")).toBe("DATABASE_URL=dev\n");
-  if (process.platform === "darwin") expect(existsSync(join(one, "node_modules", "dep", "index.js"))).toBe(true);
+  // Every platform: the copy can typecheck without a fresh install.
+  expect(existsSync(join(one, "node_modules", "dep", "index.js"))).toBe(true);
   // Idempotent: a later turn of the same thread gets the same copy back.
   expect(await ensureThreadWorktree(repo, BOT, "t1")).toBe(one);
   const prompt = threadWorktreeSystemPrompt(repo, one, "t1");
-  expect(prompt).toContain(`git -C "${repo}" merge --ff-only omb/t1`);
+  expect(prompt).toContain(threadWorktreeLandCommand(repo, "t1"));
   expect(prompt).toContain("git rebase main");
 });
 
@@ -55,4 +56,44 @@ it("keeps an unmerged copy and removes it once it landed", async () => {
   expect(removeThreadWorktree(repo, BOT, "t1")).toBeNull();
   expect(existsSync(one)).toBe(false);
   expect(git(repo, "branch", "--list", "omb/t1")).toBe("");
+});
+
+/** Runs the land command the prompt gives the agent; returns its exit status and output. */
+function land(cwd: string, thread: string): { status: number; out: string } {
+  const [cmd, ...args] = ["bash", "-c", threadWorktreeLandCommand(repo, thread)];
+  try {
+    return { status: 0, out: execFileSync(cmd!, args, { cwd, encoding: "utf8", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }) };
+  } catch (error: any) {
+    return { status: error.status ?? 1, out: `${error.stdout ?? ""}${error.stderr ?? ""}` };
+  }
+}
+
+it("lands committed work in one command, rebasing onto work merged meanwhile", async () => {
+  const one = await ensureThreadWorktree(repo, BOT, "t1");
+  writeFileSync(join(one, "a.txt"), "two\n");
+  git(one, "commit", "-qam", "work");
+  writeFileSync(join(repo, "b.txt"), "other\n");
+  git(repo, "add", "b.txt");
+  git(repo, "commit", "-qm", "merged meanwhile");
+  const result = land(one, "t1");
+  expect(result.status, result.out).toBe(0);
+  expect(result.out).toContain(`Merged ${git(one, "rev-parse", "--short", "HEAD")}`);
+  expect(git(repo, "rev-parse", "HEAD")).toBe(git(one, "rev-parse", "HEAD"));
+  expect(readFileSync(join(repo, "a.txt"), "utf8")).toBe("two\n");
+  expect(readFileSync(join(repo, "b.txt"), "utf8")).toBe("other\n");
+});
+
+it("refuses to land uncommitted work, or work whose typecheck fails on top of new merges", async () => {
+  const one = await ensureThreadWorktree(repo, BOT, "t1");
+  writeFileSync(join(one, "a.txt"), "two\n");
+  expect(land(one, "t1")).toMatchObject({ status: 1, out: expect.stringContaining("commit first") });
+  git(one, "commit", "-qam", "work");
+  writeFileSync(join(repo, "package.json"), JSON.stringify({ scripts: { typecheck: "echo broken-types >&2; exit 1" } }));
+  git(repo, "add", "package.json");
+  git(repo, "commit", "-qm", "merged meanwhile, breaks types");
+  const before = git(repo, "rev-parse", "HEAD");
+  const result = land(one, "t1");
+  expect(result.status).toBe(1);
+  expect(result.out).toContain("typecheck");
+  expect(git(repo, "rev-parse", "HEAD")).toBe(before);
 });
