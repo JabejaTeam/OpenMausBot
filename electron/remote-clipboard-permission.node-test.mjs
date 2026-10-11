@@ -54,7 +54,8 @@ test("the active paired server may write the clipboard, on request and on check"
 
 test("a remote page can never read the clipboard or gain another permission", () => {
   const h = harness(viewing("vps"));
-  for (const permission of ["clipboard-read", "notifications", "fullscreen", "media", "geolocation", "camera", "display-capture", "openExternal", "unknown"]) {
+  // Jabeja fork: "media" (audio) is the one exception — see app-permissions.mjs remoteMicrophone.
+  for (const permission of ["clipboard-read", "notifications", "fullscreen", "geolocation", "camera", "display-capture", "openExternal", "unknown"]) {
     assert.equal(h.request(permission, `${VPS}/`, { isMainFrame: true, mediaTypes: ["audio"] }), false, `request ${permission}`);
     assert.equal(h.check(permission, VPS), false, `check ${permission}`);
   }
@@ -128,11 +129,13 @@ test("the Cloud keeps its microphone and writes the clipboard by the same rule, 
   assert.equal(h.request("clipboard-sanitized-write", `${CLOUD}/chat`), true, "the Cloud writes the clipboard (its copy buttons)");
   assert.equal(h.request("clipboard-sanitized-write", `${CLOUD}/chat`, { isMainFrame: false }), false, "main frame only");
   assert.equal(h.request("clipboard-read", `${CLOUD}/chat`), false, "never reads it");
-  // The active remote server writes the clipboard but never hears the microphone.
+  // The active remote server writes the clipboard, and (Jabeja fork) hears
+  // the microphone under the Cloud's rule: audio only, main frame.
   const r = harness(viewing("vps"), { cloud: CLOUD });
   assert.equal(r.request("clipboard-sanitized-write", `${VPS}/`), true);
-  assert.equal(r.request("media", `${VPS}/`, audio), false, "a paired server never hears the microphone");
-  assert.equal(r.check("media", VPS, audio), false);
+  assert.equal(r.request("media", `${VPS}/`, audio), true, "the paired server hears the microphone");
+  assert.equal(r.request("media", `${VPS}/`, { isMainFrame: true, mediaTypes: ["audio", "video"] }), false, "never the camera");
+  assert.equal(r.request("media", `${VPS}/`, { isMainFrame: false, mediaTypes: ["audio"] }), false, "main frame only");
   // Both trusts together: the Cloud keeps its microphone and clipboard writes while a remote server is the active environment elsewhere.
   r.mainContents.getURL = () => `${CLOUD}/chat`;
   assert.equal(r.request("media", `${CLOUD}/chat`, audio), true);
