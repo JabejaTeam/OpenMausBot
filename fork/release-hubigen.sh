@@ -88,6 +88,9 @@ rsync -a release/latest-mac.yml "$VPS:$SITE/mac/latest-mac.yml"
 sed -e "s/{{name}}/$name/g" -e "s/{{version}}/$version/g" -e "s/{{dmg}}/$dmg/g" fork/hubigen/download.html > release/index.html
 rsync -a release/index.html "$VPS:$SITE/index.html"
 rsync -a fork/hubigen/icon-1024.png "$VPS:$SITE/icon.png"
-# older versions go: the feed and the page only point at this one
-ssh "$VPS" "find $SITE/mac -maxdepth 1 -name '$name-*' ! -name '$name-$version-*' -delete"
+# older versions go: the feed and the page only point at this one. Their zip
+# blockmaps stay (~300 KB each): an installed app compares its own version's
+# blockmap with the new one and downloads only the blocks that changed,
+# instead of the whole ~290 MB zip.
+ssh "$VPS" "find $SITE/mac -maxdepth 1 -name '$name-*' ! -name '$name-$version-*' ! -name '*.zip.blockmap' -delete"
 step "released $name $version: $(node -p 'require("./shared/product.json").downloads')"
