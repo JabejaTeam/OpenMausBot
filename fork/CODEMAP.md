@@ -45,15 +45,23 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
 - Thread worktrees: `server/thread-worktrees.ts`. Outgoing Gmail: `server/email-outbox.ts`.
 
 ## Tests, build, deploy (all on THE BEAST)
-- `fork/test-beast.sh [--files …] [--workers N]` → `fork/test-run.mjs` in a container:
+- `fork/beast.sh` (sourced, SSOT): host, one workspace per worktree `~/omb-fork/wt/<worktree>`
+  (node_modules + tsbuildinfo survive), one detached container run that follows its log.
+  `fork/beast-prepare.sh`: installs only when pnpm-lock.yaml/package.json changed.
+- `fork/check.sh [--base X]` — the gate for a change: incremental typecheck, oxlint on changed
+  files, tests named after changed files; warm ≈6 s (an index.ts change adds index.test.ts ≈100 s).
+- `fork/test-beast.sh [--files …] [--workers N]` — full suite (upstream merges, nightly) →
+  `fork/test-run.mjs` in a container:
   duration-packed jobs, long files sliced by test name, failed tests rerun alone.
-  Durations: beast `~/omb-fork/pnpm-store/test-durations.json`.
+  Durations: beast `~/omb-fork/pnpm-store/test-durations.json` (`/store` in the container).
 - E2e fixtures: `scripts/control-omb.ts` (`launchVerificationServer`), scripted
   engines `server/testing/fake-claude-cli.ts`, plans `server/testing/room-handoff-agent.ts`.
 - Tool catalog size is budgeted: `server/drivers/agents-catalog-wire.test.ts`
   (`FORK_EXTRA_BYTES`; regenerate goldens with
   `UPDATE_AGENTS_CATALOG_GOLDENS=1`).
-- `fork/deploy-beast.sh`: build the current commit on beast, back up, roll out, health check.
+- `fork/deploy-beast.sh [--force] [--allow-rollback]`: build the current commit on beast, back up,
+  roll out, health check (≈30 s). Refuses when live has commits HEAD lacks (rebase on fork/main),
+  one rollout at a time (`~/omb-fork/deploy.lock`), waits for the DEPLOY_OK/DEPLOY_FAIL log line.
 
 ## Office view (3D)
 - Switch: `src/lib/office-view.ts`; page: `src/components/office/OfficeView.tsx`; three.js scene
