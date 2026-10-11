@@ -23,7 +23,9 @@ mkdir -p node_modules/.cache
 ROLLDOWN_VITE=7.1.12
 
 # tests never reach the build: changing one must not rebuild anything
-inputs_hash() { find "$@" -type f ! -name '*.test.ts' ! -name '*.test.tsx' ! -name '*.test.mjs' -print0 2>/dev/null | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-32; }
+# only paths that exist: the rebrand removed enterprise/, and find on a missing
+# path fails the whole build under pipefail
+inputs_hash() { local p present=(); for p in "$@"; do [ -e "$p" ] && present+=("$p"); done; set -- "${present[@]}"; find "$@" -type f ! -name '*.test.ts' ! -name '*.test.tsx' ! -name '*.test.mjs' -print0 2>/dev/null | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-32; }
 web_hash=$(inputs_hash src shared public index.html vite.config.ts tsconfig.json package.json pnpm-lock.yaml \
   scripts/testing/duration-sequencer.ts server/testing/host-timeout.ts)-rolldown-$ROLLDOWN_VITE
 server_hash=$(inputs_hash server shared enterprise scripts electron package.json pnpm-lock.yaml \
