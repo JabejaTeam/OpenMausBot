@@ -1,6 +1,8 @@
 /* One shared animation loop for every head on the page. Each subscriber
    gets the seconds since its last frame; the loop sleeps while the tab is
-   hidden or nobody is listening.
+   hidden, while the window is not the active one (fork: the heads stand
+   still behind other windows, in a browser and in the desktop app alike),
+   or while nobody is listening.
    fork: driven by a timer, not a requestAnimationFrame that re-arms every
    display frame — on a 120 Hz screen that spin wakes the page 120×/s even
    when it draws 30, and every requested frame runs the browser's whole
@@ -47,8 +49,11 @@ function run() {
   schedule();
 }
 
+/** fork: the heads move only in the window you are using. */
+const active = () => !document.hidden && document.hasFocus();
+
 function schedule() {
-  if (timer || typeof document === 'undefined' || document.hidden || !subscribers.size) return;
+  if (timer || typeof document === 'undefined' || !active() || !subscribers.size) return;
   let next = Infinity;
   for (const s of subscribers) next = Math.min(next, s.due);
   const wait = Math.max(0, next - performance.now() - 4);
@@ -80,15 +85,18 @@ function listen() {
   };
   window.addEventListener('scroll', moved, { passive: true, capture: true });
   window.addEventListener('resize', moved, { passive: true });
-  window.addEventListener('blur', away);
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) stop();
-    else {
-      /* a long sleep is not one huge step */
-      for (const s of subscribers) s.last = 0;
-      schedule();
-    }
+  const wake = () => {
+    if (!active()) return stop();
+    /* a long sleep is not one huge step */
+    for (const s of subscribers) s.last = 0;
+    schedule();
+  };
+  window.addEventListener('blur', () => {
+    away();
+    stop();
   });
+  window.addEventListener('focus', wake);
+  document.addEventListener('visibilitychange', wake);
 }
 
 /** Call `fn` about every `interval` ms until unsubscribed. */
