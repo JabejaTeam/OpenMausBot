@@ -54,7 +54,7 @@ ok=0
 trap '[ \$ok = 1 ] || echo DEPLOY_FAIL' EXIT
 cd \$HOME/$BEAST_DIR
 start=\$(date +%s)
-docker build -q -t omb-fork-test -f fork/test.Dockerfile fork >/dev/null
+$BEAST_IMAGE
 docker run --rm $BEAST_RUN_FLAGS bash fork/beast-build.sh
 echo $commit > release/npm/DEPLOYED_COMMIT
 echo "built in \$((\$(date +%s) - start)) s"
@@ -96,7 +96,7 @@ REMOTE
 ssh "$BEAST_HOST" "nohup bash \$HOME/omb-fork/deploy-$stamp.sh > \$HOME/$log 2>&1 &"
 waited=0
 until ssh -o ConnectTimeout=10 "$BEAST_HOST" "grep -qE '^DEPLOY_(OK|FAIL)\$' \$HOME/$log" 2>/dev/null; do
-  sleep 3; waited=$((waited + 3))
+  sleep 1; waited=$((waited + 1))
   # build + idle wait + lock wait together stay well under this
   [ $waited -lt 3600 ] || { echo "no end line after an hour; see ~/$log on $BEAST_HOST" >&2; exit 1; }
 done

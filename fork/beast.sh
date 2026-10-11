@@ -37,13 +37,21 @@ BEAST_RUN_FLAGS="--init --user \$(id -u):\$(id -g) -e HOME=/tmp/home -e CI=true 
   -e OMB_TEST_DURATIONS=/store/test-durations.json \
   -v \$HOME/$BEAST_DIR:/repo -v \$HOME/omb-fork/pnpm-store:/store -w /repo omb-fork-test"
 
+# Shell snippet (run on the beast, in the worktree folder) that builds the
+# fork image only when fork/test.Dockerfile changed: `docker build` checking
+# its cache cost 1.1 s on every run (measured 2026-10-11).
+BEAST_IMAGE='h=$(sha256sum fork/test.Dockerfile | cut -c1-16); [ "$(docker image inspect omb-fork-test --format "{{index .Config.Labels \"omb.dockerfile\"}}" 2>/dev/null)" = "$h" ] || docker build -q --label omb.dockerfile=$h -t omb-fork-test -f fork/test.Dockerfile fork >/dev/null'
+
 # Run `bash -c <command>` in a detached container on the beast and follow its
 # log until it exits; returns its exit code. Detached, so a dropped SSH
 # connection or a sleeping laptop never stops it; the follow reattaches.
 beast_container() {
   local command=$1
-  ssh "$BEAST_HOST" "cd \$HOME/$BEAST_DIR && docker build -q -t omb-fork-test -f fork/test.Dockerfile fork >/dev/null \
-    && docker rm -f $BEAST_CONTAINER >/dev/null 2>&1; docker run -d --name $BEAST_CONTAINER $BEAST_RUN_FLAGS bash -c $(printf '%q' "$command") >/dev/null"
+  # A failed start must stop here: the follow below would otherwise report
+  # the previous run's container and its exit code.
+  ssh "$BEAST_HOST" "cd \$HOME/$BEAST_DIR && { $BEAST_IMAGE; } \
+    && docker rm -f $BEAST_CONTAINER >/dev/null 2>&1; docker run -d --name $BEAST_CONTAINER $BEAST_RUN_FLAGS bash -c $(printf '%q' "$command") >/dev/null" \
+    || { echo "could not start $BEAST_CONTAINER on $BEAST_HOST" >&2; return 1; }
   until ssh -o ConnectTimeout=10 "$BEAST_HOST" "docker logs -f $BEAST_CONTAINER 2>&1; [ \"\$(docker inspect -f {{.State.Running}} $BEAST_CONTAINER)\" = false ]"; do
     sleep 2
   done
