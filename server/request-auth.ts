@@ -305,6 +305,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/dictation\/token$/ },
   // fork: a phone registers its APNs token for its own person (server/routes/fork-push.ts)
   { methods: ["POST", "DELETE"], path: /^\/api\/push\/device$/ },
+  // fork: a desk says its person is working there, so their phone stays quiet (server/push-gate.ts)
+  { methods: ["POST"], path: /^\/api\/push\/desk$/ },
   // fork: who a conversation is shared with; only its person changes it (the route checks)
   { methods: ["GET", "PUT"], path: /^\/api\/threads\/[\w-]+\/shares$/ },
   // fork: everyone sees how the 3D office's teams look; changing it is admin

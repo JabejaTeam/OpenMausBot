@@ -44,6 +44,14 @@ export function apnsPayload(notification: Notification): Record<string, unknown>
   };
 }
 
+/** A silent push: the phone takes this conversation's notifications off its
+ * lock screen (read at a desk meanwhile, server/push-gate.ts). */
+export function apnsClearPayload(threadId: string): Record<string, unknown> {
+  return { aps: { "content-available": 1 }, clearThreadId: threadId };
+}
+
+export type PushType = "alert" | "background";
+
 const HOSTS: Record<ApnsEnvironment, string> = {
   production: "https://api.push.apple.com",
   sandbox: "https://api.sandbox.push.apple.com",
@@ -63,7 +71,7 @@ export class ApnsSender {
     this.config = config;
   }
 
-  async send(device: PushDevice, payload: Record<string, unknown>): Promise<SendResult> {
+  async send(device: PushDevice, payload: Record<string, unknown>, type: PushType = "alert"): Promise<SendResult> {
     const session = this.session(device.environment);
     return await new Promise<SendResult>((resolve) => {
       const req = session.request({
@@ -71,8 +79,9 @@ export class ApnsSender {
         ":path": `/3/device/${device.token}`,
         authorization: `bearer ${this.token()}`,
         "apns-topic": device.topic,
-        "apns-push-type": "alert",
-        "apns-priority": "10",
+        "apns-push-type": type,
+        // Apple refuses priority 10 for a background push
+        "apns-priority": type === "alert" ? "10" : "5",
       });
       let body = "";
       let status = 0;
@@ -117,23 +126,29 @@ export class ApnsSender {
   }
 }
 
+interface PushDeps {
+  sender: Pick<ApnsSender, "send"> | null;
+  devices: { forPerson(person: string, isLive: (id: string) => boolean): PushDevice[]; remove(token: string): void };
+  isLive(sessionId: string): boolean;
+}
+
 /** Push one notification to every live phone of its person; drop tokens
  * Apple says are gone. Never throws: a push is best-effort. */
-export async function pushToPerson(
-  deps: {
-    sender: Pick<ApnsSender, "send"> | null;
-    devices: { forPerson(person: string, isLive: (id: string) => boolean): PushDevice[]; remove(token: string): void };
-    isLive(sessionId: string): boolean;
-  },
-  person: string | undefined,
-  notification: Notification,
-): Promise<number> {
+export async function pushToPerson(deps: PushDeps, person: string | undefined, notification: Notification): Promise<number> {
+  return await sendToPerson(deps, person, apnsPayload(notification), "alert");
+}
+
+/** Take a conversation's notifications off every phone of this person. */
+export async function clearOnPhones(deps: PushDeps, person: string, threadId: string): Promise<number> {
+  return await sendToPerson(deps, person, apnsClearPayload(threadId), "background");
+}
+
+async function sendToPerson(deps: PushDeps, person: string | undefined, payload: Record<string, unknown>, type: PushType): Promise<number> {
   if (!deps.sender || !person) return 0;
-  const payload = apnsPayload(notification);
   let delivered = 0;
   for (const device of deps.devices.forPerson(person, deps.isLive)) {
     try {
-      const result = await deps.sender.send(device, payload);
+      const result = await deps.sender.send(device, payload, type);
       if (result.ok) delivered += 1;
       else if (result.gone) deps.devices.remove(device.token);
       else console.warn(`apns: push failed (${result.status} ${result.reason})`);

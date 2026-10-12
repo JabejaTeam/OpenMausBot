@@ -54,6 +54,7 @@ import type { OnboardingStatus } from "@/lib/onboarding";
 import { openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
 import { noteThreadChosen } from "@/lib/thread-channel";
 import { connectNavigationMemory, noteVisit } from "@/lib/navigation-memory";
+import { connectDeskPresence } from "@/lib/desk-presence";
 
 const MAX_ROUTINE_RUNS = 2_000;
 const ACTIVE_ROUTINE_RUN_STATUSES = new Set<RoutineRun["status"]>(["queued", "running", "waiting"]);
@@ -3975,6 +3976,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         })
         .catch(() => {});
       connectNavigationMemory(api);
+      connectDeskPresence(api);
       const chat = () =>
         api(`/api/bots?messages=${MESSAGE_PAGE_SIZE}`).then(({ bots, groups, sections, computerControl, botQueuedMessages }) => {
           if (!alive) return;

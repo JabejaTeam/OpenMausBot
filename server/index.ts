@@ -663,7 +663,8 @@ import { ROUTES, dispatchRoutes } from "./routes/table.ts";
 import { createForkPeopleRoutes } from "./routes/fork-people.ts";
 import { createForkPushRoutes } from "./routes/fork-push.ts";
 import { PushDevices } from "./push-devices.ts";
-import { ApnsSender, apnsConfigFromEnv, pushToPerson } from "./apns.ts";
+import { ApnsSender, apnsConfigFromEnv, clearOnPhones, pushToPerson } from "./apns.ts";
+import { PushGate } from "./push-gate.ts";
 import { createForkOfficeRoutes } from "./routes/fork-office.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
@@ -822,6 +823,12 @@ const privateThreadIds = new PrivateThreads(join(DATA_DIR, "thread-private.json"
 const pushDevices = new PushDevices(join(DATA_DIR, "push-devices.json"));
 const apnsConfig = apnsConfigFromEnv();
 const apnsSender = apnsConfig ? new ApnsSender(apnsConfig) : null;
+const apnsDeps = { sender: apnsSender, devices: pushDevices, isLive: (id: string) => sessions.isLive(id) };
+// Fork: no phone push while the person works at a desk; read = cleared (server/push-gate.ts).
+const pushGate = new PushGate({
+  push: (person, notification) => pushToPerson(apnsDeps, person, notification),
+  clear: (person, threadId) => clearOnPhones(apnsDeps, person, threadId),
+});
 const threadAccessRecords: ThreadAccessRecords = {
   starter: (threadId) => threadStarters.get(threadId),
   shares: (threadId) => threadShares.get(threadId),
@@ -6519,8 +6526,8 @@ function notify(notification: Notification | null) {
   if (!notification) return;
   const forPerson = connectorThreadPerson(notification.threadId);
   broadcast({ kind: "notify", notification, forPerson });
-  // Fork: the same notification as a push to that person's phones (server/apns.ts).
-  void pushToPerson({ sender: apnsSender, devices: pushDevices, isLive: (id) => sessions.isLive(id) }, forPerson, notification);
+  // Fork: the same notification as a push to that person's phones, unless they are at a desk (server/push-gate.ts).
+  pushGate.notify(forPerson, notification);
 }
 
 // Group threads: the fold needs to know WHO is talking — the turn engine
@@ -16690,7 +16697,7 @@ ROUTES.push(createForkPeopleRoutes({
   threadPerson: connectorThreadPerson,
 }));
 // Fork: a phone registers for pushes (server/routes/fork-push.ts).
-ROUTES.push(createForkPushRoutes({ personOf: actorKey, devices: pushDevices }));
+ROUTES.push(createForkPushRoutes({ personOf: actorKey, devices: pushDevices, deskPersonOf: navigationPerson, gate: pushGate }));
 // Fork: live dictation through Soniox (server/routes/fork-dictation.ts).
 ROUTES.push(createForkDictationRoutes({ sonioxKey: () => process.env.SONIOX_API_KEY?.trim() || undefined }));
 // Fork: where a person was last (server/routes/fork-navigation.ts).
@@ -21677,6 +21684,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const room = store.group(m[1]);
       if (!room) return json(res, 404, { error: "no such room" });
       const group = store.patchGroup(room.id, { unread: false, ...readCursor(room.threadId) })!;
+      pushGate.read(navigationPerson(auth), room.threadId); // fork: server/push-gate.ts
       broadcast({ kind: "group", group: publicGroupState(group) });
       return json(res, 200, { group: publicGroupState(group) });
     }
@@ -22431,6 +22439,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       requirePinnedClientThread(m[1], body?.threadId);
       const current = requestedTaskBot(m[1], body?.threadId);
       store.patchTask(current.id, current.threadId, { unread: false, ...readCursor(current.threadId) });
+      pushGate.read(navigationPerson(auth), current.threadId); // fork: server/push-gate.ts
       const bot = store.bot(current.id)!;
       const visible = wireBot(bot);
       broadcast({ kind: "bot", bot: visible });
