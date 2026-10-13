@@ -90,6 +90,8 @@ posixOnly("email cards on a shared workspace", () => {
       env: {
         ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
         HOME: home, USERPROFILE: home, OMB_PORT: String(PORT), OMB_WEBHOOK_PORT: String(PORT + 1),
+        // Fork: written for team-wide threads; conversations are private otherwise (server/thread-access.ts).
+        OMB_TEST_TEAM_THREADS: "1",
         OMB_COMPOSIO_BROKER_URL: `http://127.0.0.1:${stubPort}`,
         OMB_COMPOSIO_BROKER_TOKEN: "b".repeat(64),
         OMB_TEST_INTERNAL_CAPABILITY_KEY: CAPABILITY_KEY,

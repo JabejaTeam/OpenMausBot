@@ -68,6 +68,8 @@ const ENTRY_POINTS = [
   "permission-proxy.ts",
   "connector-proxy.ts",
   "mcp-gate.ts",
+  // fork: the mail gate in front of custom MCP servers that send mail
+  "mcp-mail-gate.ts",
   // the WhatsApp archive's read side, mounted as a custom stdio MCP server
   "whatsapp-mcp.ts",
   "mcp-remote-proxy.ts",

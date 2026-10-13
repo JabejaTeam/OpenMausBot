@@ -74,6 +74,8 @@ export class Runtime {
   private closing = false;
   private ticking = false;
   private readonly turns = new Map<string, LiveTurn>();
+  /** Fork: the children each running resume turn shows (handedResults once it completes). */
+  private readonly shownResults = new Map<string, string[]>();
   /** Wall-clock activity per root seen through progress(): a turn that keeps
    * reporting tool calls keeps its tree out of the stall window without a
    * row write per call. */
@@ -416,7 +418,17 @@ export class Runtime {
       // settled since its last turn: the requester reviews the whole of what
       // it handed out, and the host keeps those reports out of the transcript
       // it replays, so a session that lost them still hears them here.
+      // A resume returns every settled result of the node, not only what
+      // settled since its last turn: the requester reviews the whole of what
+      // it handed out, and the host keeps those reports out of the transcript
+      // it replays, so a session that lost them still hears them here. Fork:
+      // the ones an earlier resume already handed are marked so (alreadyHanded),
+      // so the requester does not report them to the person again.
+      const handed = new Set(n.handedResults ?? []);
       const settled = awaited(children).filter(isTerminal);
+      const alreadyHanded = settled.filter(c => handed.has(c.id)).map(c => c.id);
+      const stillRunning = awaited(children).length - settled.length;
+      if (resumed) this.shownResults.set(n.id, settled.map(c => c.id)); else this.shownResults.delete(n.id);
       const names = this.names(n, parent);
       const turn: RunInput["turn"] = resumed ? "resume" : n.restart === "rerun" ? "rerun" : n.answer !== undefined ? "answered"
         : n.continuation ? "continued" : "first";
@@ -428,7 +440,8 @@ export class Runtime {
         ...(n.answer !== undefined ? { answer: n.answer } : {}),
         ...(n.continuation ? { continuation: { note: n.continuation.note, ...(n.continuation.handoffPath ? { handoffPath: n.continuation.handoffPath } : {}) } } : {}),
         ...(settled.length ? { settled } : {}),
-        ...(resumed && settled.length < awaited(children).length ? { stillRunning: awaited(children).length - settled.length } : {}),
+        ...(resumed && stillRunning > 0 ? { stillRunning } : {}),
+        ...(resumed && alreadyHanded.length ? { alreadyHanded } : {}),
         level: n.level, mode: n.mode,
       };
       // Every undelivered item about its children rides this one turn.
@@ -547,6 +560,9 @@ export class Runtime {
       return;
     }
     n.result = clip(result.text, RESULT_MAX);
+    const shown = this.shownResults.get(n.id);
+    this.shownResults.delete(n.id);
+    if (shown?.length && result.kind === "completed") n.handedResults = [...new Set([...n.handedResults ?? [], ...shown])];
     const kids = awaited(this.store.children(n.id));
     const outstanding = kids.some(c => !isTerminal(c)) || awaited(childrenSince(this.store, n)).length > 0;
     if (outstanding) {

@@ -1,10 +1,10 @@
-// Jabeja fork: conversations per person on a workspace several people share
-// (server/thread-access.ts), through the real server with
-// OMB_PRIVATE_THREADS=1. Boss is the admin, Ada and Bob are members, all on
-// one bot. Ada's conversation is in her channel: the team sees it and writes
-// in it, each thread marked with whose it is, until she marks it private —
-// then Boss (admin) and Bob see nothing of it until she shares it with Bob.
-// Opening the bot lands everyone in their own latest conversation.
+// Jabeja fork: every conversation is private on a workspace several people
+// share (server/thread-access.ts), through the real server — with no setting
+// at all, and a leftover OMB_PRIVATE_THREADS=0 cannot widen it. Boss is the
+// admin, Ada and Bob are members, all on one bot. Ada's conversation is hers:
+// Boss (admin) sees it, marked whose it is; Bob sees nothing of it until she
+// shares it with him by name. Opening the bot lands everyone in their own
+// latest conversation.
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -69,7 +69,7 @@ posixOnly("private conversations on a shared workspace", () => {
       cwd: join(SERVER_DIR, ".."),
       env: {
         ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-        HOME: home, USERPROFILE: home, OMB_PORT: String(PORT), OMB_WEBHOOK_PORT: String(PORT + 1), OMB_PRIVATE_THREADS: "1",
+        HOME: home, USERPROFILE: home, OMB_PORT: String(PORT), OMB_WEBHOOK_PORT: String(PORT + 1), OMB_PRIVATE_THREADS: "0",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -106,70 +106,64 @@ posixOnly("private conversations on a shared workspace", () => {
     expect((await api("GET", "/api/auth/session", undefined, ADA)).body.privateThreads).toBe(true);
   });
 
-  it("shows the team every conversation, with whose it is, but opens everyone in their own", async () => {
+  it("shows a conversation to its person and the admins, nobody else", async () => {
     const boss = await botAs(BOSS);
     expect(boss.threadId).toBe(ids.bossThread);
     expect(boss.tasks.map((task: any) => [task.threadId, task.access]).sort()).toEqual([[ids.adaThread, "team"], [ids.bossThread, "own"]].sort());
     expect(boss.tasks.find((task: any) => task.threadId === ids.adaThread).person).toBe(ids.adaKey);
+    // the admin opens it on purpose, never by default
     expect(JSON.stringify(boss.messages)).not.toContain("ADA-PRIVATE-7");
-    // Every snapshot carries the open thread's transcript, also when that
-    // is already the bot's current thread (the client cannot render without).
-    expect(Array.isArray(boss.messages)).toBe(true);
+    expect((await api("GET", `/api/threads/${ids.adaThread}/messages`, undefined, BOSS)).status).toBe(200);
     const ada = await botAs(ADA);
     expect(ada.threadId).toBe(ids.adaThread);
+    expect(ada.tasks.map((task: any) => task.threadId)).toEqual([ids.adaThread]);
     expect(ada.messages.some((m: any) => m.text?.includes("ADA-PRIVATE-7"))).toBe(true);
-    // Bob has no conversation of his own: he sees the team's, opens none.
+    // Bob: neither Ada's nor the boss's conversation
     const bob = await botAs(BOB);
-    expect(bob.tasks.map((task: any) => task.access)).toEqual(["team", "team"]);
+    expect(bob.tasks).toEqual([]);
     expect(bob.messages).toEqual([]);
-    expect((await api("GET", `/api/threads/${ids.adaThread}/messages`, undefined, BOB)).status).toBe(200);
-    expect((await api("POST", `/api/bots/${ids.bot}/messages`, { text: "BOB-HELPS", threadId: ids.adaThread }, BOB)).status).toBe(202);
-  });
-
-  it("hides a conversation its person marks private, admins included", async () => {
-    expect((await api("PUT", `/api/threads/${ids.adaThread}/shares`, { private: true }, BOB)).status).toBe(403);
-    const marked = await api("PUT", `/api/threads/${ids.adaThread}/shares`, { private: true }, ADA);
-    expect(marked.status, JSON.stringify(marked.body)).toBe(200);
-    expect(marked.body.private).toBe(true);
-    for (const as of [BOSS, BOB]) {
-      expect((await api("GET", `/api/threads/${ids.adaThread}/messages`, undefined, as)).status).toBe(404);
-      expect((await api("POST", `/api/bots/${ids.bot}/messages`, { text: "oops", threadId: ids.adaThread }, as)).status).toBe(404);
-      expect((await api("PATCH", `/api/bots/${ids.bot}/tasks/${ids.adaThread}`, { title: "mine now" }, as)).status).toBe(404);
-      expect((await api("POST", `/api/bots/${ids.bot}/interrupt`, { threadId: ids.adaThread }, as)).status).toBe(404);
-      expect((await api("GET", `/api/threads/${ids.adaThread}/shares`, undefined, as)).status).toBe(404);
-      expect((await botAs(as)).tasks.map((task: any) => task.threadId)).not.toContain(ids.adaThread);
+    for (const thread of [ids.adaThread, ids.bossThread]) {
+      expect((await api("GET", `/api/threads/${thread}/messages`, undefined, BOB)).status).toBe(404);
+      expect((await api("GET", `/api/threads/${thread}/export`, undefined, BOB)).status).toBe(404);
+      expect((await api("POST", `/api/bots/${ids.bot}/messages`, { text: "oops", threadId: thread }, BOB)).status).toBe(404);
+      expect((await api("PATCH", `/api/bots/${ids.bot}/tasks/${thread}`, { title: "mine now" }, BOB)).status).toBe(404);
+      expect((await api("POST", `/api/bots/${ids.bot}/interrupt`, { threadId: thread }, BOB)).status).toBe(404);
+      expect((await api("GET", `/api/threads/${thread}/shares`, undefined, BOB)).status).toBe(404);
     }
-    // No thread named: the bot's current one is Ada's, so nothing to fall back on.
+    // No thread named: the bot's current one is not his, so nothing to fall back on.
     expect((await api("POST", `/api/bots/${ids.bot}/messages`, { text: "oops" }, BOB)).status).toBe(409);
-    const search = await api("GET", "/api/search?q=ADA-PRIVATE-7", undefined, BOSS);
-    expect(JSON.stringify(search.body)).not.toContain(ids.adaThread);
+    expect(JSON.stringify((await api("GET", "/api/search?q=ADA-PRIVATE-7", undefined, BOB)).body)).not.toContain(ids.adaThread);
+    expect(JSON.stringify((await api("GET", "/api/search?q=ADA-PRIVATE-7", undefined, BOSS)).body)).toContain(ids.adaThread);
   });
 
-  it("shares a conversation only when its person says so, and takes it back", async () => {
+  it("has no team-wide switch: private is the only setting", async () => {
+    const refused = await api("PUT", `/api/threads/${ids.adaThread}/shares`, { private: false }, ADA);
+    expect(refused.status).toBe(400);
+    expect((await api("GET", `/api/threads/${ids.adaThread}/messages`, undefined, BOB)).status).toBe(404);
+    expect((await api("GET", `/api/threads/${ids.adaThread}/shares`, undefined, ADA)).body.private).toBe(true);
+  });
+
+  it("shares a conversation only with whom its person names, and takes it back", async () => {
     expect(ids.bobKey).toMatch(/^p_/);
+    expect((await api("PUT", `/api/threads/${ids.adaThread}/shares`, { people: [ids.bobKey] }, BOSS)).status).toBe(403);
     expect((await api("PUT", `/api/threads/${ids.adaThread}/shares`, { people: ["p_notonthisworkspace00000"] }, ADA)).status).toBe(400);
     const shared = await api("PUT", `/api/threads/${ids.adaThread}/shares`, { people: [ids.bobKey] }, ADA);
     expect(shared.status, JSON.stringify(shared.body)).toBe(200);
     expect(shared.body.sharedWith.map((person: any) => person.email)).toEqual([BOB]);
 
     const bob = await botAs(BOB);
-    expect(bob.tasks.find((task: any) => task.threadId === ids.adaThread)?.access).toBe("shared");
+    expect(bob.tasks.map((task: any) => [task.threadId, task.access])).toEqual([[ids.adaThread, "shared"]]);
     expect(bob.threadId).toBe(ids.adaThread);
     expect(Array.isArray(bob.messages) && bob.messages.length > 0).toBe(true);
     expect((await api("GET", `/api/threads/${ids.adaThread}/messages`, undefined, BOB)).status).toBe(200);
     expect((await api("POST", `/api/bots/${ids.bot}/messages`, { text: "BOB-JOINS", threadId: ids.adaThread }, BOB)).status).toBe(202);
-    // Shared, not the team's: still private.
-    // Bob is in it, but it stays Ada's to share.
+    // Bob is in it, but it stays Ada's to share; the boss's stays hidden from him.
     expect((await api("PUT", `/api/threads/${ids.adaThread}/shares`, { people: [] }, BOB)).status).toBe(403);
-    // Still nothing for the admin.
-    expect((await api("GET", `/api/threads/${ids.adaThread}/messages`, undefined, BOSS)).status).toBe(404);
+    expect((await api("GET", `/api/threads/${ids.bossThread}/messages`, undefined, BOB)).status).toBe(404);
 
     expect((await api("PUT", `/api/threads/${ids.adaThread}/shares`, { people: [] }, ADA)).status).toBe(200);
     expect((await api("GET", `/api/threads/${ids.adaThread}/messages`, undefined, BOB)).status).toBe(404);
     expect((await botAs(BOB)).tasks.map((task: any) => task.threadId)).not.toContain(ids.adaThread);
-
-    // Back to the team.
-    expect((await api("PUT", `/api/threads/${ids.adaThread}/shares`, { private: false }, ADA)).status).toBe(200);
     expect((await api("GET", `/api/threads/${ids.adaThread}/messages`, undefined, BOSS)).status).toBe(200);
   });
 

@@ -18,6 +18,9 @@ type Kind = (typeof KINDS)[number];
 export interface WhatsAppToolOptions {
   dir: string;
   sonioxKey?: string;
+  /** Whose number this is (WA_OWNER_NAME), shown on outgoing messages and in
+   * the tool text; without one the wording stays neutral. */
+  owner?: string;
   fetch?: typeof fetch;
   now?: () => number;
 }
@@ -71,6 +74,7 @@ const KIND_ALIASES: Record<string, Kind> = {
 
 export function createWhatsAppTools(options: WhatsAppToolOptions) {
   const { dir } = options;
+  const owner = options.owner?.trim() || "";
   const now = () => new Date((options.now ?? Date.now)());
 
   const chats = (): string[] => {
@@ -161,7 +165,7 @@ export function createWhatsAppTools(options: WhatsAppToolOptions) {
     return `<${label}${media.name ? ` '${media.name}'` : ""}${seconds} — ${filePath(record)}>`;
   };
   const line = (record: WhatsAppRecord): string => {
-    const who = record.dir === "out" ? "Wiebren" : record.sender_name || record.sender || "?";
+    const who = record.dir === "out" ? owner || "Owner" : record.sender_name || record.sender || "?";
     const parts = [`[${brusselsTime(record.ts)}] ${who}:`];
     if (record.media) {
       parts.push(attachment(record));
@@ -192,7 +196,7 @@ export function createWhatsAppTools(options: WhatsAppToolOptions) {
   const tools: WhatsAppTool[] = [
     {
       name: "whatsapp_chats",
-      description: "Which WhatsApp chats had messages recently, with the last message of each. Start here: the chat names it returns are the `chat` value for the other tools. This is Wiebren's own WhatsApp number, incoming and outgoing.",
+      description: `Which WhatsApp chats had messages recently, with the last message of each. Start here: the chat names it returns are the \`chat\` value for the other tools. This is ${possessive(owner)} own WhatsApp number, incoming and outgoing.`,
       inputSchema: { type: "object", properties: { days: { type: "integer", description: "How many days back (default 7)." }, kind: kindSchema } },
       run: async (args) => {
         const count = Number(args.days) || 7;
@@ -337,10 +341,16 @@ export function createWhatsAppTools(options: WhatsAppToolOptions) {
   return tools;
 }
 
-const INSTRUCTIONS = "The archive of Wiebren's own WhatsApp number, incoming and outgoing. Messages land here without any bot running; these tools read them only when asked. Voice notes read as text. Start with whatsapp_chats. Sending is not done here: that is the wasender MCP, and it needs Wiebren's explicit ok per message.";
+function possessive(owner: string): string {
+  return owner ? `${owner}'s` : "the owner's";
+}
+
+function instructions(owner: string): string {
+  return `The archive of ${possessive(owner)} own WhatsApp number, incoming and outgoing. Messages land here without any bot running; these tools read them only when asked. Voice notes read as text. Start with whatsapp_chats. Sending is not done here: that is the wasender MCP, and it needs ${possessive(owner)} explicit ok per message.`;
+}
 
 /** One JSON-RPC request → its response, or null for a notification. */
-export async function handleWhatsAppMcp(tools: WhatsAppTool[], request: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+export async function handleWhatsAppMcp(tools: WhatsAppTool[], request: Record<string, unknown>, owner = ""): Promise<Record<string, unknown> | null> {
   const id = request.id ?? null;
   const method = String(request.method ?? "");
   if (method === "initialize") {
@@ -348,7 +358,7 @@ export async function handleWhatsAppMcp(tools: WhatsAppTool[], request: Record<s
       protocolVersion: "2025-06-18",
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "whatsapp", version: "1.0.0" },
-      instructions: INSTRUCTIONS,
+      instructions: instructions(owner.trim()),
     } };
   }
   if (method === "tools/list") {

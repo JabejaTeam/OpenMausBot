@@ -11,6 +11,7 @@ import { Check, CornerDownLeft, MoreHorizontal } from "lucide-react";
 import { openThread, useStore, type Message } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 import { relayAnswerText, relayDelegateText } from "../../shared/relay-question";
 import { BotAvatar } from "./Avatar";
 import { BotName } from "./SimpleChat";
@@ -64,7 +65,7 @@ export function RelayCard({ botId, threadId, message }: { botId: string; threadI
         <span className="flex items-center gap-1 text-[11.5px] text-ink-tertiary">
           <Check size={11} strokeWidth={2.25} />
           <span className="font-medium"><BotName bot={asker} fallback={relay.name} /></span>
-          <span className="max-w-[420px] truncate">· {card.answered ?? "afgevinkt"}</span>
+          <span className="max-w-[420px] truncate">· {card.answered ?? t("relay.dismissed")}</span>
         </span>
       </div>
     );
@@ -91,10 +92,10 @@ export function RelayCard({ botId, threadId, message }: { botId: string; threadI
     } else settle(trimmed, relayAnswerText(relay, card.subtitle, trimmed));
     setCustom("");
   };
-  const chief = state.bots.find((candidate) => candidate.id === botId)?.name ?? "de Chief";
+  const chief = state.bots.find((candidate) => candidate.id === botId)?.name ?? t("relay.chiefFallback");
   const leaveIt = () => direct
-    ? answer("Wiebren laat de keuze aan jou: kies zelf de beste optie en vermeld je keuze in je rapport.")
-    : settle(`Overgelaten aan ${chief}`, relayDelegateText(relay, card.subtitle));
+    ? answer(t("relay.leaveItAnswer"))
+    : settle(t("relay.leftTo", { name: chief }), relayDelegateText(relay, card.subtitle));
   const menuItem = "rounded-full px-3 py-1 text-[12.5px] text-ink-secondary transition-colors hover:bg-control hover:text-ink";
 
   return (
@@ -107,7 +108,7 @@ export function RelayCard({ botId, threadId, message }: { botId: string; threadI
       >
         {asker && <BotAvatar bot={asker} state="happy" size={16} motion="none" motionKey={0} animated={false} />}
         <BotName bot={asker} fallback={relay.name} />
-        <span className="size-1.5 rounded-full bg-accent" aria-label="wacht op je antwoord" />
+        <span className="size-1.5 rounded-full bg-accent" aria-label={t("relay.waiting")} />
       </button>
       <div className="w-fit max-w-[min(42rem,78%)] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-snug whitespace-pre-wrap text-ink">
         {card.subtitle}
@@ -124,11 +125,11 @@ export function RelayCard({ botId, threadId, message }: { botId: string; threadI
           </button>
         ))}
         {!relay.permission && (
-          <button type="button" title="Antwoorden" aria-label="Antwoorden" onClick={() => setReplying((value) => !value)} className={iconButton}>
+          <button type="button" title={t("relay.reply")} aria-label={t("relay.reply")} onClick={() => setReplying((value) => !value)} className={iconButton}>
             <CornerDownLeft size={14} />
           </button>
         )}
-        <button type="button" title="Meer" aria-label="Meer" onClick={() => setMore((value) => !value)} className={iconButton}>
+        <button type="button" title={t("relay.more")} aria-label={t("relay.more")} onClick={() => setMore((value) => !value)} className={iconButton}>
           <MoreHorizontal size={15} />
         </button>
       </div>
@@ -141,7 +142,7 @@ export function RelayCard({ botId, threadId, message }: { botId: string; threadI
             if (event.key === "Enter") answer(custom);
             if (event.key === "Escape") setReplying(false);
           }}
-          placeholder={`Antwoord aan ${relay.name}`}
+          placeholder={t("relay.replyTo", { name: relay.name })}
           className="mt-2 w-full max-w-[min(42rem,78%)] rounded-full bg-raised px-4 py-2 text-[14px] text-ink placeholder:text-ink-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40"
         />
       )}
@@ -149,17 +150,17 @@ export function RelayCard({ botId, threadId, message }: { botId: string; threadI
         <div className="mt-1.5 flex flex-wrap gap-0.5">
           {!relay.permission && (
             <button type="button" onClick={leaveIt} className={menuItem}>
-              {direct ? `Laat ${relay.name} kiezen` : `Laat ${chief} beslissen`}
+              {direct ? t("relay.leaveToAgent", { name: relay.name }) : t("relay.leaveToChief", { name: chief })}
             </button>
           )}
           <button type="button" className={menuItem}
             onClick={() => dispatch({ type: "settleRelay", botId, threadId, messageId: message.id, dismissed: true })}>
-            Afvinken
+            {t("relay.checkOff")}
           </button>
           {relay.threadId && (
             <button type="button" className={menuItem}
               onClick={() => openThread(dispatch, { botId: relay.botId, threadId: relay.threadId! }, state, showThreads)}>
-              Open thread
+              {t("relay.openThread")}
             </button>
           )}
         </div>

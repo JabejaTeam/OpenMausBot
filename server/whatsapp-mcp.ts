@@ -1,6 +1,6 @@
 // The WhatsApp archive as a stdio MCP server, mounted like any custom server:
 //   { "command": "<node>", "args": ["<dist-server>/whatsapp-mcp.js"],
-//     "env": { "WA_ARCHIVE_DIR": "…", "SONIOX_API_KEY": "…" } }
+//     "env": { "WA_ARCHIVE_DIR": "…", "SONIOX_API_KEY": "…", "WA_OWNER_NAME": "…" } }
 // The tools live in whatsapp-tools.ts; this file only speaks the protocol.
 import { createInterface } from "node:readline";
 
@@ -11,7 +11,8 @@ if (!dir) {
   process.stderr.write("WA_ARCHIVE_DIR is not set\n");
   process.exit(2);
 }
-const tools = createWhatsAppTools({ dir, sonioxKey: process.env.SONIOX_API_KEY || undefined });
+const owner = process.env.WA_OWNER_NAME ?? "";
+const tools = createWhatsAppTools({ dir, sonioxKey: process.env.SONIOX_API_KEY || undefined, owner });
 
 createInterface({ input: process.stdin }).on("line", (line) => {
   if (!line.trim()) return;
@@ -21,7 +22,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   } catch {
     return;
   }
-  void handleWhatsAppMcp(tools, request).then((response) => {
+  void handleWhatsAppMcp(tools, request, owner).then((response) => {
     if (response) process.stdout.write(`${JSON.stringify(response)}\n`);
   });
 });

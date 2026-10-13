@@ -84,7 +84,9 @@ describe("fork: interim resume", () => {
     await w.release(slow.assignment.id);
     w.tick();
     const final = w.runs.filter(r => r.a.id === root.id && r.input.resumed).at(-1)!;
+    // every result rides along; the fast one is marked as already handed
     expect(final.input.settled?.map(s => s.id).sort()).toEqual([fast.assignment.id, slow.assignment.id].sort());
+    expect(final.input.alreadyHanded).toEqual([fast.assignment.id]);
     expect(final.input.stillRunning).toBeUndefined();
     await flush();
     expect(w.store.get(root.id)?.status).toBe("completed");

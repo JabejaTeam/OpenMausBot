@@ -12,9 +12,10 @@
 // other bot keeps upstream's own-only brief.
 //
 // Who may see which conversation is not decided here: `canSee` is the
-// thread-access SSOT (server/thread-access.ts via VisibleSet.thread), so a
-// conversation marked private only shows up for its person and whom they
-// shared it with. Code bots (kindTakesSharedContext) and routine runs are
+// thread-access SSOT (server/thread-access.ts: VisibleSet.thread for the
+// bots, threadFeeds for the conversations), so only the person's own
+// conversations and those shared with them show up — never a teammate's,
+// also not for an admin. Code bots (kindTakesSharedContext) and routine runs are
 // not conversations a teammate builds on, so they never appear.
 import { isPrivateValue } from "./bot-visibility.ts";
 import { kindTakesSharedContext } from "./kind-instructions.ts";

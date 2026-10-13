@@ -286,8 +286,10 @@ describe("§2 lifecycle", () => {
     expect(rootRuns).toHaveLength(2);
     expect(rootRuns[0].input!.settled?.map((a) => a.id)).toEqual([firstRow.id]);
     // A resume returns every settled result of the node, so the rework's
-    // resume carries the first round's result again beside its own.
+    // resume carries the first round's result again beside its own (fork:
+    // marked as already handed, so it is not reported twice).
     expect(rootRuns[1].input!.settled?.map((a) => a.id)).toEqual([firstRow.id, second.id]);
+    expect(rootRuns[1].input!.alreadyHanded).toEqual([firstRow.id]);
     expect(get(w, root.id).status).toBe("completed");
     expect(w.store.all()).toHaveLength(3);
     invariants(w);

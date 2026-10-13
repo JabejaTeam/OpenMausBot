@@ -148,6 +148,9 @@ export interface Assignment {
   /** Fork: on a requester, the children whose results already resumed it
    * while a sibling still ran (an interim resume); each wakes it once. */
   interimFrom?: string[];
+  /** Fork: on a requester, the children whose results a finished resume
+   * already read, so a later resume hands only what is new. */
+  handedResults?: string[];
   /** While parked: the exact question for the person. */
   question?: string;
   /** The person's answer, harness-quoted, carried into the next turn. */
@@ -267,6 +270,8 @@ export interface RunInput {
   settled?: Assignment[];
   /** Fork: children still running at an interim resume. */
   stillRunning?: number;
+  /** Fork: settled children an earlier resume already handed (named, not repeated). */
+  alreadyHanded?: string[];
   /** For a continued turn: why it continues and, after a step cap, where
    * the steps so far are listed. */
   continuation?: { note: string; handoffPath?: string };

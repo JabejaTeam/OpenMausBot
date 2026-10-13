@@ -44,6 +44,8 @@ export const SPAWNED_PROXIES = {
   dweb: resolveProxy("drivers/dweb-proxy"),
   connectors: resolveProxy("connector-proxy"),
   mcpGate: resolveProxy("mcp-gate"),
+  // fork: outgoing mail through a custom MCP server waits on the email card
+  mcpMail: resolveProxy("mcp-mail-gate"),
   mcpRemote: resolveProxy("mcp-remote-proxy"),
   phone: resolveProxy("drivers/phone-proxy"),
   hook: resolveProxy("hooks/omb-hook"),

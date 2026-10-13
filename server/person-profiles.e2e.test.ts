@@ -75,6 +75,8 @@ async function start() {
     env: {
       ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
       HOME: home, USERPROFILE: home, OMB_PORT: String(PORT), OMB_WEBHOOK_PORT: String(PORT + 1),
+      // Fork: written for team-wide threads; conversations are private otherwise (server/thread-access.ts).
+      OMB_TEST_TEAM_THREADS: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

@@ -80,6 +80,7 @@ const assignmentSchema = z.object({
   rework: z.boolean(),
   independent: z.boolean().optional(),
   interimFrom: z.array(z.string()).optional(),
+  handedResults: z.array(z.string()).optional(),
   question: z.string().optional(),
   answer: z.string().optional(),
   budgets: z.object({ since: z.number(), requests: z.number(), executions: z.number(), wakes: z.number() }).optional(),

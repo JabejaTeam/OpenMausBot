@@ -115,6 +115,8 @@ import {
 import * as composio from "./composio.ts";
 import { connectorCallFromFrame, connectorRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import * as outbox from "./email-outbox.ts";
+import * as mcpMail from "./mcp-mail.ts";
+import { withMailGates } from "./mcp-mail-mount.ts";
 import { connectorCardText } from "./connector-card-text.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { buildRecall } from "./recall.ts";
@@ -292,7 +294,7 @@ import { RESTART_EXIT_CODE } from "./restart.ts";
 import { holdIncludedServices, trialCreditCredential } from "./included-services.ts";
 import { CloudCreditProvider } from "./cloud-credit-provider.ts";
 import { TRIAL_CREDIT_OWN_AI } from "./trial-credit.ts";
-import type { ProviderInstance } from "./contracts.ts";
+import type { McpServerSpec, ProviderInstance } from "./contracts.ts";
 import { readyToRun, selectDefaultModelSelection, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts";
 import { workTopicOf } from "./work-topic.ts";
 import { ensureThreadWorktree, removeThreadWorktree, threadWorktreePath, threadWorktreeSystemPrompt } from "./thread-worktrees.ts";
@@ -537,7 +539,7 @@ import {
 } from "./request-auth.ts";
 import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope, type SessionRecord } from "./sessions.ts";
 import { ThreadStarters } from "./thread-starters.ts";
-import { PrivateThreads, ThreadShares, threadOwnerPerson, threadRole, type ThreadAccessRecords } from "./thread-access.ts";
+import { ThreadShares, threadFeeds, threadOwnerPerson, threadRole, type ThreadAccessRecords } from "./thread-access.ts";
 import { createForkThreadRoutes } from "./routes/fork-threads.ts";
 import { createForkNavigationRoutes } from "./routes/fork-navigation.ts";
 import { createForkDictationRoutes } from "./routes/fork-dictation.ts";
@@ -766,12 +768,10 @@ if (CLOUD_HOME && Object.keys(CLOUD_SECRETS).length === 0) {
 }
 // Who each thread is for, when a signed-in person can be named (server-private).
 const threadStarters = new ThreadStarters(join(DATA_DIR, "thread-starters.json"));
-// Fork: which threads their person marked private, and whom they shared
-// those with (server/thread-access.ts).
+// Fork: whom each conversation's person shared it with (server/thread-access.ts).
 const threadShares = new ThreadShares(join(DATA_DIR, "thread-shares.json"));
 // Fork: where each person was last, per agent (server/person-navigation.ts).
 const personNavigation = new PersonNavigation(join(DATA_DIR, "person-navigation.json"));
-const privateThreadIds = new PrivateThreads(join(DATA_DIR, "thread-private.json"));
 // Fork: iPhone pushes while the app is closed (server/apns.ts); off without OMB_APNS_* env.
 const pushDevices = new PushDevices(join(DATA_DIR, "push-devices.json"));
 const apnsConfig = apnsConfigFromEnv();
@@ -786,15 +786,25 @@ const threadAccessRecords: ThreadAccessRecords = {
   starter: (threadId) => threadStarters.get(threadId),
   shares: (threadId) => threadShares.get(threadId),
   owner: () => ownerPersonKey(),
-  isPrivate: (threadId) => privateThreadIds.has(threadId),
 };
-/** Fork: each thread belongs to its person (their channel; the team sees it
- * unless they mark it private) on a self-hosted workspace several people
- * share, when the deployment opts in with OMB_PRIVATE_THREADS=1 (beast:
- * ~/omb-services/omb-server.env). A Cloud home keeps its own owner/guest rules. */
-const PRIVATE_THREADS = process.env.OMB_PRIVATE_THREADS === "1";
+/** Fork: every conversation is private to its person (+ whom they share it
+ * with, + admins) on a self-hosted workspace several people share
+ * (server/thread-access.ts). Always on there: no setting widens it
+ * (OMB_PRIVATE_THREADS is gone; a leftover =0 does nothing). A one-person
+ * install and a Cloud home (its own owner/guest rules) are unaffected. The
+ * only exception is the upstream e2e fixtures written for team-wide threads,
+ * which start their server with OMB_TEST_TEAM_THREADS=1 — a test switch,
+ * shouted about at startup, never set on a deployment. */
+const TEAM_THREADS_TEST_FIXTURE = process.env.OMB_TEST_TEAM_THREADS === "1";
+if (TEAM_THREADS_TEST_FIXTURE) console.warn("OMB_TEST_TEAM_THREADS=1: conversations are NOT private on this server (test fixture switch; never set it on a deployment)");
 function privateThreads(): boolean {
-  return PRIVATE_THREADS && !CLOUD_HOME && sharedMembership();
+  return !TEAM_THREADS_TEST_FIXTURE && !CLOUD_HOME && sharedMembership();
+}
+/** Fork: which threads may feed one (a brief, recall, search, a listing):
+ * only those everyone it is for may open themselves (threadFeeds). */
+function feedsThread(into: string): (source: string) => boolean {
+  if (!privateThreads()) return () => true;
+  return (source) => threadFeeds(source, into, threadAccessRecords);
 }
 const commandAllowlist = new CommandAllowlistStore(join(DATA_DIR, "command-allowlist.json"));
 // Saved website logins (Settings → Logins, the sign-in card's Save), sealed
@@ -957,7 +967,7 @@ function personKey(session: Pick<SessionRecord, "id" | "email"> & { scopes?: rea
   if (session.email) return personKeyForEmail(session.email);
   // Fork: with private conversations, an admin device paired without an
   // email (the owner's phone) is the install owner, so it keeps their threads.
-  const owner = PRIVATE_THREADS && session.scopes?.includes("admin") ? ownerPersonKey() : undefined;
+  const owner = privateThreads() && session.scopes?.includes("admin") ? ownerPersonKey() : undefined;
   return owner ?? personKeyFor(`session:${session.id}`);
 }
 
@@ -1650,7 +1660,7 @@ function visibleTo(viewer: Viewer): VisibleSet {
   if (!set) {
     const person = viewer.kind === "all" ? undefined : viewer.person;
     set = new VisibleSet(store.bots, store.groups, viewer, threadOwner,
-      privateThreads() ? (threadId) => threadRole(person, threadId, threadAccessRecords) : undefined,
+      privateThreads() ? (threadId) => threadRole(person, threadId, threadAccessRecords, viewer.kind === "admin") : undefined,
       (threadId) => threadOwnerPerson(threadId, threadAccessRecords),
       person ? (botId) => personNavigation.lastThread(person, botId) : undefined);
     if (visibleSets.size >= 1_000) visibleSets.clear();
@@ -1766,7 +1776,9 @@ function personViewer(person: string): Viewer {
 function recentConversationsBrief(bot: BotRecord, threadId: string, person: string | undefined): string {
   const include = recentWorkFilter().include;
   const access = person ? visibleTo(personViewer(person)) : undefined;
-  const canSee = (id: string) => (!include || include(id)) && (!access || access.thread(id));
+  // Fork: never someone else's conversation, also for an admin or a turn no person started.
+  const feeds = feedsThread(threadId);
+  const canSee = (id: string) => (!include || include(id)) && (!access || access.thread(id)) && feeds(id);
   return recentConversationsPrompt(recentConversations(bot, store.bots, recentWorkSources(bot), {
     widen: Boolean(person), canSee, currentThreadId: threadId, userName: cfg.profile?.name?.trim() || "User",
   }));
@@ -1792,6 +1804,8 @@ function autoRecallPrompt(bot: BotRecord, threadId: string, message: string, opt
       // On a Cloud home a conversation anyone else wrote in never feeds
       // another: its words would reach the owner's turns (and a lent Mac).
       .filter((id) => id !== threadId && (!CLOUD_HOME || cloudOwnerOnlyThread(id)))
+      // Fork: only conversations everyone in this one may open themselves.
+      .filter(feedsThread(threadId))
     : [];
   try {
     const recalled = buildRecall({
@@ -2392,7 +2406,7 @@ type InternalCapability = {
   threadId: string;
   generation: string;
   depth: number;
-  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone" | "data";
+  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone" | "data" | "mail";
   skillAuthoring: boolean;
   createdBots: number;
   createdRooms?: number;
@@ -2750,6 +2764,17 @@ function agentsIntegration(
   };
 }
 
+
+/** Fork: custom MCP servers that send mail are mounted behind the mail gate
+ * (server/mcp-mail-gate.ts), which asks /api/internal/mcp-mail with this
+ * turn's bearer before a message leaves. */
+function withMailGate(custom: Record<string, McpServerSpec>, botId: string, threadId: string, generation: string): Record<string, McpServerSpec> {
+  return withMailGates(custom, mcpMail.mcpMailSpecs(cfg.mcpServers), () => ({
+    url: `http://127.0.0.1:${PORT}`,
+    token: mintInternalCapability({ botId, threadId, generation, depth: 0, kind: "mail", skillAuthoring: false, createdBots: 0, openedThreads: 0 }),
+    // Codex refuses ELECTRON_RUN_AS_NODE on a custom server; only Electron needs it.
+  }), process.versions.electron ? AGENTS_NODE_FLAG : undefined);
+}
 
 /** Engine lifecycle hooks (item 0.2): a turn-scoped bearer the engine's hook
  * helper presents on /api/internal/hook. OMB_HOOKS=0 turns the channel off. */
@@ -11723,7 +11748,7 @@ async function startTurn(
         // Per-person values follow whoever this work is for (the same person
         // as the turn's [Person], so delegated work keeps the asker's values);
         // an automation (routine, webhook) is for nobody and gets the shared values.
-        const custom = await withMcpSignIn(engineMcpServers(bot, opts?.automationSource ? undefined : turnPerson), mcpOAuth);
+        const custom = withMailGate(await withMcpSignIn(engineMcpServers(bot, opts?.automationSource ? undefined : turnPerson), mcpOAuth), bot.id, threadId, dispatchClaimId);
         if (Object.keys(custom).length) integrations.custom = custom;
       }
       // CLI engines work inside the bot's own workspace directory rather
@@ -13025,14 +13050,19 @@ routines = new RoutineManager({
     // On a Cloud home a routine reports only where its writer may write: a
     // guest's (or nobody's) keeps a results conversation opened as theirs.
     const opener = CLOUD_HOME ? routineOpener(routine.id) : undefined;
+    // Fork: with private conversations a routine reports only into a
+    // conversation of whoever it works for (routineRunPerson), else into a
+    // results conversation of theirs.
+    const person = privateThreads() ? routineRunPerson(routines?.makerOf(routine.id) ?? undefined) : undefined;
+    const theirs = (threadId: string) => !person || threadOwnerPerson(threadId, threadAccessRecords) === person;
     const main = bot && !bot.hidden ? botMainThread(bot.id) : undefined;
-    const mainAllowed = main && (!CLOUD_HOME || opener === CLOUD_OWNER_KEY);
-    const keepChosen = chosen && !chosen.routineRunId && !(mainAllowed && legacyResultsThread(routine.name, chosen));
+    const mainAllowed = main && (!CLOUD_HOME || opener === CLOUD_OWNER_KEY) && theirs(main);
+    const keepChosen = chosen && !chosen.routineRunId && theirs(chosen.threadId) && !(mainAllowed && legacyResultsThread(routine.name, chosen));
     if (keepChosen) return { threadId: chosen.threadId };
     if (mainAllowed) return { threadId: main, main: true };
-    if (!CLOUD_HOME) return undefined;
+    if (!CLOUD_HOME && !person) return undefined;
     const threadId = store.createTask(routine.botId, `${routine.name} · Results`, false)?.threadId;
-    if (threadId) threadStarters.set(threadId, opener!);
+    if (threadId) threadStarters.set(threadId, opener ?? person);
     return threadId ? { threadId } : undefined;
   },
   // Those versions saved it only where a routine might report into the main
@@ -14499,7 +14529,7 @@ async function runClaimedGroupMemberTurn(
   // user-configured MCP servers: same gating as the 1:1 site above, with the
   // values of the person the room's current request is for.
   if (instance.adapter.capabilities.customMcp === true) {
-    const custom = await withMcpSignIn(engineMcpServers(bot, threadPersonKey(threadId)), mcpOAuth);
+    const custom = withMailGate(await withMcpSignIn(engineMcpServers(bot, threadPersonKey(threadId)), mcpOAuth), bot.id, threadId, internalGeneration);
     if (Object.keys(custom).length) integrations.custom = custom;
   }
   // Connected-app discovery is intentionally awaited before a provider owns
@@ -14919,7 +14949,10 @@ async function runClaimedGroupMemberTurn(
   // brief can carry a private chat into the room; as with session_search
   // (#754) the room is told, once per source thread, rather than the
   // crossing being blocked.
-  const recentLines = recentWork(recentWorkSources(bot), bot, { userName, currentThreadId: threadId, ...recentWorkFilter() });
+  const roomFeeds = feedsThread(threadId);
+  const roomInclude = recentWorkFilter().include;
+  const recentLines = recentWork(recentWorkSources(bot), bot, { userName, currentThreadId: threadId,
+    include: (id) => (!roomInclude || roomInclude(id)) && roomFeeds(id) });
   recordTurnPlace(bot.id, threadId, (roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : surfaceOfComputerKind(roomComputerKind)) ?? (integrations.browser ? "browser" : null));
   const roomComputerPromptKind = resolveComputerPromptKind({
     kind: roomTeamComputer || roomComputerKind === "box" ? "box" : roomVmTarget ? "vm" : roomComputerKind,
@@ -16743,6 +16776,18 @@ function forkResultsNote(botId: string, threadId: string): string {
     : "";
 }
 
+/** Fork: what a parallel copy of a card thread is told about the card: the
+ * card thread's latest finished assignments and their results, clipped. The
+ * copy starts fresh instead of copying the card's session (store.markForkOf). */
+function forkCardBrief(cardThreadId: string): string {
+  const done = coordinator.all()
+    .filter((n) => n.threadId === cardThreadId && n.parentId && n.status === "completed" && n.result)
+    .sort((a, b) => a.createdAt - b.createdAt).slice(-3);
+  if (!done.length) return "";
+  const lines = done.map((n) => `- "${n.text.split("\n")[0]!.slice(0, 160)}": ${n.result.slice(0, 1200)}`);
+  return `[This card's own thread did this work so far (its code is merged; rebase to get it). You run beside it in your own copy, so read the code you need yourself:\n${lines.join("\n")}]\n\n`;
+}
+
 /** Fork: after the person sent, drafted or dropped an email card, the bot
  * goes on in that conversation with the outcome (outbox.cardOutcomeText),
  * once the thread is free: a click while its turn still runs waits for it
@@ -17963,15 +18008,13 @@ ROUTES.push(createForkNavigationRoutes({
     return visible.bot(botId) && visible.thread(threadId);
   },
 }));
-// Fork: marking a conversation private and sharing it (server/routes/fork-threads.ts).
+// Fork: sharing a conversation with specific people (server/routes/fork-threads.ts).
 ROUTES.push(createForkThreadRoutes({
   personKey,
   conversationExists: (threadId) => Boolean(store.botByThread(threadId) || store.groupByThread(threadId)),
   threadOwner: (threadId) => threadOwnerPerson(threadId, threadAccessRecords),
   shares: (threadId) => threadShares.get(threadId),
   setShares: (threadId, people) => threadShares.set(threadId, people),
-  isPrivate: (threadId) => privateThreadIds.has(threadId),
-  setPrivate: (threadId, value) => privateThreadIds.set(threadId, value),
   workspaceEmails: () => [...signInAllowList().admins, ...signInAllowList().members].filter((entry) => !entry.startsWith("@")),
   changed: (threadId) => {
     forgetVisibility();
@@ -18969,7 +19012,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const parsed = z.object({
         botId: z.string().regex(/^[\w-]{1,128}$/),
         threadId: z.string().regex(/^[\w-]{1,128}$/),
-        kind: z.enum(["agents", "connectors", "computer", "data"]).default("agents"),
+        kind: z.enum(["agents", "connectors", "computer", "data", "mail"]).default("agents"),
         depth: z.number().int().min(0).max(MAX_COMMS_DEPTH).default(0),
         skillAuthoring: z.boolean().default(false),
         deliversSavedFiles: z.boolean().default(false),
@@ -19035,6 +19078,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ? "phone"
         : path.startsWith("/api/internal/connectors/")
         ? "connectors"
+        : path.startsWith("/api/internal/mcp-mail")
+        ? "mail"
         : path === "/api/internal/computer-control" || path === "/api/internal/computer/mcp"
           ? "computer"
           : "agents";
@@ -19416,7 +19461,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // On a Cloud home a turn that may use the lent Mac sees only the
         // conversations the owner alone opened and wrote in: a title is words
         // too (cloudLendingView).
-        const shown = cloudLendingView(internalCapability) ? cloudOwnerOnlyThread : () => true;
+        // Fork: and never another person's conversation (threadFeeds).
+        const lending = cloudLendingView(internalCapability);
+        const feeds = feedsThread(fromThreadId);
+        const shown = (threadId: string) => (!lending || cloudOwnerOnlyThread(threadId)) && feeds(threadId);
         for (const task of store.tasks(from.id)) {
           if (!shown(task.threadId)) continue;
           rows.push({
@@ -19451,7 +19499,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const threadId = closeMatch[1]!;
         const owner = [from, ...reachablePeers(store.bots, from)].find((bot) => store.taskByThread(bot.id, threadId));
-        const task = owner ? store.taskByThread(owner.id, threadId) : undefined;
+        const task = owner && feedsThread(fromThreadId)(threadId) ? store.taskByThread(owner.id, threadId) : undefined;
         if (!owner || !task) return json(res, 404, { error: "no such thread — call list_threads for the ones you can see" });
         if (owner.id !== from.id && task.openedBy?.botId !== from.id) {
           return json(res, 403, { error: "that thread is not yours to close — only the bot that opened it, or its own bot, can" });
@@ -19923,7 +19971,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const ownThreads = [...new Set([from.threadId, ...(from.tasks ?? []).map((task) => task.threadId), ...roomByThread.keys()])]
           // On a Cloud home a turn that may use the lent Mac searches only the
           // conversations the owner alone opened and wrote in.
-          .filter(cloudLendingView(internalCapability) ? cloudOwnerOnlyThread : () => true);
+          .filter(cloudLendingView(internalCapability) ? cloudOwnerOnlyThread : () => true)
+          // Fork: never another person's conversation (thread-access.ts threadFeeds).
+          .filter(feedsThread(fromThreadId));
         // A room is the only place a recall can be a disclosure, and only a
         // private chat is one: in a 1:1 the user already owns every thread
         // the bot can reach, and a room's lines were said in the open.
@@ -19961,7 +20011,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const messageId = String(url.searchParams.get("messageId") ?? "").trim();
         if (!threadId || !messageId) return json(res, 400, { error: "threadId and messageId are required" });
         const own = (threadId === from.threadId || Boolean(store.taskByThread(from.id, threadId))) &&
-          (!cloudLendingView(internalCapability) || cloudOwnerOnlyThread(threadId));
+          (!cloudLendingView(internalCapability) || cloudOwnerOnlyThread(threadId)) && feedsThread(fromThreadId)(threadId);
         const message = own ? readMessageText(threadId, messageId) : null;
         if (!message) return json(res, 404, { error: "no such message in your conversations" });
         const readInRoom = Boolean(store.groupByThread(fromThreadId));
@@ -20183,9 +20233,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             // Fork: a code agent keeps one thread per card the assignment
             // names (work-topic.ts), from any of the sender's conversations;
             // another card gets its own thread and runs beside it. thread
-            // "new" on a card starts as a copy of the card's thread.
+            // "new" on a card is a fresh thread (own session, own worktree)
+            // told what the card's thread did (forkCardBrief).
             const topic = !destination && kindStartsFreshPerAssignment(recipient.kind) ? workTopicOf(call.message) : undefined;
-            const cardThread = topic ? store.workThreadOn(target.botId, internalSender.id, topic) : undefined;
+            // Fork: with private conversations a card's thread is per person too:
+            // one opened for someone else stays theirs (threadOwnerPerson).
+            const cardPerson = topic && privateThreads() ? openerFrom(address.threadId) ?? ownerPersonKey() : undefined;
+            const cardThread = topic ? store.workThreadOn(target.botId, internalSender.id, topic,
+              cardPerson ? (threadId) => threadOwnerPerson(threadId, threadAccessRecords) === cardPerson : undefined) : undefined;
             const standing = destination || fresh ? undefined : topic ? cardThread : store.workThread(target.botId, internalSender.id, address.threadId);
             // Fork: rework of a code agent's card while it still runs there
             // opens a thread of its own instead of waiting behind it.
@@ -20200,7 +20255,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               target.threadId = task.threadId;
               if (!continued) createdThread = task.threadId;
               if (topic && !continued && !fresh) store.setTaskWorkTopic(target.botId, task.threadId, topic);
-              if (topic && !continued && fresh && cardThread) store.seedForkTask(target.botId, task.threadId, cardThread);
+              if (topic && !continued && fresh && cardThread) store.markForkOf(target.botId, task.threadId, cardThread.threadId);
               applyDelegatedLevel(internalSender, internalCapability.threadId, recipient, target.threadId);
               inheritMailMode(address.threadId, task.threadId);
             }
@@ -20224,7 +20279,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             }
             // Fork: the card's thread learns what its parallel copies did
             // since its last assignment (their code is already merged).
-            const forkNote = continued && topic ? forkResultsNote(target.botId, continued.threadId) : "";
+            const forkNote = continued && topic ? forkResultsNote(target.botId, continued.threadId)
+              : topic && fresh && cardThread ? forkCardBrief(cardThread.threadId) : "";
             const { node, duplicate } = coordinator.enqueue(address, generation, internalCapability.roomHandoffId, target, forkNote + call.message, {
               mode, reply, thread: call.thread, approvalGranted, rework: call.rework, requestBatchKey,
               // Fork: a code agent's assignments run in their own threads (one
@@ -21023,6 +21079,84 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           throw error;
         }
+      }
+      // Fork: a custom MCP server's mail gate holds a sending call here
+      // (server/mcp-mail.ts): in a routine allowed to send it goes, else the
+      // person gets the email card and this answers once they chose.
+      if (method === "POST" && path === "/api/internal/mcp-mail") {
+        const body = await readInternalBody();
+        const threadId = internalCapability.threadId;
+        const server = typeof body.server === "string" ? body.server : "";
+        const tool = typeof body.tool === "string" ? body.tool : "";
+        const args = body.arguments && typeof body.arguments === "object" && !Array.isArray(body.arguments) ? body.arguments as Record<string, unknown> : {};
+        const spec = mcpMail.mcpMailSpecs(cfg.mcpServers)[server];
+        const rule = spec ? mcpMail.outgoingRule(spec, tool, args) : undefined;
+        if (!spec || !rule) return json(res, 200, { action: "send", arguments: args });
+        const decided = { threadId, botId: internalSender.id, botName: internalSender.name, tool: `mcp__${server}__${tool}` };
+        if (mcpMail.mayLeaveUnattended(threadMailMode(threadId), spec, mcpMail.readMail(args))) {
+          appendDecision(DATA_DIR, { ...decided, decision: "auto-approved", source: "outbound", rule: "routine-mail:send" });
+          return json(res, 200, { action: "send", arguments: args });
+        }
+        const owner = connectorThread(internalSender.id, threadId);
+        const held = outboundRequests.open({ botId: internalSender.id, threadId, tool: decided.tool, timeoutMs: OUTBOUND_HOLD_MS });
+        const shown = mcpMail.mailCard({ server, tool, args, rule, requestId: held.requestId });
+        const card = store.appendMessage(threadId, {
+          role: "bot",
+          kind: "email",
+          ...(owner?.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}),
+          email: shown,
+        });
+        appendDecision(DATA_DIR, { ...decided, requestId: held.requestId, summary: `${server}: ${shown.subject || tool} → ${shown.to.join(", ")}`.slice(0, 240), decision: "card-shown", source: "outbound" });
+        showWaitingOnPersonChip(threadId, held.requestId, internalSender, "approval");
+        const waitingHere = () => owner?.group ? activeGroupTurnForBot(internalSender.id)?.threadId === threadId : store.taskByThread(internalSender.id, threadId)?.busy;
+        if (waitingHere()) {
+          if (owner?.group) store.setActivity(internalSender.id, "waiting-on-you");
+          else store.setTaskActivity(internalSender.id, threadId, "waiting-on-you");
+        }
+        notify(buildNotification("approval", internalSender, threadId, `${shown.subject || tool} → ${shown.to.join(", ") || server}`, { avatarUrl: internalSender.avatarUrl }));
+        // The gate gone (the turn stopped, the engine gave up): nobody waits.
+        let gone = false;
+        res.on("close", () => {
+          if (res.writableFinished) return;
+          gone = true;
+          outboundRequests.resolve({ threadId, requestId: held.requestId, behavior: "deny" });
+        });
+        const answer = await held.answer;
+        outboundRequests.forget(held.requestId);
+        settleWaitingOnPersonChips(threadId, { requestId: held.requestId, behavior: answer === "allow" ? "allow" : "deny", source: answer === "timeout" ? "timeout" : "user" });
+        if (internalCapabilityIsActive(internalCapability) && waitingHere()) {
+          if (owner?.group) store.setActivity(internalSender.id, "working");
+          else store.setTaskActivity(internalSender.id, threadId, "working");
+        }
+        const current = store.messagesFor(threadId).find((message) => message.id === card.id)?.email;
+        if (answer === "allow" && current && !gone) {
+          const edited = current.to.join() !== shown.to.join() || current.cc.join() !== shown.cc.join() || current.bcc.join() !== shown.bcc.join()
+            || current.subject !== shown.subject || current.body !== shown.body;
+          return json(res, 200, {
+            action: "send",
+            arguments: mcpMail.argsWithEdits(args, shown, current),
+            cardId: card.id,
+            note: mcpMail.sentNote(current, edited),
+          });
+        }
+        if (current && current.status === "editable") {
+          store.patchMessage(threadId, card.id, {
+            email: { ...current, status: "failed", error: answer === "timeout" ? "Nobody answered in time; nothing was sent." : "The bot stopped waiting; nothing was sent." },
+          });
+        }
+        if (gone) return;
+        return json(res, 200, { action: "refuse", text: answer === "timeout" ? mcpMail.TIMEOUT_TEXT : mcpMail.DISCARDED_TEXT });
+      }
+      if (method === "POST" && path === "/api/internal/mcp-mail/done") {
+        const body = await readInternalBody();
+        const threadId = internalCapability.threadId;
+        const message = store.messagesFor(threadId).find((candidate) => candidate.id === body.cardId && candidate.email?.mcp);
+        if (!message?.email || message.email.status !== "working") return json(res, 404, { error: "no such email" });
+        const failed = body.ok !== true;
+        store.patchMessage(threadId, message.id, {
+          email: { ...message.email, status: failed ? "failed" : "sent", error: failed ? String(body.error ?? "The mail app did not accept it").slice(0, 240) : undefined },
+        });
+        return json(res, 200, { status: failed ? "failed" : "sent" });
       }
       if (method === "POST" && path === "/api/internal/connectors/mcp") {
         const body = await readInternalBody();
@@ -22353,6 +22487,28 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 403, { error: "Only the person this conversation is for can send this email." });
       }
       const action = m[3] as "send" | "draft" | "discard";
+      // Fork: a custom MCP server's mail (server/mcp-mail.ts). Its gate is
+      // still holding the call: the answer goes there, and only Send or
+      // Discard exist — never a draft, never "always".
+      if (card.mcp) {
+        const requestId = card.mcp.requestId;
+        if (card.status !== "editable") return json(res, 409, { error: "this email was already handled" });
+        if (!outboundRequests.pending(threadId).includes(requestId)) {
+          store.patchMessage(threadId, message.id, { email: { ...card, status: "failed", error: "This request expired; nothing was sent. Ask the bot again." } });
+          return json(res, 409, { error: "this email request expired" });
+        }
+        if (action === "draft") return json(res, 400, { error: "This email can only be sent or discarded." });
+        if (action === "discard") {
+          store.patchMessage(threadId, message.id, { email: { ...card, status: "discarded", error: undefined } });
+          outboundRequests.resolve({ threadId, requestId, behavior: "deny" });
+          return json(res, 200, { status: "discarded" });
+        }
+        const edits = mcpMail.cleanMcpEdits(body, card);
+        if ("error" in edits) return json(res, 400, { error: edits.error });
+        store.patchMessage(threadId, message.id, { email: { ...card, ...edits.draft, status: "working", error: undefined } });
+        outboundRequests.resolve({ threadId, requestId, behavior: "allow" });
+        return json(res, 200, { status: "working" });
+      }
       const resume = (done: EmailCardData) => resumeAfterEmailCard(m![1], threadId, outbox.cardOutcomeText(action, done));
       if (action === "discard") {
         const done: EmailCardData = { ...card, status: "discarded", error: undefined };

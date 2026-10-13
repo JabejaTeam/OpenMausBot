@@ -1,6 +1,8 @@
 // Fork: an outgoing email the bot wrote while you were in the chat. You edit
 // it here, then send it, keep it as a Gmail draft, or discard it; the server
 // sends it with your connected Gmail and appends your Gmail signature.
+// A mail a custom MCP server would send (card.mcp, server/mcp-mail.ts) uses
+// the same card: Send or Discard only, read-only where it cannot be edited.
 import { useState } from "react";
 import { Check, FileText, Loader2, Mail, Send, Trash2 } from "lucide-react";
 
@@ -34,8 +36,11 @@ export function EmailCard({ botId, threadId, message }: { botId: string; threadI
   const [pending, setPending] = useState<"send" | "draft" | "discard" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const editable = card.status === "editable" || card.status === "failed";
+  const mcp = card.mcp;
+  // An MCP mail's call is gone once it failed: nothing is left to retry.
+  const editable = card.status === "editable" || (card.status === "failed" && !mcp);
   const busy = pending !== null || card.status === "working";
+  const locked = busy || (mcp !== undefined && !mcp.editable);
   const isReply = Boolean(card.replyThreadId);
 
   const act = async (action: "send" | "draft" | "discard") => {
@@ -55,19 +60,21 @@ export function EmailCard({ botId, threadId, message }: { botId: string; threadI
 
   if (!editable && card.status !== "working") {
     const done = card.status === "sent"
-      ? t("email.card.sent", { to: joinList(card.to) })
+      ? t("email.card.sent", { to: joinList(card.to) || mcp?.server || "" })
       : card.status === "drafted"
         ? t("email.card.drafted", { to: joinList(card.to) })
-        : t("email.card.discarded");
+        : card.status === "failed"
+          ? t("email.card.notSent", { error: card.error ?? "" })
+          : t("email.card.discarded");
     return (
       <div className="flex w-full justify-start">
         <div className="flex w-full max-w-[560px] items-center gap-3 rounded-2xl border border-hairline/50 bg-card px-4 py-3">
-          <div className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${card.status === "discarded" ? "bg-control text-ink-secondary" : "bg-success/15 text-success"}`}>
-            {card.status === "discarded" ? <Trash2 size={15} /> : <Check size={15} />}
+          <div className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${card.status === "discarded" || card.status === "failed" ? "bg-control text-ink-secondary" : "bg-success/15 text-success"}`}>
+            {card.status === "discarded" || card.status === "failed" ? <Trash2 size={15} /> : <Check size={15} />}
           </div>
           <div className="min-w-0">
             <div className="truncate text-[13px] font-medium text-ink">{done}</div>
-            {card.status !== "discarded" && (
+            {card.status !== "discarded" && card.status !== "failed" && (
               <div className="truncate text-[12px] text-ink-secondary">{isReply ? t("email.card.reply") : card.subject || t("email.card.noSubject")}</div>
             )}
           </div>
@@ -85,25 +92,25 @@ export function EmailCard({ botId, threadId, message }: { botId: string; threadI
         <div className="flex items-center gap-2.5 border-b border-hairline/40 px-4 py-3">
           <Mail size={15} className="text-ink-secondary" />
           <span className="text-[13.5px] font-semibold text-ink">{isReply ? t("email.card.reply") : t("email.card.title")}</span>
-          {card.account && <span className="rounded-full bg-control px-2 py-0.5 text-[11px] text-ink-secondary">{card.account}</span>}
+          {(card.account ?? mcp?.server) && <span className="rounded-full bg-control px-2 py-0.5 text-[11px] text-ink-secondary">{card.account ?? mcp?.server}</span>}
         </div>
         <div className="flex flex-col gap-3 px-4 py-3.5">
           <Field label={t("email.card.to")}>
-            <input className={inputClass} value={to} onChange={(event) => setTo(event.target.value)} disabled={busy} />
+            <input className={inputClass} value={to} onChange={(event) => setTo(event.target.value)} disabled={locked} placeholder={mcp ? t("email.card.mcpRecipients") : undefined} />
           </Field>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label={t("email.card.cc")}>
-              <input className={inputClass} value={cc} onChange={(event) => setCc(event.target.value)} disabled={busy} />
+              <input className={inputClass} value={cc} onChange={(event) => setCc(event.target.value)} disabled={locked} />
             </Field>
             {showBcc ? (
               <Field label={t("email.card.bcc")}>
-                <input className={inputClass} value={bcc} onChange={(event) => setBcc(event.target.value)} disabled={busy} />
+                <input className={inputClass} value={bcc} onChange={(event) => setBcc(event.target.value)} disabled={locked} />
               </Field>
             ) : (
               <button
                 type="button"
                 onClick={() => setShowBcc(true)}
-                disabled={busy}
+                disabled={locked}
                 className="self-end rounded-lg px-2 py-1.5 text-left text-[12px] text-ink-secondary hover:bg-control hover:text-ink"
               >
                 + {t("email.card.bcc")}
@@ -112,7 +119,7 @@ export function EmailCard({ botId, threadId, message }: { botId: string; threadI
           </div>
           {!isReply && (
             <Field label={t("email.card.subject")}>
-              <input className={inputClass} value={subject} onChange={(event) => setSubject(event.target.value)} disabled={busy} />
+              <input className={inputClass} value={subject} onChange={(event) => setSubject(event.target.value)} disabled={locked} />
             </Field>
           )}
           <Field label={t("email.card.message")}>
@@ -120,10 +127,20 @@ export function EmailCard({ botId, threadId, message }: { botId: string; threadI
               className={`${inputClass} min-h-[160px] resize-y leading-relaxed`}
               value={body}
               onChange={(event) => setBody(event.target.value)}
-              disabled={busy}
+              disabled={locked}
             />
           </Field>
-          {card.signature ? (
+          {mcp ? (
+            <>
+              <p className="text-[11.5px] text-ink-tertiary">{t(mcp.editable ? "email.card.mcpNote" : "email.card.mcpReadOnly", { server: mcp.server })}</p>
+              {!mcp.editable && (
+                <details className="text-[12px] text-ink-secondary">
+                  <summary className="cursor-pointer">{t("email.card.details", { server: mcp.server })}</summary>
+                  <pre className="mt-1.5 max-h-[240px] overflow-auto whitespace-pre-wrap break-all rounded-lg border border-hairline/40 bg-panel/40 p-2 text-[11.5px]">{mcp.raw}</pre>
+                </details>
+              )}
+            </>
+          ) : card.signature ? (
             <div className="flex flex-col gap-1.5">
               <span className="text-[11px] font-medium uppercase tracking-wide text-ink-tertiary">{t("email.card.signature")}</span>
               {/* Gmail's own HTML, shown sandboxed: no scripts, no navigation. */}
@@ -149,14 +166,14 @@ export function EmailCard({ botId, threadId, message }: { botId: string; threadI
             {pending === "discard" ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} {t("email.card.discard")}
           </button>
           <div className="flex items-center gap-2">
-            <button
+            {!mcp && <button
               type="button"
               onClick={() => void act("draft")}
               disabled={busy}
               className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-transform active:scale-[0.98] disabled:opacity-50 ${primary === "draft" ? "bg-accent text-white hover:opacity-90" : "bg-control text-ink hover:bg-control/80"}`}
             >
               {pending === "draft" ? <Loader2 size={13} className="animate-spin" /> : <FileText size={13} />} {t("email.card.saveDraft")}
-            </button>
+            </button>}
             <button
               type="button"
               onClick={() => void act("send")}

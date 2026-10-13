@@ -531,7 +531,7 @@ export class RuntimeCoordinator implements Coordinator {
     // so far are, then its assignment again, as a restart note would.
     const body = resumed
       ? composeResume(a, this.host.names(node, parent && this.project(parent)),
-        settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node))), input.stillRunning)
+        settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node))), input.stillRunning, input.alreadyHanded)
       : root
         ? composeRootTurn(a, { turn: input.turn === "resume" ? "first" : input.turn, restartNote: "", ...(input.answer !== undefined ? { answer: input.answer } : {}),
           ...(input.continuation ? { continuation: input.continuation } : {}) })

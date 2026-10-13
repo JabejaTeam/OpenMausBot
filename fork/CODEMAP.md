@@ -25,24 +25,40 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
 - Chief-only relay of questions: `shared/relay-question.ts`, `relay_question` route.
 
 ## Conversations per person (who may see/write a thread)
-- The rule (SSOT): `server/thread-access.ts` — a thread is its starter's (`thread-starters.json`,
-  else the install owner): their channel. The whole team sees and writes in it unless its person
-  marked it private (`thread-private.json`); a private one is open only to whom they shared it
-  with (`thread-shares.json`). On only with `OMB_PRIVATE_THREADS=1` and a shared sign-in list;
-  admins get no exception, loopback sees all.
+- The rule (SSOT): `server/thread-access.ts` — every conversation is private: it is its starter's
+  (`thread-starters.json`; work a bot opened for someone is that person's, via `openerFrom`; a routine
+  run is its maker's; else the install owner = admins[0]). Visible to that person, the people they
+  shared it with by name (`thread-shares.json`) and admins (role `team`). Always on when the sign-in
+  list has members (`privateThreads()` in index.ts, no env; `OMB_TEST_TEAM_THREADS=1` is only for
+  upstream e2e fixtures written for team-wide threads). Loopback sees all. `thread-private.json`
+  (old Privé flags) is no longer read.
+- What may flow from one conversation into another (Recent work brief, auto-recall, session_search,
+  session_read, list_threads, close_thread, room recent work): `threadFeeds` via `feedsThread(into)` —
+  only threads everyone the target thread is for may open themselves; the admin view does not count.
+- Work for a person never lands in someone else's thread: ask_bot/delegate_bot open a fresh thread of
+  theirs (`guestWorkThread`), a code card's thread is per person (`store.workThreadOn(…, mine)`),
+  a routine reports into its person's thread (`resolveResultsThread`).
 - Applied once, in `server/bot-visibility.ts`: `VisibleSet.threadRole` narrows `.thread()`, so the
   request gate, search, attachments and live frames follow; `ownThreads` marks each task with
   `access` (own/shared/team) and `person`, and opens the viewer's latest own thread (GET /api/bots).
 - Gate in `handleRequest` (index.ts, "names only threads it may open"): path task id, `?threadId`,
   and every JSON body's `threadId` via `onParsedBody` (`server/harness/http.ts`).
-- Private/share routes: `server/routes/fork-threads.ts`; UI `src/components/ThreadShare.tsx`
-  (lock in the chat header), channel picker `src/components/ThreadChannel.tsx` (filters
-  `BotThreadList`); composer gating `src/lib/cloud-guest.ts` (`privateThreads` from /api/auth/session).
-- Test: `server/private-threads.e2e.test.ts`.
+- Share routes: `server/routes/fork-threads.ts` (`PUT {people:[…]}`, only the thread's person);
+  UI `src/components/ThreadShare.tsx` (lock/people icon in the chat header), channel picker
+  `src/components/ThreadChannel.tsx` (filters `BotThreadList`); composer gating `src/lib/cloud-guest.ts`
+  (`privateThreads` from /api/auth/session).
+- Tests: `server/thread-access.test.ts`, `server/private-threads.e2e.test.ts`,
+  `server/private-threads-delegation.e2e.test.ts`.
 
 ## Fork routes and people
 - New fork HTTP routes go in `server/routes/fork-people.ts` (route table), not inline in index.ts.
 - Thread worktrees: `server/thread-worktrees.ts`. Outgoing Gmail: `server/email-outbox.ts`.
+- Mail through a custom MCP server (Outlook/ms365, Odoo, …): `outbound` on the server in
+  config.json `mcpServers` (preset `"ms365"`/`"odoo"`, `tools`, `unattendedTo`). Rules and the
+  card: `server/mcp-mail.ts`; every such server is mounted behind `server/mcp-mail-gate.ts`
+  (`withMailGate` in index.ts → `server/mcp-mail-mount.ts`), which holds a sending call on
+  `/api/internal/mcp-mail` until the person sends or discards the email card. All approval
+  modes, Full included; a routine with mail "send" passes. Tests: `server/mcp-mail*.test.ts`.
 
 ## Tests, build, deploy (all on THE BEAST)
 - `fork/beast.sh` (sourced, SSOT): host, one workspace per worktree `~/omb-fork/wt/<worktree>`
@@ -59,9 +75,12 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
 - Tool catalog size is budgeted: `server/drivers/agents-catalog-wire.test.ts`
   (`FORK_EXTRA_BYTES`; regenerate goldens with
   `UPDATE_AGENTS_CATALOG_GOLDENS=1`).
-- `fork/deploy-beast.sh [--force] [--allow-rollback]`: build the current commit on beast, back up,
-  roll out, health check (≈30 s). Refuses when live has commits HEAD lacks (rebase on fork/main),
-  one rollout at a time (`~/omb-fork/deploy.lock`), waits for the DEPLOY_OK/DEPLOY_FAIL log line.
+- `fork/deploy-beast.sh [--instance NAME | --all] [--force] [--allow-rollback]`: build the current
+  commit on beast, back up, roll out, health check (≈30 s). Instances (container, port, live/data dir,
+  ssh host or jump chain `hop>container>target>vm`, e.g. ripal via beast → omb → node1 → incus VM)
+  live in `fork/instances.tsv`; default `jabeja`. Another host gets the release copied from
+  beast; `on_host`/`copy_to_host` in the script are the one way to reach a host. Refuses when live has commits HEAD lacks (rebase on fork/main), one rollout at a time per host
+  (`~/omb-fork/deploy.lock`), waits for the BUILD_/DEPLOY_OK/FAIL log lines.
 
 ## Office view (3D)
 - Switch: `src/lib/office-view.ts`; page: `src/components/office/OfficeView.tsx`; three.js scene
