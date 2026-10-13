@@ -4102,5 +4102,17 @@
   "data.chart.loading": "Drawing chart…",
   "data.chart.failed": "The chart could not be drawn: {reason}",
   "data.editor.label": "SQL",
-  "data.editor.resize": "Resize SQL editor"
+  "data.editor.resize": "Resize SQL editor",
+  "relay.dismissed": "checked off",
+  "relay.waiting": "waiting for your answer",
+  "relay.reply": "Reply",
+  "relay.more": "More",
+  "relay.replyTo": "Reply to {name}",
+  "relay.chiefFallback": "the Chief",
+  "relay.leftTo": "Left to {name}",
+  "relay.leaveToAgent": "Let {name} choose",
+  "relay.leaveToChief": "Let {name} decide",
+  "relay.leaveItAnswer": "The choice is yours: pick the best option yourself and state your choice in your report.",
+  "relay.checkOff": "Check off",
+  "relay.openThread": "Open thread"
 }

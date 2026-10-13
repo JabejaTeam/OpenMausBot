@@ -4102,5 +4102,17 @@
   "data.chart.loading": "Grafiek tekenen…",
   "data.chart.failed": "De grafiek kon niet worden getekend: {reason}",
   "data.editor.label": "SQL",
-  "data.editor.resize": "SQL-editor vergroten of verkleinen"
+  "data.editor.resize": "SQL-editor vergroten of verkleinen",
+  "relay.dismissed": "afgevinkt",
+  "relay.waiting": "wacht op je antwoord",
+  "relay.reply": "Antwoorden",
+  "relay.more": "Meer",
+  "relay.replyTo": "Antwoord aan {name}",
+  "relay.chiefFallback": "de Chief",
+  "relay.leftTo": "Overgelaten aan {name}",
+  "relay.leaveToAgent": "Laat {name} kiezen",
+  "relay.leaveToChief": "Laat {name} beslissen",
+  "relay.leaveItAnswer": "De keuze is aan jou: kies zelf de beste optie en vermeld je keuze in je rapport.",
+  "relay.checkOff": "Afvinken",
+  "relay.openThread": "Open thread"
 }

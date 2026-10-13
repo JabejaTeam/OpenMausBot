@@ -18,7 +18,7 @@ BEAST_CONTAINER="omb-fork-$_beast_slug"
 # rsync is openrsync, which does not protect .gitignore'd paths from --delete
 # — every sync wiped dist, dist-server and release, so every build started
 # cold and an incremental tsc emit came out empty (found 2026-10-11).
-BEAST_KEEP=(node_modules dist dist-server dist-companion dist-electron dist-native release .deploy-ancestors)
+BEAST_KEEP=(node_modules dist dist-server dist-companion dist-electron dist-native release)
 
 # Copy the working tree (tracked + untracked, not ignored) to this worktree's
 # folder on the beast.

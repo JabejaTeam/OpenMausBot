@@ -1,0 +1,9 @@
+# Jabeja fork only: every live OpenMausBot that fork/deploy-beast.sh rolls out
+# to, one per line (SSOT). Same image everywhere; each its own container,
+# port, code and data. The port is the server's inside its container; paths
+# are relative to $HOME on the host; the live folder holds DEPLOYED_COMMIT.
+# Host "beast" means $BEAST_HOST (fork/beast.sh). Builds always run on the
+# beast; another host gets the built release copied over.
+# name	host	container	port	live	data
+jabeja	beast	omb	8799	omb-data/home/omb-server	omb-data/home/.openmausbot
+# ripal	node1	omb-ripal	8799	omb-ripal/home/omb-server	omb-ripal/home/.openmausbot	(example: ssh alias, port and paths still to be decided)

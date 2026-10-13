@@ -59,9 +59,11 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
 - Tool catalog size is budgeted: `server/drivers/agents-catalog-wire.test.ts`
   (`FORK_EXTRA_BYTES`; regenerate goldens with
   `UPDATE_AGENTS_CATALOG_GOLDENS=1`).
-- `fork/deploy-beast.sh [--force] [--allow-rollback]`: build the current commit on beast, back up,
-  roll out, health check (≈30 s). Refuses when live has commits HEAD lacks (rebase on fork/main),
-  one rollout at a time (`~/omb-fork/deploy.lock`), waits for the DEPLOY_OK/DEPLOY_FAIL log line.
+- `fork/deploy-beast.sh [--instance NAME | --all] [--force] [--allow-rollback]`: build the current
+  commit on beast, back up, roll out, health check (≈30 s). Instances (container, port, live/data dir,
+  ssh host) live in `fork/instances.tsv`; default `jabeja`. Another host gets the release copied from
+  beast. Refuses when live has commits HEAD lacks (rebase on fork/main), one rollout at a time per host
+  (`~/omb-fork/deploy.lock`), waits for the BUILD_/DEPLOY_OK/FAIL log lines.
 
 ## Office view (3D)
 - Switch: `src/lib/office-view.ts`; page: `src/components/office/OfficeView.tsx`; three.js scene

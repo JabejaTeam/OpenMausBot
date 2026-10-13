@@ -152,6 +152,7 @@ describe("WhatsApp MCP tools", () => {
       dir,
       now: () => NOW,
       sonioxKey: "soniox",
+      owner: "Wiebren",
       fetch: fakeFetch({
         "https://api.soniox.com/v1/files": () => Response.json({ id: "f" }),
         "https://api.soniox.com/v1/transcriptions/t/transcript": () => Response.json({ text: "ik kom om tien uur" }),
@@ -181,6 +182,9 @@ describe("WhatsApp MCP tools", () => {
     const tools = createWhatsAppTools({ dir: tempDir() });
     const init = await handleWhatsAppMcp(tools, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     expect((init!.result as { serverInfo: { name: string } }).serverInfo.name).toBe("whatsapp");
+    expect((init!.result as { instructions: string }).instructions).toContain("the owner's own WhatsApp number");
+    const named = await handleWhatsAppMcp(tools, { jsonrpc: "2.0", id: 1, method: "initialize", params: {} }, "Lies");
+    expect((named!.result as { instructions: string }).instructions).toContain("Lies's own WhatsApp number");
     const list = await handleWhatsAppMcp(tools, { jsonrpc: "2.0", id: 2, method: "tools/list" });
     expect((list!.result as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name)).toEqual([
       "whatsapp_chats", "whatsapp_read", "whatsapp_search", "whatsapp_media",
