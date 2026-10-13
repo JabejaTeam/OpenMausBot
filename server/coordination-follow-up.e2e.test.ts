@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
@@ -17,7 +18,17 @@ async function fixture(test: (f: any) => Promise<void>) {
     const gate = join(session.info.dataDir, "clerk-gate");
     const plan: Record<string, any> = {};
     const save = () => writeFileSync(planPath, JSON.stringify(plan));
-    const nodes = () => existsSync(join(session.info.dataDir, "room-handoffs.json")) ? JSON.parse(readFileSync(join(session.info.dataDir, "room-handoffs.json"), "utf8")) : [];
+    // The job runtime's assignments (DATA_DIR/runtime.db), in the shape these
+    // tests were written against: who runs it where, what it was asked, how it went.
+    const nodes = () => {
+      const path = join(session.info.dataDir, "runtime.db");
+      if (!existsSync(path)) return [];
+      const db = new DatabaseSync(path, { readOnly: true });
+      try {
+        return (db.prepare("SELECT json FROM assignments ORDER BY created_at, id").all() as Array<{ json: string }>).map(row => JSON.parse(row.json))
+          .filter((a: any) => a.parentId).map((a: any) => ({ ...a, botId: a.assignee.botId, threadId: a.assignee.destination.threadId, text: a.brief }));
+      } finally { db.close(); }
+    };
     const clerkNodes = () => nodes().filter((n: any) => n.botId === clerk.id);
     const evidence = () => existsSync(`${planPath}.evidence.jsonl`) ? readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
     const chiefTurn = (index: number) => evidence().find((t: any) => t.botId === chief.id && t.turnIndex === index);
@@ -53,7 +64,6 @@ it("steers a follow-up into the teammate's running turn instead of queueing it b
   await expect.poll(() => f.clerkNodes()[0]?.status, { timeout: 15_000 }).toBe("completed");
   expect(f.clerkNodes()).toHaveLength(1);
   expect(f.clerkNodes()[0].result).toContain("Book USD invoices in EUR only");
-  expect(f.clerkNodes()[0].corrections).toEqual(["Book USD invoices in EUR only"]);
   const thread = await f.messages(f.clerkNodes()[0].threadId);
   expect(thread.some((m: any) => m.role === "user" && m.steered && m.text.includes("Book USD invoices in EUR only"))).toBe(true);
   await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((m: any) => m.text === "Q3 booked in EUR"), { timeout: 15_000 }).toBe(true);
@@ -105,7 +115,7 @@ it("starts a parallel assignment to a code agent in its own thread beside the on
   await f.api(`/api/bots/${f.clerk.id}`, { kind: "code" }, "PATCH");
   f.plan[f.chief.id] = { turns: [
     { steps: [{ arguments: f.assign }], reply: "Asked the Bookkeeper" },
-    { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Book the Q3 customer invoices", parallel: true } }], reply: "Second job started" },
+    { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Book the Q3 customer invoices", thread: "new" } }], reply: "Second job started" },
     { reply: "Both booked" },
   ] };
   f.plan[f.clerk.id] = { progress: "Collecting invoices", gateFile: f.gate, reply: "Booked" };
@@ -118,7 +128,7 @@ it("starts a parallel assignment to a code agent in its own thread beside the on
   await expect.poll(() => f.clerkNodes().map((n: any) => n.status), { timeout: 15_000 }).toEqual(["running", "running"]);
   const [first, second] = f.clerkNodes();
   expect(second.threadId).not.toBe(first.threadId);
-  expect(first.corrections ?? []).toEqual([]);
+  expect((await f.messages(first.threadId)).some((m: any) => m.steered)).toBe(false);
   writeFileSync(f.gate, "go");
   await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((m: any) => m.text === "Both booked"), { timeout: 20_000 }).toBe(true);
 }), 60_000);
@@ -126,7 +136,7 @@ it("starts a parallel assignment to a code agent in its own thread beside the on
 it("resumes the sender with a parallel assignment's result while its sibling is still running", () => fixture(async f => {
   await f.api(`/api/bots/${f.clerk.id}`, { kind: "code" }, "PATCH");
   f.plan[f.chief.id] = { turns: [
-    { steps: [{ arguments: f.assign }, { arguments: { bot_ids: [f.clerk.id], message: "Book the Q3 customer invoices", parallel: true } }], reply: "Two jobs started" },
+    { steps: [{ arguments: f.assign }, { arguments: { bot_ids: [f.clerk.id], message: "Book the Q3 customer invoices", thread: "new" } }], reply: "Two jobs started" },
     { reply: "Customer invoices are booked; supplier invoices still running", expectContextIncludes: ["Booked", "still running"] },
     { reply: "Both booked" },
   ] };
@@ -171,7 +181,7 @@ it("starts a parallel assignment on a card as a copy of that card's thread, and 
   f.plan[f.chief.id] = { turns: [
     { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Kaart aaaa1111: build the invoice list" } }], reply: "List started" },
     { reply: "List done" },
-    { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Kaart aaaa1111: add a CSV export", parallel: true } }], reply: "Export started" },
+    { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Kaart aaaa1111: add a CSV export", thread: "new" } }], reply: "Export started" },
     { reply: "Export done" },
     { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Kaart aaaa1111: sort the list by date" } }], reply: "Sort started" },
     { reply: "Sort done" },

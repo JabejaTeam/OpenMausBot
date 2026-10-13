@@ -7,6 +7,7 @@ import { t } from "@/lib/i18n";
 import { botLabel } from "@/lib/bot-label";
 import { stateForBot } from "@/lib/mascot";
 import { BotAvatar } from "./Avatar";
+import type { WindowDragProps } from "./DesktopCapabilities";
 
 /** The team of the chat being read: a teammate from that team is named by
  * role alone ("Code"), anyone else with their team ("Manager · Ripal"). */
@@ -25,18 +26,18 @@ export function SimpleHeaderPill({
   name,
   title,
   onClick,
-  dragStyle,
+  dragProps,
   noDragStyle,
 }: {
   avatar: ReactNode;
   name: string;
   title?: string;
   onClick: () => void;
-  dragStyle?: CSSProperties;
+  dragProps?: WindowDragProps;
   noDragStyle?: CSSProperties;
 }) {
   return (
-    <div style={dragStyle} className="flex justify-center px-5 pb-1 pt-3" data-simple-header>
+    <div {...dragProps} className="flex justify-center px-5 pb-1 pt-3" data-simple-header>
       <button
         type="button"
         onClick={onClick}
@@ -51,7 +52,7 @@ export function SimpleHeaderPill({
   );
 }
 
-export function SimpleChatHeader({ bot, dragStyle, noDragStyle }: { bot: Bot; dragStyle?: CSSProperties; noDragStyle?: CSSProperties }) {
+export function SimpleChatHeader({ bot, dragProps, noDragStyle }: { bot: Bot; dragProps?: WindowDragProps; noDragStyle?: CSSProperties }) {
   const { dispatch } = useStore();
   return (
     <SimpleHeaderPill
@@ -59,7 +60,7 @@ export function SimpleChatHeader({ bot, dragStyle, noDragStyle }: { bot: Bot; dr
       name={botLabel(bot).name}
       title={t("chat.openProfile")}
       onClick={() => dispatch({ type: "toggleSettings", open: true })}
-      dragStyle={dragStyle}
+      dragProps={dragProps}
       noDragStyle={noDragStyle}
     />
   );

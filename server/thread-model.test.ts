@@ -137,7 +137,7 @@ describe("threads follow their bot's model", () => {
     expect(ownModel(open(), "legacy", "copy")).toBeUndefined();
   });
 
-  it("followBotModel clears exactly the listed threads' own model, in one write, and Ask where the bot's engine would have to confirm", () => {
+  it("followBotModel clears exactly the listed threads' own model, in one write, and keeps Full across engines (#2697)", () => {
     const store = open();
     const bot = store.createBot();
     const first = bot.threadId;
@@ -156,8 +156,8 @@ describe("threads follow their bot's model", () => {
       return { rewound: true };
     });
     expect(moved.sort()).toEqual([full.threadId, asks.threadId, same.threadId].sort());
-    // Fork: Full survives an engine switch the new engine supports (0dd132426).
-    expect(store.taskByThread(bot.id, full.threadId)).toMatchObject({ approvalMode: "full", autoApprove: false, alwaysAllow: ["Bash"], rewound: true });
+    // Full carries to the bot's engine, which runs it (#2697).
+    expect(store.taskByThread(bot.id, full.threadId)).toMatchObject({ approvalMode: "full", alwaysAllow: ["Bash"], rewound: true });
     expect(store.taskByThread(bot.id, full.threadId)?.modelSelection).toBeUndefined();
     expect(store.taskByThread(bot.id, asks.threadId)).toMatchObject({ approvalMode: "ask" });
     // Another model on the same engine: the level stays.
@@ -170,7 +170,7 @@ describe("threads follow their bot's model", () => {
     expect(ownModel(reloaded, bot.id, untouched.threadId)).toEqual(opus);
   });
 
-  it("a following thread's Full access goes back to Ask when the bot moves to another engine, never on the same engine", () => {
+  it("a following thread keeps its Full access when the bot moves to another engine that runs it (#2697)", () => {
     const store = open();
     const bot = store.createBot();
     const full = store.createTask(bot.id, "Full")!;
@@ -178,7 +178,6 @@ describe("threads follow their bot's model", () => {
     store.patchBot(bot.id, { modelSelection: opus });
     expect(store.taskByThread(bot.id, full.threadId)).toMatchObject({ approvalMode: "full", alwaysAllow: ["Bash"] });
     store.patchBot(bot.id, { modelSelection: codex });
-    // Fork: Full survives an engine switch the new engine supports (0dd132426).
     expect(store.taskByThread(bot.id, full.threadId)).toMatchObject({ approvalMode: "full", alwaysAllow: ["Bash"] });
     expect(open().taskByThread(bot.id, full.threadId)?.approvalMode).toBe("full");
 

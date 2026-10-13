@@ -90,6 +90,7 @@ const routineToolDefinitionSchema = z.object({
   continuity: z.boolean().optional(),
   overlap: z.enum(["skip", "queue"]).optional(),
   mail: z.enum(["draft", "send"]).optional(),
+  runOnStartup: z.boolean().optional(),
 }).strict();
 
 const routineToolChangesSchema = routineToolDefinitionSchema
@@ -218,6 +219,7 @@ const storedDefinitionSchema = z.object({
   continuity: z.boolean().optional(),
   overlap: z.enum(["skip", "queue"]).optional(),
   mail: z.enum(["draft", "send"]).optional(),
+  runOnStartup: z.boolean().optional(),
 }).strict();
 const storedChangesSchema = storedDefinitionSchema
   .omit({ schedule: true, timeoutMinutes: true })
@@ -601,6 +603,7 @@ function normalizeDefinition(input: RoutineToolDefinitionInput, now: number): Ro
     ...(input.continuity === true ? { continuity: true } : {}),
     ...(input.overlap === "queue" ? { overlap: "queue" as const } : {}),
     ...(input.mail === "send" ? { mail: "send" as const } : {}),
+    ...(input.runOnStartup === true ? { runOnStartup: true } : {}),
   };
 }
 
@@ -615,6 +618,7 @@ function normalizeChanges(input: RoutineToolChangesInput, now: number): RoutineR
   if (input.continuity !== undefined) changes.continuity = input.continuity === true;
   if (input.overlap !== undefined) changes.overlap = input.overlap;
   if (input.mail !== undefined) changes.mail = input.mail;
+  if (input.runOnStartup !== undefined) changes.runOnStartup = input.runOnStartup === true;
   return changes;
 }
 
@@ -841,6 +845,7 @@ function effectiveDefinition(operation: RoutineRequestOperation, manager: Routin
     ...(existing.continuity ? { continuity: true } : {}),
     ...(existing.overlap ? { overlap: existing.overlap } : {}),
     ...(existing.mail === "send" ? { mail: "send" as const } : {}),
+    ...(existing.runOnStartup ? { runOnStartup: true } : {}),
   };
   if (operation.action !== "update") return base;
   const { schedule, timeoutMinutes, ...changes } = operation.changes;
@@ -851,6 +856,8 @@ function effectiveDefinition(operation: RoutineRequestOperation, manager: Routin
   };
   if (timeoutMinutes === null) delete merged.timeoutMinutes;
   else if (timeoutMinutes !== undefined) merged.timeoutMinutes = timeoutMinutes;
+  // Becoming a one-time routine drops it, as the routine itself does.
+  if (merged.schedule.type === "once") delete merged.runOnStartup;
   return merged;
 }
 
@@ -926,6 +933,9 @@ function cardCopy(
       `Continuity: ${definition.continuity ? "Carries the previous run's report into the next run" : "Each run starts fresh"}`,
       `While busy: ${definition.overlap === "queue" ? "Queue one scheduled run; skip further occurrences until it starts" : "Skip overlapping scheduled occurrences"}`,
       `Email: ${definition.mail === "send" ? "May send Gmail directly" : "Gmail drafts only, never sent"}`,
+      ...(definition.runOnStartup || (operation.action === "update" && operation.changes.runOnStartup !== undefined)
+        ? [`On startup: ${definition.runOnStartup ? "Also runs once each time OpenMausBot starts" : "Runs only on its schedule"}`]
+        : []),
       // Last before the instructions: the one sentence that says what
       // confirming actually does, in the reader's terms.
       ...(operation.action === "create" || operation.action === "update"
@@ -953,6 +963,7 @@ function inputFromDefinition(definition: RoutineRequestDefinition, botId: string
     ...(definition.continuity ? { continuity: true } : {}),
     ...(definition.overlap === "queue" ? { overlap: "queue" as const } : {}),
     ...(definition.mail === "send" ? { mail: "send" as const } : {}),
+    ...(definition.runOnStartup ? { runOnStartup: true } : {}),
   };
 }
 
@@ -971,6 +982,7 @@ function updateFromChanges(
   if (changes.continuity !== undefined) patch.continuity = changes.continuity;
   if (changes.overlap !== undefined) patch.overlap = changes.overlap;
   if (changes.mail !== undefined) patch.mail = changes.mail;
+  if (changes.runOnStartup !== undefined) patch.runOnStartup = changes.runOnStartup;
   return patch;
 }
 
@@ -1047,6 +1059,7 @@ function revalidateOperation(operation: RoutineRequestOperation, manager: Routin
         || Boolean(routine.continuity) !== Boolean(definition.continuity)
         || (routine.overlap ?? "skip") !== (definition.overlap ?? "skip")
         || (routine.mail ?? "draft") !== (definition.mail ?? "draft")
+        || Boolean(routine.runOnStartup) !== Boolean(definition.runOnStartup)
         || (routine.attachments?.length ?? 0) > 0) return false;
       // An omitted start means "every N minutes", not a new phase each time
       // the model retries. Explicit starts and all other constraints stay exact.
@@ -1080,6 +1093,12 @@ function revalidateOperation(operation: RoutineRequestOperation, manager: Routin
     } catch (error) {
       throw new RoutineRequestError(error instanceof Error ? error.message : "Invalid cron schedule", 409);
     }
+  }
+  const startsWithApp = operation.action === "create"
+    ? operation.routine.runOnStartup === true
+    : operation.action === "update" && operation.changes.runOnStartup === true;
+  if (startsWithApp && (schedule ?? current?.schedule)?.type === "once") {
+    throw new RoutineRequestError("Only a repeating routine can also run when OpenMausBot starts. A one-time routine just runs at its time.");
   }
   if (schedule?.type === "once" && schedule.at <= now) {
     throw new RoutineRequestError("That one-time schedule is now in the past. Ask the bot to propose a new time.", 409, { terminal: true });
@@ -1138,6 +1157,7 @@ function routineSnapshot(routine: Routine): RoutineRequestSnapshot | undefined {
     ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
     ...(routine.continuity ? { continuity: true } : {}),
     ...(routine.overlap === "queue" ? { overlap: "queue" as const } : {}),
+    ...(routine.runOnStartup ? { runOnStartup: true } : {}),
     enabled: routine.enabled,
     ...(routine.target === "room-goal" ? { target: "room-goal" as const } : {}),
     ...(routine.groupId ? { groupId: routine.groupId } : {}),
@@ -1161,6 +1181,7 @@ function restorePatch(before: RoutineRequestSnapshot, now: number): Partial<Rout
     timeoutMinutes: before.timeoutMinutes ?? null,
     continuity: before.continuity === true,
     overlap: before.overlap ?? "skip",
+    runOnStartup: before.runOnStartup === true,
   };
 }
 
@@ -1415,6 +1436,7 @@ export class RoutineRequestService {
             ...(before.timeoutMinutes === undefined ? {} : { timeoutMinutes: before.timeoutMinutes }),
             ...(before.continuity ? { continuity: true } : {}),
             ...(before.overlap === "queue" ? { overlap: "queue" as const } : {}),
+            ...(before.runOnStartup ? { runOnStartup: true } : {}),
             ...(before.resultsThreadId ? { resultsThreadId: before.resultsThreadId } : {}),
           }).id;
           break;

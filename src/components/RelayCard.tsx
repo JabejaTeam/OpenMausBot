@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { Check, CornerDownLeft, MoreHorizontal } from "lucide-react";
 import { openThread, useStore, type Message } from "@/state/store";
+import { useShowThreads } from "@/lib/thread-preferences";
 import { cn } from "@/lib/cn";
 import { relayAnswerText, relayDelegateText } from "../../shared/relay-question";
 import { BotAvatar } from "./Avatar";
@@ -23,13 +24,14 @@ export function isOpenRelay(message: Message): boolean {
  * "BOA PM (icon) gestuurd". A click opens that teammate's thread. */
 export function AgentTag({ label, botId, threadId }: { label: string; botId: string; threadId?: string }) {
   const { state, dispatch } = useStore();
+  const showThreads = useShowThreads();
   const bot = state.bots.find((candidate) => candidate.id === botId);
   return (
     <div className="flex justify-center py-0.5">
       <button
         type="button"
         disabled={!threadId}
-        onClick={() => threadId && openThread(dispatch, { botId, threadId }, state)}
+        onClick={() => threadId && openThread(dispatch, { botId, threadId }, state, showThreads)}
         className="flex items-center gap-1.5 text-[12px] text-ink-tertiary transition-colors enabled:hover:text-ink-secondary"
       >
         <span className="font-medium"><BotName bot={bot} fallback="Teammate" /></span>
@@ -47,6 +49,7 @@ const iconButton =
 
 export function RelayCard({ botId, threadId, message }: { botId: string; threadId?: string; message: Message }) {
   const { state, dispatch } = useStore();
+  const showThreads = useShowThreads();
   const [replying, setReplying] = useState(false);
   const [more, setMore] = useState(false);
   const [custom, setCustom] = useState("");
@@ -99,7 +102,7 @@ export function RelayCard({ botId, threadId, message }: { botId: string; threadI
       <button
         type="button"
         disabled={!relay.threadId}
-        onClick={() => relay.threadId && openThread(dispatch, { botId: relay.botId, threadId: relay.threadId }, state)}
+        onClick={() => relay.threadId && openThread(dispatch, { botId: relay.botId, threadId: relay.threadId }, state, showThreads)}
         className="mb-1 flex items-center gap-1.5 pl-0.5 text-[11px] font-medium text-ink-secondary enabled:hover:text-ink"
       >
         {asker && <BotAvatar bot={asker} state="happy" size={16} motion="none" motionKey={0} animated={false} />}
@@ -155,7 +158,7 @@ export function RelayCard({ botId, threadId, message }: { botId: string; threadI
           </button>
           {relay.threadId && (
             <button type="button" className={menuItem}
-              onClick={() => openThread(dispatch, { botId: relay.botId, threadId: relay.threadId! }, state)}>
+              onClick={() => openThread(dispatch, { botId: relay.botId, threadId: relay.threadId! }, state, showThreads)}>
               Open thread
             </button>
           )}

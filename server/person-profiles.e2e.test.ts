@@ -163,15 +163,16 @@ posixOnly("a profile per person, carried by the turns done for them", () => {
     await turnAs(ADA, asker, "Ada asks the asker for a deploy");
 
     // The asker runs outside this server with a standing token bound to the
-    // thread Ada wrote in (docs/self-hosting.md); its ask is a real ask_bot.
+    // thread Ada wrote in (docs/self-hosting.md); its ask is a real
+    // coordinate_bots consultation (ask_bot went in 0.1.108).
     const token = "person-profiles-ask-fixture-0123456789abcdef";
     writeFileSync(join(home, ".openmausbot", "external-runtimes.json"),
       JSON.stringify({ [asker.id]: { token, threadId: asker.threadId } }), { mode: 0o600 });
     rmSync(dumpPath, { force: true });
-    const asked = await fetch(`${BASE}/api/internal/ask-bot`, {
+    const asked = await fetch(`${BASE}/api/internal/coordinate-bots`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-      body: JSON.stringify({ toBotId: coder.id, message: "Please deploy what Ada asked for" }),
+      body: JSON.stringify({ botIds: [coder.id], message: "Please deploy what Ada asked for", consult: true }),
     });
     expect(asked.status, await asked.clone().text()).toBe(200);
     const prompt = await waitFor(dumpedPrompt);

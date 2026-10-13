@@ -536,15 +536,17 @@ test("the base policy itself still grants a remote origin nothing", () => {
 
 // ── Jabeja fork: the paired server's page may use the microphone ──
 // The active remote server (bots.jabeja.be) gets the Cloud's narrow rule:
-// main frame of the main window, exact origin, audio only.
-test("the active remote server's main frame may use the microphone and show notifications, and nothing more", () => {
+// main frame of the main window, exact origin, audio only — once the person
+// allowed that server the microphone (upstream's per-server ask, 0.1.108).
+test("the active remote server's main frame may use the microphone once allowed and show notifications, and nothing more", () => {
   const PAIRED = "https://bots.jabeja.be";
-  const state = { main: { getURL: () => `${PAIRED}/` }, active: PAIRED };
+  const state = { main: { getURL: () => `${PAIRED}/` }, active: PAIRED, allowed: false };
   const handlers = appPermissionHandlers({
     rendererOrigin: () => LOCAL_ORIGIN,
     mainContents: () => state.main,
     cloudHomeOrigin: () => null,
     activeRemoteOrigin: () => state.active,
+    activeRemoteMicrophone: () => state.allowed,
   });
   const ask = (permission, details, contents = state.main) => {
     let granted;
@@ -552,6 +554,8 @@ test("the active remote server's main frame may use the microphone and show noti
     return granted;
   };
   const mic = { requestingUrl: `${PAIRED}/chat`, isMainFrame: true, mediaTypes: ["audio"] };
+  assert.equal(ask("media", mic), false, "not before the person allowed it");
+  state.allowed = true;
   assert.equal(ask("media", mic), true);
   assert.equal(handlers.check(state.main, "media", PAIRED, { isMainFrame: true, mediaType: "audio" }), true);
   for (const mediaTypes of [["video"], ["audio", "video"], []]) assert.equal(ask("media", { ...mic, mediaTypes }), false, JSON.stringify(mediaTypes));

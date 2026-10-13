@@ -109,6 +109,9 @@ describe("scopes", () => {
       // a person's own connected apps (the handler picks their Composio user)
       ["GET", "/api/connectors/catalog"], ["GET", "/api/connectors/connected"], ["POST", "/api/connectors/slack/authorize"],
       ["DELETE", "/api/connectors/slack/accounts/ca_1"], ["POST", "/api/bots/x/connector-cards/m/authorize"],
+      // the person a bot asks to sign in reaches its card and its browser
+      ["POST", "/api/bots/x/sign-in-cards/m/done"], ["POST", "/api/bots/x/sign-in-cards/m/cancel"], ["POST", "/api/bots/x/sign-in-cards/m/save-login"],
+      ["GET", "/api/bots/x/browser/live"], ["POST", "/api/bots/x/browser/action"],
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("client");
     for (const [method, path] of [
       ["POST", "/api/cli-test"], ["GET", "/api/cli-candidates"], ["PATCH", "/api/instances/claude"],
@@ -127,6 +130,9 @@ describe("scopes", () => {
       ["POST", "/api/live/device-revoked"],
       ["POST", "/api/auth/pair"], // handled before the gate; the gate itself never grants it
       ["GET", "/api/something-new"], // anything unlisted is admin until listed
+      ["POST", "/api/bots/x/sign-in-cards/m/provide"], ["POST", "/api/browser-engine/install"],
+      ["GET", "/api/logins"], ["POST", "/api/logins"], ["PATCH", "/api/logins/l1"], ["DELETE", "/api/logins/l1"],
+      ["POST", "/api/logins/1password"], ["POST", "/api/logins/1password/refresh"], ["DELETE", "/api/logins/1password"],
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
   });
 
@@ -310,7 +316,7 @@ describe("resolveRequestAuth", () => {
     }
     expect(resolveRequestAuth(
       request({ host: "127.0.0.1:8799" }, "POST"),
-      options("/api/internal/ask-bot"),
+      options("/api/internal/coordinate-bots"),
     ).auth?.kind).toBe("loopback");
   });
 
@@ -517,7 +523,7 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
     ["DELETE", "/api/bots/bot-1/queue/queue-1"],
     ["POST", "/api/threads/thread-1/respond"],
     ["GET", "/api/auth/session"],
-    ["POST", "/api/internal/ask-bot"],
+    ["POST", "/api/internal/coordinate-bots"],
     ["GET", "/api/internal/agents"],
     ["POST", "/api/internal/hook"],
     ["POST", "/api/testing/internal-capability"],

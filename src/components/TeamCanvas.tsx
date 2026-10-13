@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ArrowRight, BookOpen, Brain, Crown, Eye, EyeOff, MessageCircle, Minus, Monitor, MoreHorizontal, Pencil, Plus, Trash2, Users } from "lucide-react";
-import { api, useStore, type Bot } from "@/state/store";
+import { api, openBot, useStore, type Bot } from "@/state/store";
+import { useShowThreads } from "@/lib/thread-preferences";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { botLabel, botLabelPhrase } from "@/lib/bot-label";
@@ -32,6 +33,7 @@ function BotCard({ bot, selected, moving, connected, onComputer, onArrange }: {
   const { state, dispatch } = useStore();
   usePeople();
   const hiddenForMe = hiddenBotsForMe().has(bot.id);
+  const showThreads = useShowThreads();
   const status = teamMapStatus(bot);
   const instance = state.instances.find((item) => item.instanceId === bot.modelSelection.instanceId);
   const model = instance?.models.options.find((item) => item.id === bot.modelSelection.model)?.label ?? bot.modelSelection.model;
@@ -56,7 +58,7 @@ function BotCard({ bot, selected, moving, connected, onComputer, onArrange }: {
     </button>
     <div className="flex h-[43px] items-center gap-1 border-t border-hairline/30 px-2">
       <button className={cn(iconButton, "size-8")} aria-label={t("canvas.openBotChat", { name: label })} title={t("canvas.openChat")}
-        onClick={() => dispatch({ type: "select", id: bot.id })}><MessageCircle size={13} /></button>
+        onClick={() => openBot(dispatch, bot, showThreads)}><MessageCircle size={13} /></button>
       {status.tone !== "idle" && <span className="flex items-center gap-1.5 text-[10px] text-ink-secondary" title={status.label}>
         <span className={cn("size-1.5 rounded-full", status.tone === "success" ? "bg-success" : status.tone === "warning" ? "bg-warning" : status.tone === "danger" ? "bg-danger" : "bg-ink-secondary/35")} />
         {status.label}

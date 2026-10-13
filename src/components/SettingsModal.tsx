@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Archive, CircleUser, Coins, FlaskConical, KeyRound, Monitor, Palette, ScrollText, Search, Sparkles, TabletSmartphone, Terminal, User, UserRound, Users, X, Building2, Zap, BookOpen } from "lucide-react";
+import { Archive, CircleUser, Coins, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Sparkles, TabletSmartphone, Terminal, User, UserRound, Users, X, Building2, Zap, BookOpen } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, routinesInConversationEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
@@ -29,12 +29,14 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { currentPhonePairingTarget, phonePairingSettingsAction } from "@/lib/phone-pairing";
 import { CustomDomainSettings } from "./CustomDomainSettings";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
+import { LoginsSettings } from "./LoginsSettings";
 import { RemoteComputerSection } from "./RemoteComputerSection";
 import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
 import { OrganizationSettings } from "./OrganizationSettings";
 import { CloudAccountSettings } from "./CloudAccountSettings";
 import { ProSettingsCard } from "./ProIntroduction";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
+import { SkillReviewSettings } from "./SkillReviewSettings";
 import { effortLabel } from "./ModelPicker";
 import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
 import { shortcutLabel } from "./ShortcutHint";
@@ -44,6 +46,7 @@ import { LicenseExpiryBanner } from "./LicenseExpiryBanner";
 import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
 import { SkinPicker } from "./SkinPicker";
 import { FONT_IDS, applyFont, readFont, type FontId } from "@/lib/fonts";
+import { setColorUserBubbles, useColorUserBubbles } from "@/lib/user-bubble-preference";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { McpCallTimeoutSettings } from "./McpCallTimeoutSettings";
 import { AboutMeSettings } from "./AboutMeSettings";
@@ -63,6 +66,7 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { advancedAllowed } from "@/lib/advanced-access";
 import { parseSidebarDensity, setSidebarDensity, SIDEBAR_DENSITIES, useSidebarDensity, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
+import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
 
 // `labelKey`, not a label: t() reads the active pack when it is called, so a
@@ -87,18 +91,19 @@ export const SECTIONS: Array<{
   keywords: string[];
 }> = [
   { id: "general", group: "you", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "about me", "about", "suggestions", "suggested", "memory", "analytics", "updates", "effort", "new bots", "reasoning", "threads", "parallel", "concurrency", "cleanup", "retention", "event log", "event-log", "log size", "automatic recovery", "backup model", "fallback", "routines", "conversation", "schedule"] },
-  { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["simple ui", "simpele ui", "simple", "skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "density", "compact", "comfortable", "avatars", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top"] },
+  { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["simple ui", "simpele ui", "simple", "skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "density", "compact", "comfortable", "avatars", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top", "send", "enter", "return", "shift+enter", "ctrl+enter", "cmd+enter", "⌘+enter", "new line", "keyboard", "ime", "japanese", "bubble", "bubbles", "message color", "my messages"] },
   { id: "companion", group: "you", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "aboutMe", group: "you", labelKey: "settings.section.aboutMe", icon: UserRound, keywords: ["about", "me", "profile", "preferences", "personal", "name"] },
   { id: "myPhone", group: "you", labelKey: "settings.section.myPhone", icon: TabletSmartphone, keywords: ["phone", "iphone", "ios", "app", "mobile", "pair", "pairing", "qr", "my", "own"] },
   { id: "myTokens", group: "you", labelKey: "settings.section.myTokens", icon: KeyRound, keywords: ["token", "tokens", "mcp", "my", "own", "personal", "jabeja", "credentials"] },
   { id: "engines", group: "ai", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "model providers", "engines", "claude", "codex", "grok", "providers", "cli", "sign in", "subscription"] },
-  { id: "connections", group: "ai", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "api keys", "connections", "composio", "box", "xai", "mistral", "cerebras", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "opencode", "provider"] },
+  { id: "connections", group: "ai", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "api keys", "connections", "composio", "box", "xai", "mistral", "cerebras", "meta", "muse", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "opencode", "provider"] },
   { id: "decisionModel", group: "ai", labelKey: "settings.section.decisionModel", icon: Zap, keywords: ["decision", "jev", "typesafe", "routing", "auto", "rooms", "who answers"] },
   { id: "skills", group: "ai", labelKey: "settings.section.skills", icon: BookOpen, keywords: ["skills", "library", "assign", "agent skills", "skill md"] },
   { id: "workRules", group: "ai", labelKey: "settings.section.workRules", icon: ScrollText, keywords: ["rules", "work rules", "code agent", "instructions", "guidelines", "role", "kind"] },
   { id: "desktopWorkspaces", group: "computers", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "servers", "connect", "pair", "switch", "local"] },
   { id: "computer", group: "computers", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop", "browser", "built-in browser", "profiles", "browser profiles"] },
+  { id: "logins", group: "computers", labelKey: "settings.section.logins", icon: LockKeyhole, keywords: ["logins", "login", "passwords", "password", "sign in", "2fa", "one-time code", "totp", "fill_login", "1password", "vault"] },
   { id: "cloudAccount", group: "account", labelKey: "settings.section.cloudAccount", icon: User, keywords: ["cloud", "account", "personal", "sign in", "pro", "subscription", "billing"] },
   { id: "organization", group: "account", labelKey: "settings.section.organization", icon: Building2, keywords: ["company", "organization", "organisation", "sign in", "enroll", "managed", "models", "disconnect"] },
   { id: "usage", group: "account", labelKey: "settings.section.usage", icon: Coins, keywords: ["tokens", "cost", "billing", "plan", "quota", "remaining", "weekly", "5-hour", "model", "used"] },
@@ -123,7 +128,7 @@ export const SIMPLE_PAGES: SimpleSettingsPage[] = [
   { id: "general", labelKey: "settings.section.general", icon: User, sections: ["general", "aboutMe", "myPhone", "myTokens"] },
   { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, sections: ["appearance"] },
   { id: "ai", labelKey: "settings.group.ai", icon: Sparkles, sections: ["engines", "connections", "decisionModel", "workRules"] },
-  { id: "computers", labelKey: "settings.group.computers", icon: Monitor, sections: ["companion", "desktopWorkspaces", "computer"] },
+  { id: "computers", labelKey: "settings.group.computers", icon: Monitor, sections: ["companion", "desktopWorkspaces", "computer", "logins"] },
   { id: "account", labelKey: "settings.group.account", icon: CircleUser, sections: ["cloudAccount", "organization", "people", "activity"] },
 ];
 
@@ -318,7 +323,7 @@ function NewBotEffortRow() {
         disabled={saving}
         aria-label={t("settings.newBotEffort.aria")}
         onChange={(event) => void save(event.target.value)}
-        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
+        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
       >
         <option value="">{t("settings.newBotEffort.default")}</option>
         {EFFORT_LEVELS.map((level) => (
@@ -389,7 +394,7 @@ function ReplayTourRow() {
   const { dispatch } = useStore();
   return (
     <SettingRow title={t("settings.welcome.title")} subtitle={t("settings.welcome.subtitle")}>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         <ReplayAppTourButton />
         <button
           onClick={() => dispatch({ type: "toggleWelcome", open: true })}
@@ -418,7 +423,7 @@ function LanguageRow() {
         value={current}
         aria-label={t("settings.language.aria")}
         onChange={(event) => setLanguageChoice(event.target.value)}
-        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
+        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
       >
         <option value="">{t("settings.language.system")}</option>
         {localeChoices.map(({ code, label }) => (
@@ -457,12 +462,43 @@ function FontRow() {
           applyFont(id);
           setCurrent(id);
         }}
-        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
+        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
       >
         {FONT_IDS.map((id) => (
           <option key={id} value={id}>{t(`settings.font.${id}`)}</option>
         ))}
       </select>
+    </SettingRow>
+  );
+}
+
+function SendKeyRow() {
+  const sendKey = useSendKey();
+  return (
+    <SettingRow title={t("settings.sendKey.title")} subtitle={t("settings.sendKey.subtitle", { key: sendKeyLabel("mod-enter") })}>
+      <select
+        value={sendKey}
+        aria-label={t("settings.sendKey.title")}
+        onChange={(event) => setSendKey(parseSendKey(event.target.value))}
+        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
+      >
+        {SEND_KEYS.map((mode) => (
+          <option key={mode} value={mode}>{sendKeyLabel(mode)}</option>
+        ))}
+      </select>
+    </SettingRow>
+  );
+}
+
+function ColorUserBubblesRow() {
+  const enabled = useColorUserBubbles();
+  return (
+    <SettingRow title={t("settings.userBubbles.title")} subtitle={t("settings.userBubbles.subtitle")}>
+      <Switch
+        checked={enabled}
+        aria-label={t("settings.userBubbles.aria")}
+        onClick={() => setColorUserBubbles(!enabled)}
+      />
     </SettingRow>
   );
 }
@@ -517,7 +553,7 @@ function SidebarDensityRow() {
         value={density}
         aria-label={t("sidebar.density.chooseAria")}
         onChange={(event) => setSidebarDensity(parseSidebarDensity(event.target.value))}
-        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
+        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
       >
         {SIDEBAR_DENSITIES.map((option) => (
           <option key={option} value={option}>{t(SIDEBAR_DENSITY_LABEL_KEYS[option])}</option>
@@ -674,6 +710,7 @@ function ExperimentalFeaturesRow() {
         />
       </div>
       {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
+      <SkillReviewSettings />
     </Card>
   );
 }
@@ -708,27 +745,25 @@ function BuiltInBrowserRow() {
   };
 
   return (
-    <div data-built-in-browser className="rounded-xl bg-card px-4">
-      <SettingRow
-        title={t("settings.experimental.browserAria")}
-        subtitle={desktopBrowser
-          ? browser
-            ? t("settings.experimental.browserOn")
-            : t("settings.experimental.browserOff")
-          : browserBlockedOnWindows
-            ? t("settings.experimental.browserWindows")
-            : browserUnavailableReason(state.config)}
-        message={error ? <p role="alert" className="text-danger">{error}</p> : null}
-      >
-        <Switch
+    <SettingRow
+    title={t("settings.experimental.browserAria")}
+    subtitle={desktopBrowser
+        ? browser
+        ? t("settings.experimental.browserOn")
+        : t("settings.experimental.browserOff")
+        : browserBlockedOnWindows
+        ? t("settings.experimental.browserWindows")
+        : browserUnavailableReason(state.config)}
+    message={error ? <p role="alert" className="text-danger">{error}</p> : null}
+    >
+      <Switch
           checked={browser}
           aria-label={t("settings.experimental.browserAria")}
           disabled={saving || (!browser && !desktopBrowser && !browserInstallable)}
           onClick={() => void toggle(!browser)}
           className="disabled:cursor-wait disabled:opacity-50"
-        />
-      </SettingRow>
-    </div>
+      />
+    </SettingRow>
   );
 }
 
@@ -926,27 +961,29 @@ export function SettingsModal() {
             <Card title={t("settings.profile.title")} subtitle={t("settings.profile.sharedSubtitle")}>
               <ProfileFields />
             </Card>
-            <div>
-              <LanguageRow />
-              <NewBotEffortRow />
-              <AnalyticsRow />
-              <DefaultBotSettings />
-            </div>
+
+            <LanguageRow />
+            <NewBotEffortRow />
+            <AnalyticsRow />
+            <DefaultBotSettings />
+
             <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}>
               <RoomTurnTimeoutSettings />
             </Card>
+
             <Card title={t("settings.mcpCalls.title")} subtitle={t("settings.mcpCalls.subtitle")}>
               <McpCallTimeoutSettings />
             </Card>
             <ThreadConcurrencySettings />
+
             {!remoteActive && <RoutinesInConversationRow />}
+
             <AutomaticRecoverySettings />
             <ThreadCleanupSettings />
-            <div>
-              {!remoteActive && <ReplayTourRow />}
-              <UpdatesRow />
-              <DiagnosticsRow />
-            </div>
+
+            {!remoteActive && <ReplayTourRow />}
+            <UpdatesRow />
+            <DiagnosticsRow />
           </>
         );
       case "appearance":
@@ -956,18 +993,18 @@ export function SettingsModal() {
             <Card title={t("settings.skin.title")} subtitle={t("settings.skin.subtitle")}>
               <SkinPicker />
             </Card>
-            <div>
-              <FontRow />
-              <SidebarDensityRow />
-              {/* Simple mode keeps one conversation per bot, so the switch
-                  only means something in Advanced. */}
-              {advanced && <ShowThreadsRow />}
-              <PinnedCirclesRow />
-              <UniversalPinsRow />
-              <NotificationSoundsRow />
-              {!remoteActive && <ToolCallsRow />}
-              <RunCardRow />
-            </div>
+            <FontRow />
+            <ColorUserBubblesRow />
+            <SendKeyRow />
+            <SidebarDensityRow />
+            {/* Simple mode keeps one conversation per bot, so the switch
+                only means something in Advanced. */}
+            {advanced && <ShowThreadsRow />}
+            <PinnedCirclesRow />
+            <UniversalPinsRow />
+            <NotificationSoundsRow />
+            {!remoteActive && <ToolCallsRow />}
+            <RunCardRow />
           </>
         );
       case "experimental":
@@ -993,6 +1030,8 @@ export function SettingsModal() {
               <ApiKeyRow section="openrouter" testProvider="openrouter" />
               <ApiKeyRow section="mistral" testProvider="mistral" />
               <ApiKeyRow section="cerebras" testProvider="cerebras" />
+              <ApiKeyRow section="groq" testProvider="groq" />
+              <ApiKeyRow section="meta" testProvider="meta" />
               <details data-api-keys-other className="rounded-lg border border-hairline/40 bg-inset px-3 py-2" open={Boolean(state.config?.openaiCompat?.configured)}>
                 <summary className="cursor-pointer text-[13px] text-ink-secondary">{t("keys.other.title")}</summary>
                 <div className="mt-3 flex flex-col gap-4">
@@ -1055,6 +1094,8 @@ export function SettingsModal() {
         return advanced
           ? <><BuiltInBrowserRow /><BrowserProfilesRow /><LocalComputerSection /></>
           : <LocalComputerSection />;
+      case "logins":
+        return <LoginsSettings />;
       case "usage":
         return <UsageSection />;
       case "skills":
@@ -1080,7 +1121,7 @@ export function SettingsModal() {
   };
 
   const blockHeading = (labelKey: LocaleKey) => (
-    <h3 className="px-1 text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-secondary">{t(labelKey)}</h3>
+    <h3 className="px-4 text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-secondary">{t(labelKey)}</h3>
   );
 
   return (
@@ -1143,7 +1184,7 @@ export function SettingsModal() {
                     onClick={() => openSection(id)}
                     aria-current={section === id ? "page" : undefined}
                     className={cn(
-                      "flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors motion-reduce:transition-none",
+                      "cursor-pointer flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors motion-reduce:transition-none",
                       section === id ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/50 hover:text-ink",
                     )}
                   >
@@ -1165,7 +1206,7 @@ export function SettingsModal() {
                     onClick={() => openSection(page.sections[0]!)}
                     aria-current={current ? "page" : undefined}
                     className={cn(
-                      "flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors motion-reduce:transition-none",
+                      "cursor-pointer flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors motion-reduce:transition-none",
                       current ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/50 hover:text-ink",
                     )}
                   >
@@ -1179,7 +1220,7 @@ export function SettingsModal() {
         </nav>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 px-3 py-3 sm:px-5">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 px-3 py-3 sm:pl-9">
             {advanced ? (
               <select
                 aria-label={t("settings.title")}
@@ -1188,7 +1229,7 @@ export function SettingsModal() {
                   setQuery("");
                   openSection(event.target.value as AppSettingsSection);
                 }}
-                className="min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
+                className="cursor-pointer min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
               >
                 {SETTINGS_GROUPS.map((group) => {
                   const entries = availableSections.filter((entry) => entry.group === group.id);
@@ -1210,7 +1251,7 @@ export function SettingsModal() {
                   const page = simplePages.find((candidate) => candidate.id === event.target.value);
                   if (page) openSection(page.sections[0]!);
                 }}
-                className="min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
+                className="cursor-pointer min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
               >
                 {simplePages.map((page) => (
                   <option key={page.id} value={page.id}>{t(page.labelKey)}</option>
@@ -1224,7 +1265,7 @@ export function SettingsModal() {
               onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
               aria-label={t("settings.close")}
               title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
-              className="ui-icon-button shrink-0"
+              className="ui-icon-button cursor-pointer shrink-0"
             >
               <X size={18} />
             </button>

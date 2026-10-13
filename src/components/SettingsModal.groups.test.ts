@@ -105,7 +105,7 @@ describe("Settings rail groups", () => {
     expect(SETTINGS_GROUPS.map((group) => group.id)).toEqual(["you", "ai", "computers", "account"]);
     const ids = SECTIONS.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toHaveLength(21); // 16 + the shared Skills library (AI group) + fork: aboutMe, myPhone, myTokens, workRules
+    expect(ids).toHaveLength(22); // 16 + the shared Skills library (AI group) + Logins (Computers) + fork: aboutMe, myPhone, myTokens, workRules
     for (const entry of SECTIONS) expect(SETTINGS_GROUPS.map((group) => group.id)).toContain(entry.group);
   });
 
@@ -117,7 +117,7 @@ describe("Settings rail groups", () => {
     expect(rail(html)).toEqual({
       you: ["general", "appearance", "companion"],
       ai: ["engines", "connections", "decisionModel"],
-      computers: ["desktopWorkspaces", "computer"],
+      computers: ["desktopWorkspaces", "computer", "logins"],
       account: ["cloudAccount", "organization", "usage", "backups", "experimental"],
     });
     // the narrow-window picker carries the same groups
