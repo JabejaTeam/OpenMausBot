@@ -60,6 +60,13 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
   `/api/internal/mcp-mail` until the person sends or discards the email card. All approval
   modes, Full included; a routine with mail "send" passes. Tests: `server/mcp-mail*.test.ts`.
 
+## Environments behind the front door (omb-voordeur, bots.jabeja.be)
+- Settings → Account → Omgeving: `src/components/OmgevingSection.tsx`, data + switch in
+  `src/lib/voordeur-omgevingen.ts` (`GET /__voordeur/omgevingen`, `POST /__voordeur/wissel`, both
+  answered by the voordeur, not this server; without a voordeur the SPA page comes back and the item
+  stays hidden). Shown only with 2+ environments; the profile row then shows the current one.
+  Electron needs nothing: a saved server is an origin and the switch is a same-origin reload.
+
 ## Tests, build, deploy (all on THE BEAST)
 - `fork/beast.sh` (sourced, SSOT): host, one workspace per worktree `~/omb-fork/wt/<worktree>`
   (node_modules + tsbuildinfo survive), one detached container run that follows its log.

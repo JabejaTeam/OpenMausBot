@@ -105,7 +105,7 @@ describe("Settings rail groups", () => {
     expect(SETTINGS_GROUPS.map((group) => group.id)).toEqual(["you", "ai", "computers", "account"]);
     const ids = SECTIONS.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toHaveLength(22); // 16 + the shared Skills library (AI group) + Logins (Computers) + fork: aboutMe, myPhone, myTokens, workRules
+    expect(ids).toHaveLength(23); // 16 + the shared Skills library (AI group) + Logins (Computers) + fork: aboutMe, myPhone, myTokens, workRules, omgeving
     for (const entry of SECTIONS) expect(SETTINGS_GROUPS.map((group) => group.id)).toContain(entry.group);
   });
 

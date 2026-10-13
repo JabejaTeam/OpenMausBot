@@ -45,6 +45,7 @@ import { brand } from "../lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { FEEDBACK_URL, HELP_CENTER_URL, openExternalLink } from "@/lib/app-links";
+import { canSwitchOmgeving, useOmgevingen } from "@/lib/voordeur-omgevingen";
 import {
   cloudPhoneDestination,
   connectPhoneEntry,
@@ -374,6 +375,9 @@ export function SidebarProfileMenu({ iconOnly = false }: { iconOnly?: boolean } 
     return () => { active = false; };
   }, []);
   const profile = person ?? state.config?.profile;
+  // Fork: someone in 2+ environments behind the front door sees which one this is
+  const omgevingen = useOmgevingen();
+  const omgeving = canSwitchOmgeving(omgevingen) ? omgevingen.find((o) => o.actief)?.titel : undefined;
   const name = profileLabel(profile);
   const connectTo = (destination: PhoneDestination) => selectPhoneDestination(destination, { bridge: cloudPhone.bridge, dispatch });
   const remote = window.ogb?.remoteClient?.active === true;
@@ -439,7 +443,12 @@ export function SidebarProfileMenu({ iconOnly = false }: { iconOnly?: boolean } 
             )}
           >
             <InitialsAvatar initials={profileInitials(profile)} size={28} />
-            <span className="min-w-0 flex-1 truncate text-[14px] font-medium leading-5 text-ink">{name}</span>
+            {omgeving ? (
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-[14px] font-medium leading-5 text-ink">{name}</span>
+                <span data-omgeving-label className="truncate text-[12px] leading-tight text-ink-tertiary">{omgeving}</span>
+              </span>
+            ) : <span className="min-w-0 flex-1 truncate text-[14px] font-medium leading-5 text-ink">{name}</span>}
             {/* an update is the one thing worth interrupting the name for, so
               * it sits on the row rather than waiting to be found in the menu */}
             {noteworthy && (
