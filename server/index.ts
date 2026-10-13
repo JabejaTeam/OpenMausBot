@@ -602,7 +602,7 @@ import {
 } from "./request-auth.ts";
 import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope, type SessionRecord } from "./sessions.ts";
 import { ThreadStarters } from "./thread-starters.ts";
-import { PrivateThreads, ThreadShares, threadOwnerPerson, threadRole, type ThreadAccessRecords } from "./thread-access.ts";
+import { ThreadShares, threadFeeds, threadOwnerPerson, threadRole, type ThreadAccessRecords } from "./thread-access.ts";
 import { createForkThreadRoutes } from "./routes/fork-threads.ts";
 import { createForkNavigationRoutes } from "./routes/fork-navigation.ts";
 import { createForkDictationRoutes } from "./routes/fork-dictation.ts";
@@ -816,12 +816,10 @@ if (CLOUD_HOME && Object.keys(CLOUD_SECRETS).length === 0) {
 }
 // Who each thread is for, when a signed-in person can be named (server-private).
 const threadStarters = new ThreadStarters(join(DATA_DIR, "thread-starters.json"));
-// Fork: which threads their person marked private, and whom they shared
-// those with (server/thread-access.ts).
+// Fork: whom each conversation's person shared it with (server/thread-access.ts).
 const threadShares = new ThreadShares(join(DATA_DIR, "thread-shares.json"));
 // Fork: where each person was last, per agent (server/person-navigation.ts).
 const personNavigation = new PersonNavigation(join(DATA_DIR, "person-navigation.json"));
-const privateThreadIds = new PrivateThreads(join(DATA_DIR, "thread-private.json"));
 // Fork: iPhone pushes while the app is closed (server/apns.ts); off without OMB_APNS_* env.
 const pushDevices = new PushDevices(join(DATA_DIR, "push-devices.json"));
 const apnsConfig = apnsConfigFromEnv();
@@ -836,15 +834,25 @@ const threadAccessRecords: ThreadAccessRecords = {
   starter: (threadId) => threadStarters.get(threadId),
   shares: (threadId) => threadShares.get(threadId),
   owner: () => ownerPersonKey(),
-  isPrivate: (threadId) => privateThreadIds.has(threadId),
 };
-/** Fork: each thread belongs to its person (their channel; the team sees it
- * unless they mark it private) on a self-hosted workspace several people
- * share, when the deployment opts in with OMB_PRIVATE_THREADS=1 (beast:
- * ~/omb-services/omb-server.env). A Cloud home keeps its own owner/guest rules. */
-const PRIVATE_THREADS = process.env.OMB_PRIVATE_THREADS === "1";
+/** Fork: every conversation is private to its person (+ whom they share it
+ * with, + admins) on a self-hosted workspace several people share
+ * (server/thread-access.ts). Always on there: no setting widens it
+ * (OMB_PRIVATE_THREADS is gone; a leftover =0 does nothing). A one-person
+ * install and a Cloud home (its own owner/guest rules) are unaffected. The
+ * only exception is the upstream e2e fixtures written for team-wide threads,
+ * which start their server with OMB_TEST_TEAM_THREADS=1 — a test switch,
+ * shouted about at startup, never set on a deployment. */
+const TEAM_THREADS_TEST_FIXTURE = process.env.OMB_TEST_TEAM_THREADS === "1";
+if (TEAM_THREADS_TEST_FIXTURE) console.warn("OMB_TEST_TEAM_THREADS=1: conversations are NOT private on this server (test fixture switch; never set it on a deployment)");
 function privateThreads(): boolean {
-  return PRIVATE_THREADS && !CLOUD_HOME && sharedMembership();
+  return !TEAM_THREADS_TEST_FIXTURE && !CLOUD_HOME && sharedMembership();
+}
+/** Fork: which threads may feed one (a brief, recall, search, a listing):
+ * only those everyone it is for may open themselves (threadFeeds). */
+function feedsThread(into: string): (source: string) => boolean {
+  if (!privateThreads()) return () => true;
+  return (source) => threadFeeds(source, into, threadAccessRecords);
 }
 const commandAllowlist = new CommandAllowlistStore(join(DATA_DIR, "command-allowlist.json"));
 const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
@@ -983,7 +991,7 @@ function personKey(session: Pick<SessionRecord, "id" | "email"> & { scopes?: rea
   if (session.email) return personKeyForEmail(session.email);
   // Fork: with private conversations, an admin device paired without an
   // email (the owner's phone) is the install owner, so it keeps their threads.
-  const owner = PRIVATE_THREADS && session.scopes?.includes("admin") ? ownerPersonKey() : undefined;
+  const owner = privateThreads() && session.scopes?.includes("admin") ? ownerPersonKey() : undefined;
   return owner ?? personKeyFor(`session:${session.id}`);
 }
 
@@ -1449,10 +1457,13 @@ function parentThreadModel(botId: string, parentThreadId: string): { modelSelect
 /** On a Cloud home: the conversation that work a guest-driven turn hands a
  * teammate (delegate_bot, ask_bot) runs in. It is a fresh one of the guest's
  * own on the teammate, never the owner's conversation with it, so the work,
- * and anything that later continues there, stays confined. Undefined when
- * the source is not guest-driven, null when it could not be made. */
+ * and anything that later continues there, stays confined. Fork: the same on
+ * a workspace with private conversations (privateThreads), where the
+ * teammate's open thread is somebody's own conversation: the work gets a
+ * fresh thread of the person it is for (openerFrom). Undefined when neither
+ * applies, null when it could not be made. */
 function guestWorkThread(from: BotRecord, target: BotRecord, fromThreadId: string, brief: string): string | undefined | null {
-  if (!CLOUD_HOME || !cloudGuestDriven(fromThreadId)) return undefined;
+  if (!privateThreads() && (!CLOUD_HOME || !cloudGuestDriven(fromThreadId))) return undefined;
   const title = brief.replace(/\s+/g, " ").trim().slice(0, 60) || `From ${from.name}`;
   const task = store.createTask(target.id, title, false, undefined, { botId: from.id, name: from.name, at: Date.now() });
   if (!task) return null;
@@ -1672,7 +1683,7 @@ function visibleTo(viewer: Viewer): VisibleSet {
   if (!set) {
     const person = viewer.kind === "all" ? undefined : viewer.person;
     set = new VisibleSet(store.bots, store.groups, viewer, threadOwner,
-      privateThreads() ? (threadId) => threadRole(person, threadId, threadAccessRecords) : undefined,
+      privateThreads() ? (threadId) => threadRole(person, threadId, threadAccessRecords, viewer.kind === "admin") : undefined,
       (threadId) => threadOwnerPerson(threadId, threadAccessRecords),
       person ? (botId) => personNavigation.lastThread(person, botId) : undefined);
     if (visibleSets.size >= 1_000) visibleSets.clear();
@@ -1788,7 +1799,9 @@ function personViewer(person: string): Viewer {
 function recentConversationsBrief(bot: BotRecord, threadId: string, person: string | undefined): string {
   const include = recentWorkFilter().include;
   const access = person ? visibleTo(personViewer(person)) : undefined;
-  const canSee = (id: string) => (!include || include(id)) && (!access || access.thread(id));
+  // Fork: never someone else's conversation, also for an admin or a turn no person started.
+  const feeds = feedsThread(threadId);
+  const canSee = (id: string) => (!include || include(id)) && (!access || access.thread(id)) && feeds(id);
   return recentConversationsPrompt(recentConversations(bot, store.bots, recentWorkSources(bot), {
     widen: Boolean(person), canSee, currentThreadId: threadId, userName: cfg.profile?.name?.trim() || "User",
   }));
@@ -1814,6 +1827,8 @@ function autoRecallPrompt(bot: BotRecord, threadId: string, message: string, opt
       // On a Cloud home a conversation anyone else wrote in never feeds
       // another: its words would reach the owner's turns (and a lent Mac).
       .filter((id) => id !== threadId && (!CLOUD_HOME || cloudOwnerOnlyThread(id)))
+      // Fork: only conversations everyone in this one may open themselves.
+      .filter(feedsThread(threadId))
     : [];
   try {
     const recalled = buildRecall({
@@ -11983,13 +11998,18 @@ routines = new RoutineManager({
     // On a Cloud home a routine reports only where its writer may write: a
     // guest's (or nobody's) keeps a results conversation opened as theirs.
     const opener = CLOUD_HOME ? routineOpener(routine.id) : undefined;
+    // Fork: with private conversations a routine reports only into a
+    // conversation of whoever it works for (routineRunPerson), else into a
+    // results conversation of theirs.
+    const person = privateThreads() ? routineRunPerson(routines?.makerOf(routine.id) ?? undefined) : undefined;
+    const theirs = (threadId: string) => !person || threadOwnerPerson(threadId, threadAccessRecords) === person;
     const main = bot && !bot.hidden ? botMainThread(bot.id) : undefined;
-    const mainAllowed = main && (!CLOUD_HOME || (opener === CLOUD_OWNER_KEY && !cloudGuestOpened(main)));
-    const keepChosen = chosen && !chosen.routineRunId && !(mainAllowed && legacyResultsThread(routine.name, chosen));
+    const mainAllowed = main && (!CLOUD_HOME || (opener === CLOUD_OWNER_KEY && !cloudGuestOpened(main))) && theirs(main);
+    const keepChosen = chosen && !chosen.routineRunId && theirs(chosen.threadId) && !(mainAllowed && legacyResultsThread(routine.name, chosen));
     if (keepChosen) return chosen.threadId;
-    if (mainAllowed || !CLOUD_HOME) return main;
+    if (mainAllowed || (!CLOUD_HOME && !person)) return main;
     const threadId = store.createTask(routine.botId, `${routine.name} · Results`, false)?.threadId;
-    if (threadId) threadStarters.set(threadId, opener!);
+    if (threadId) threadStarters.set(threadId, opener ?? person);
     return threadId;
   },
   discardResultsThread: (botId, threadId) => {
@@ -13824,7 +13844,10 @@ async function runGroupMemberTurn(
   // brief can carry a private chat into the room; as with session_search
   // (#754) the room is told, once per source thread, rather than the
   // crossing being blocked.
-  const recentLines = recentWork(recentWorkSources(bot), bot, { userName, currentThreadId: threadId, ...recentWorkFilter() });
+  const roomFeeds = feedsThread(threadId);
+  const roomInclude = recentWorkFilter().include;
+  const recentLines = recentWork(recentWorkSources(bot), bot, { userName, currentThreadId: threadId,
+    include: (id) => (!roomInclude || roomInclude(id)) && roomFeeds(id) });
   const roomComputerPromptKind = resolveComputerPromptKind({
     kind: roomTeamComputer || roomComputerKind === "box" ? "box" : roomVmTarget ? "vm" : roomComputerKind,
     vmPrivate: localVmMode(cfg) === "per-bot",
@@ -16726,15 +16749,13 @@ ROUTES.push(createForkNavigationRoutes({
     return visible.bot(botId) && visible.thread(threadId);
   },
 }));
-// Fork: marking a conversation private and sharing it (server/routes/fork-threads.ts).
+// Fork: sharing a conversation with specific people (server/routes/fork-threads.ts).
 ROUTES.push(createForkThreadRoutes({
   personKey,
   conversationExists: (threadId) => Boolean(store.botByThread(threadId) || store.groupByThread(threadId)),
   threadOwner: (threadId) => threadOwnerPerson(threadId, threadAccessRecords),
   shares: (threadId) => threadShares.get(threadId),
   setShares: (threadId, people) => threadShares.set(threadId, people),
-  isPrivate: (threadId) => privateThreadIds.has(threadId),
-  setPrivate: (threadId, value) => privateThreadIds.set(threadId, value),
   workspaceEmails: () => [...signInAllowList().admins, ...signInAllowList().members].filter((entry) => !entry.startsWith("@")),
   changed: (threadId) => {
     forgetVisibility();
@@ -17832,7 +17853,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // On a Cloud home a turn that may use the lent Mac sees only the
         // conversations the owner alone opened and wrote in: a title is words
         // too (cloudLendingView).
-        const shown = cloudLendingView(internalCapability) ? cloudOwnerOnlyThread : () => true;
+        // Fork: and never another person's conversation (threadFeeds).
+        const lending = cloudLendingView(internalCapability);
+        const feeds = feedsThread(fromThreadId);
+        const shown = (threadId: string) => (!lending || cloudOwnerOnlyThread(threadId)) && feeds(threadId);
         for (const task of store.tasks(from.id)) {
           if (!shown(task.threadId)) continue;
           rows.push({
@@ -17867,7 +17891,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const threadId = closeMatch[1]!;
         const owner = [from, ...reachablePeers(store.bots, from)].find((bot) => store.taskByThread(bot.id, threadId));
-        const task = owner ? store.taskByThread(owner.id, threadId) : undefined;
+        const task = owner && feedsThread(fromThreadId)(threadId) ? store.taskByThread(owner.id, threadId) : undefined;
         if (!owner || !task) return json(res, 404, { error: "no such thread — call list_threads for the ones you can see" });
         if (owner.id !== from.id && task.openedBy?.botId !== from.id) {
           return json(res, 403, { error: "that thread is not yours to close — only the bot that opened it, or its own bot, can" });
@@ -18336,7 +18360,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const ownThreads = [...new Set([from.threadId, ...(from.tasks ?? []).map((task) => task.threadId), ...roomByThread.keys()])]
           // On a Cloud home a turn that may use the lent Mac searches only the
           // conversations the owner alone opened and wrote in.
-          .filter(cloudLendingView(internalCapability) ? cloudOwnerOnlyThread : () => true);
+          .filter(cloudLendingView(internalCapability) ? cloudOwnerOnlyThread : () => true)
+          // Fork: never another person's conversation (thread-access.ts threadFeeds).
+          .filter(feedsThread(fromThreadId));
         // A room is the only place a recall can be a disclosure, and only a
         // private chat is one: in a 1:1 the user already owns every thread
         // the bot can reach, and a room's lines were said in the open.
@@ -18374,7 +18400,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const messageId = String(url.searchParams.get("messageId") ?? "").trim();
         if (!threadId || !messageId) return json(res, 400, { error: "threadId and messageId are required" });
         const own = (threadId === from.threadId || Boolean(store.taskByThread(from.id, threadId))) &&
-          (!cloudLendingView(internalCapability) || cloudOwnerOnlyThread(threadId));
+          (!cloudLendingView(internalCapability) || cloudOwnerOnlyThread(threadId)) && feedsThread(fromThreadId)(threadId);
         const message = own ? readMessageText(threadId, messageId) : null;
         if (!message) return json(res, 404, { error: "no such message in your conversations" });
         const readInRoom = Boolean(store.groupByThread(fromThreadId));
@@ -18578,6 +18604,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           // A guest's request never folds into a turn running in the
           // owner's conversation; it waits for a confined one of its own.
           if (cloudGuestDriven(fromThreadId)) return null;
+          // Fork: nor into somebody's own conversation (privateThreads).
+          if (privateThreads()) return null;
           // Busy elsewhere (room turn, sibling thread): the thread this ask
           // targets is not the running one, so there is nothing to fold
           // into here — the queue lane keeps it.
@@ -19074,8 +19102,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               // another card gets its own thread and runs beside it.
               const fresh = kindStartsFreshPerAssignment(store.bot(target.botId)?.kind);
               const topic = fresh && !destination ? workTopicOf(parsed.data.message) : undefined;
+              // Fork: with private conversations a card's thread is per person too:
+              // one opened for someone else stays theirs (threadOwnerPerson).
+              const cardPerson = topic && privateThreads() ? openerFrom(address.threadId) ?? ownerPersonKey() : undefined;
               const workThread = destination ? undefined : topic
-                ? store.workThreadOn(target.botId, internalSender.id, topic)
+                ? store.workThreadOn(target.botId, internalSender.id, topic,
+                  cardPerson ? (threadId) => threadOwnerPerson(threadId, threadAccessRecords) === cardPerson : undefined)
                 : store.workThread(target.botId, internalSender.id, address.threadId);
               // Fork: parallel=true is a separate assignment, so a code agent
               // starts it in its own thread beside the one still running. Any

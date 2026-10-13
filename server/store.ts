@@ -2720,10 +2720,11 @@ export class Store {
   }
 
   /** Fork: the thread `fromBotId` opened on this bot for one card, from any
-   * of its conversations (the newest when there are several). */
-  workThreadOn(botId: string, fromBotId: string, topic: string): TaskRecord | undefined {
+   * of its conversations (the newest when there are several); `mine` narrows
+   * it to the ones of one person. */
+  workThreadOn(botId: string, fromBotId: string, topic: string, mine?: (threadId: string) => boolean): TaskRecord | undefined {
     return this.tasks(botId).find((t) => t.openedBy?.kind === "work" && t.openedBy.botId === fromBotId &&
-      t.workTopic === topic && t.archivedAt === undefined);
+      t.workTopic === topic && t.archivedAt === undefined && (!mine || mine(t.threadId)));
   }
 
   /** Fork: start `threadId` as a copy of `from`'s Claude session (the driver

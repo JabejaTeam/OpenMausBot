@@ -1275,7 +1275,7 @@
   "chat.share.team": "Zichtbaar voor het team",
   "chat.share.privateToggle": "Privé",
   "chat.share.teamHint": "Iedereen in het team kan hier lezen en schrijven.",
-  "chat.share.ownedBy": "Gesprek van {name}, zichtbaar voor het team",
+  "chat.share.ownedBy": "Gesprek van {name}",
   "chat.channel.mine": "Mijn gesprekken",
   "chat.channel.team": "Team",
   "chat.claudeUpdate.aria": "Claude Code bijwerken",

@@ -25,20 +25,30 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
 - Chief-only relay of questions: `shared/relay-question.ts`, `relay_question` route.
 
 ## Conversations per person (who may see/write a thread)
-- The rule (SSOT): `server/thread-access.ts` — a thread is its starter's (`thread-starters.json`,
-  else the install owner): their channel. The whole team sees and writes in it unless its person
-  marked it private (`thread-private.json`); a private one is open only to whom they shared it
-  with (`thread-shares.json`). On only with `OMB_PRIVATE_THREADS=1` and a shared sign-in list;
-  admins get no exception, loopback sees all.
+- The rule (SSOT): `server/thread-access.ts` — every conversation is private: it is its starter's
+  (`thread-starters.json`; work a bot opened for someone is that person's, via `openerFrom`; a routine
+  run is its maker's; else the install owner = admins[0]). Visible to that person, the people they
+  shared it with by name (`thread-shares.json`) and admins (role `team`). Always on when the sign-in
+  list has members (`privateThreads()` in index.ts, no env; `OMB_TEST_TEAM_THREADS=1` is only for
+  upstream e2e fixtures written for team-wide threads). Loopback sees all. `thread-private.json`
+  (old Privé flags) is no longer read.
+- What may flow from one conversation into another (Recent work brief, auto-recall, session_search,
+  session_read, list_threads, close_thread, room recent work): `threadFeeds` via `feedsThread(into)` —
+  only threads everyone the target thread is for may open themselves; the admin view does not count.
+- Work for a person never lands in someone else's thread: ask_bot/delegate_bot open a fresh thread of
+  theirs (`guestWorkThread`), a code card's thread is per person (`store.workThreadOn(…, mine)`),
+  a routine reports into its person's thread (`resolveResultsThread`).
 - Applied once, in `server/bot-visibility.ts`: `VisibleSet.threadRole` narrows `.thread()`, so the
   request gate, search, attachments and live frames follow; `ownThreads` marks each task with
   `access` (own/shared/team) and `person`, and opens the viewer's latest own thread (GET /api/bots).
 - Gate in `handleRequest` (index.ts, "names only threads it may open"): path task id, `?threadId`,
   and every JSON body's `threadId` via `onParsedBody` (`server/harness/http.ts`).
-- Private/share routes: `server/routes/fork-threads.ts`; UI `src/components/ThreadShare.tsx`
-  (lock in the chat header), channel picker `src/components/ThreadChannel.tsx` (filters
-  `BotThreadList`); composer gating `src/lib/cloud-guest.ts` (`privateThreads` from /api/auth/session).
-- Test: `server/private-threads.e2e.test.ts`.
+- Share routes: `server/routes/fork-threads.ts` (`PUT {people:[…]}`, only the thread's person);
+  UI `src/components/ThreadShare.tsx` (lock/people icon in the chat header), channel picker
+  `src/components/ThreadChannel.tsx` (filters `BotThreadList`); composer gating `src/lib/cloud-guest.ts`
+  (`privateThreads` from /api/auth/session).
+- Tests: `server/thread-access.test.ts`, `server/private-threads.e2e.test.ts`,
+  `server/private-threads-delegation.e2e.test.ts`.
 
 ## Fork routes and people
 - New fork HTTP routes go in `server/routes/fork-people.ts` (route table), not inline in index.ts.

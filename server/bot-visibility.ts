@@ -26,11 +26,10 @@
 // other's thread, so a teammate with a different audience could surface a
 // restricted bot's answers to people who cannot see it.
 //
-// Fork: on a workspace several people share, a thread its person marked
-// private is hidden as well (server/thread-access.ts): a session also needs
-// the thread to be theirs, shared with them, or not private, admins included.
-// VisibleSet carries that rule as `threadRole`, so the same checks below
-// cover it.
+// Fork: on a workspace several people share, every conversation is private
+// (server/thread-access.ts): a session also needs the thread to be theirs or
+// shared with them by name; admins see all. VisibleSet carries that rule as
+// `threadRole`, so the same checks below cover it.
 //
 // Pure: no store, no server. server/index.ts supplies the records.
 import { z } from "zod";
@@ -222,8 +221,8 @@ export class VisibleSet {
   private readonly ownerOf: (threadId: string) => ThreadOwner | undefined;
   private threads: Map<string, ThreadOwner> | null = null;
   private readonly botMemo = new Map<string, boolean>();
-  /** Fork: how this viewer reaches a thread (own or shared), when threads
-   * are private; undefined otherwise. */
+  /** Fork: how this viewer reaches a thread (own, shared, or — admins —
+   * someone else's), when threads are private; undefined otherwise. */
   readonly threadRole?: (threadId: string) => ThreadRole | undefined;
   /** Fork: the person a thread belongs to (its channel), alongside threadRole. */
   readonly threadPerson?: (threadId: string) => string | undefined;
@@ -429,7 +428,7 @@ export function ownThreads<T extends object>(record: T, visible: VisibleSet, pag
     : undefined;
   if (tasks) {
     out.tasks = tasks;
-    // The bot's dot follows the viewer's own conversations, not the team's.
+    // The bot's dot follows the viewer's own conversations, not others' (admins).
     if ("unread" in out) out.unread = tasks.some((task) => Boolean(task.unread) && !task.routineRunId && task.access !== "team");
   }
   const current = typeof out.threadId === "string" ? out.threadId : "";
