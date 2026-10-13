@@ -338,16 +338,17 @@ describe("encrypted full workspace backups", () => {
     }
   });
 
-  it("leaves the destination's session open-marker in place, so a crash before a restore still ends account sign-ins", async () => {
+  it("leaves the destination's session open-marker in place, so a removal it lost before a restore still ends account sign-ins", async () => {
     const source = directory(), target = directory();
     json(join(source, "bots.json"), [{ id: "bot" }]);
     // The source is running: its marker exists, and is never exported.
     writeFileSync(join(source, "sessions.json.open"), "Session registry is open.\n");
     const exported = await createWorkspaceBackup(source, { password: PASSWORD });
-    // The destination crashed with an account session saved.
+    // The destination crashed with an account session saved, after a removal
+    // it could not write (Jabeja fork: only that ends account sign-ins).
     const sessions = new SessionRegistry({ file: join(target, "sessions.json") });
     sessions.issue({ label: "Member", scopes: ["client"], userId: "user-1" });
-    expect(existsSync(join(target, "sessions.json.open"))).toBe(true);
+    writeFileSync(join(target, "sessions.json.open"), "Session registry unsaved.\n");
     const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
     expect(readJson(join(target, ".backups", staged.id, "staged", "manifest.json")).entries.map((entry: { path: string }) => entry.path)).not.toContain("sessions.json.open");
     commitPendingWorkspaceRestore(target, staged.id);

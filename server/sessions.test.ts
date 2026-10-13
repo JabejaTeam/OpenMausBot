@@ -446,15 +446,91 @@ describe("sessions", () => {
     cleanRestart.close();
   });
 
-  it("drops account and portal sessions but preserves paired phones after any unclean restart", () => {
+  it("keeps account, portal and paired sessions after a crash that lost nothing (Jabeja fork)", () => {
     registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => ["client"], portalMembership: true });
     const paired = pair();
     const account = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
     const portal = registry.issuePortal({ email: "person@example.test", grant: "g".repeat(43), scopes: ["client"] });
+    // No close(): the process died and the open marker is still there.
     const restarted = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => ["client"], portalMembership: true });
-    expect(restarted.authenticate(account.token)).toBeNull();
-    expect(restarted.authenticate(portal.token)).toBeNull();
+    expect(restarted.authenticate(account.token)?.id).toBe(account.session.id);
+    expect(restarted.authenticate(portal.token)?.id).toBe(portal.session.id);
     expect(restarted.authenticate(paired.token)?.id).toBe(paired.session.id);
+    restarted.close();
+  });
+
+  it("still rechecks restored email sessions against the sign-in list after a crash", () => {
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => ["client"] });
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    const restarted = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => null });
+    expect(restarted.authenticate(email.token)).toBeNull();
+    restarted.close();
+  });
+
+  it("drops account sessions after a crash when a revoke could not be saved", () => {
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => ["client"] });
+    const paired = pair();
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    const other = registry.issue({ label: "phone", email: "other@example.test", scopes: ["client"] });
+    const writes = vi.spyOn(atomic, "writeFileAtomic").mockImplementation(() => { throw new Error("ENOSPC"); });
+    expect(() => registry.revoke(email.session.id)).toThrow("ENOSPC");
+    writes.mockRestore();
+    expect(readFileSync(`${file()}.open`, "utf8")).toBe("Session registry unsaved.\n");
+    const restarted = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => ["client"] });
+    expect(restarted.authenticate(email.token)).toBeNull();
+    expect(restarted.authenticate(other.token)).toBeNull();
+    expect(restarted.authenticate(paired.token)?.id).toBe(paired.session.id);
+    restarted.close();
+  });
+
+  it("keeps sessions after a crash again once a lost removal has been saved", () => {
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => ["client"] });
+    const gone = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    const kept = registry.issue({ label: "phone", email: "other@example.test", scopes: ["client"] });
+    const writes = vi.spyOn(atomic, "writeFileAtomic").mockImplementation(() => { throw new Error("ENOSPC"); });
+    expect(() => registry.revoke(gone.session.id)).toThrow("ENOSPC");
+    writes.mockRestore();
+    clock += 61_000; // the next last-seen write saves the whole set, the removal included
+    expect(registry.authenticate(kept.token)?.id).toBe(kept.session.id);
+    expect(readFileSync(`${file()}.open`, "utf8")).toBe("Session registry is open.\n");
+    const restarted = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => ["client"] });
+    expect(restarted.authenticate(gone.token)).toBeNull();
+    expect(restarted.authenticate(kept.token)?.id).toBe(kept.session.id);
+    restarted.close();
+  });
+
+  it("deletes the session file when neither a removal nor the marker can be written", () => {
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => ["client"] });
+    const paired = pair();
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    rmSync(`${file()}.open`);
+    mkdirSync(`${file()}.open`); // the in-place marker write now fails too
+    const writes = vi.spyOn(atomic, "writeFileAtomic").mockImplementation(() => { throw new Error("ENOSPC"); });
+    expect(() => registry.revoke(email.session.id)).toThrow("ENOSPC");
+    writes.mockRestore();
+    expect(existsSync(file())).toBe(false);
+    rmSync(`${file()}.open`, { recursive: true });
+    const restarted = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => ["client"] });
+    expect(restarted.authenticate(email.token)).toBeNull();
+    expect(restarted.authenticate(paired.token)).toBeNull();
+    restarted.close();
+  });
+
+  it("leaves the saved sessions alone when a revoke arrives after close", () => {
+    const paired = pair();
+    registry.close();
+    expect(() => registry.revoke(paired.session.id)).toThrow("Session registry is closed.");
+    const restarted = new SessionRegistry({ file: file(), now: () => clock });
+    expect(restarted.authenticate(paired.token)?.id).toBe(paired.session.id);
+    restarted.close();
+  });
+
+  it("treats an unreadable marker as a lost removal", () => {
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => ["client"] });
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    writeFileSync(`${file()}.open`, "garbage");
+    const restarted = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => ["client"] });
+    expect(restarted.authenticate(email.token)).toBeNull();
     restarted.close();
   });
 

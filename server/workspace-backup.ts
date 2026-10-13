@@ -99,8 +99,8 @@ function preserved(name: string): boolean {
 const SNAPSHOT_DATABASES: Record<string, string> = { "messages.db": "messages-snapshot.db", "runtime.db": "runtime-snapshot.db" };
 const LIVE_DATABASE_SIDECARS = new Set(Object.keys(SNAPSHOT_DATABASES).flatMap((name) => [`${name}-wal`, `${name}-shm`]));
 /** Left where it is by a restore. The session registry's open marker is this
- * machine's own (never exported or installed): a crash before the restore
- * still costs account sign-ins, as it would have without one. */
+ * machine's own (never exported or installed): a lost removal it records
+ * before the restore still costs account sign-ins, as it would have without one. */
 function keptInPlace(name: string): boolean {
   return preserved(name) || name.toLowerCase() === "sessions.json.open";
 }

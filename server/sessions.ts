@@ -9,7 +9,7 @@
 // endpoint, because EventSource cannot set headers. Failed exchanges are
 // counted per source: five in a minute lock that source out for ten.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
@@ -62,6 +62,14 @@ export const EXCHANGE_REPLAY_MS = 60_000;
 /** Outstanding stream tickets per session; issuing more retires the oldest. */
 export const MAX_STREAM_TICKETS_PER_SESSION = 5;
 const LAST_SEEN_WRITE_INTERVAL_MS = 60_000;
+/** The open marker's two states (Jabeja fork). Open: every change so far is
+ * on disk, so a crash loses nothing and all sessions come back. Unsaved: a
+ * removal (logout, revocation, lost membership) could not be written, so the
+ * file may still hold a bearer that must stay dead — account sessions are
+ * dropped at the next start. Same length, so one overwrites the other in
+ * place without needing a new disk block, which still works on a full disk. */
+const MARKER_OPEN = "Session registry is open.\n";
+const MARKER_UNSAVED = "Session registry unsaved.\n";
 
 const scopeSchema = z.enum(["admin", "client"]);
 
@@ -230,6 +238,8 @@ export class SessionRegistry {
   private readonly now: () => number;
   private readonly options: SessionStoreOptions;
   private readonly openMarker: string;
+  /** A removal is in memory but not on disk (the marker says so too). */
+  private unsaved = false;
   private closed = false;
   /** Set on an OMB Cloud home (requireAdmin): only admin scope, anywhere. */
   private adminOnly: string | null = null;
@@ -240,18 +250,32 @@ export class SessionRegistry {
     this.options = options;
     this.now = options.now ?? Date.now;
     this.openMarker = `${options.file}.open`;
-    const unclean = existsSync(this.openMarker);
+    const removalLost = this.removalLost();
     try {
       mkdirSync(dirname(options.file), { recursive: true, mode: 0o700 });
-      // Establish the guard before accepting any persisted bearer. Even if
-      // every subsequent write fails, an unclean restart will see this marker.
-      writeFileAtomic(this.openMarker, "Session registry is open.\n", { mode: 0o600 });
+      // Establish the guard before accepting any persisted bearer: a removal
+      // that later fails to save can then always be recorded in place.
+      writeFileAtomic(this.openMarker, MARKER_OPEN, { mode: 0o600 });
       this.syncDirectory();
     } catch {
       throw new Error("Could not establish safe session storage.");
     }
-    this.load(!unclean);
+    // A crash alone keeps every session: each change was fsynced before it
+    // took effect, and email sessions are rechecked against the sign-in list
+    // right below. Only a recorded lost removal drops account sessions.
+    this.load(!removalLost);
     this.revalidateEmailSessions();
+  }
+
+  /** Whether the previous run recorded a removal it could not save. A
+   * marker that cannot be read counts as one: fail closed. */
+  private removalLost(): boolean {
+    if (!existsSync(this.openMarker)) return false;
+    try {
+      return readFileSync(this.openMarker, "utf8") !== MARKER_OPEN;
+    } catch {
+      return true;
+    }
   }
 
   private load(restoreAccounts: boolean): void {
@@ -281,11 +305,48 @@ export class SessionRegistry {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     writeFileAtomic(this.options.file, JSON.stringify({ version: 1, sessions: this.sessions }, null, 2) + "\n", { mode: 0o600 });
     this.syncDirectory();
+    if (this.unsaved) {
+      // Everything is on disk again, so a crash no longer has to cost sign-ins.
+      try {
+        this.writeMarker(MARKER_OPEN);
+        this.unsaved = false;
+      } catch {}
+    }
   }
 
-  /** Call after HTTP/stream shutdown. A failed close leaves the open marker,
-   * so account sessions require fresh sign-in after restart. Paired devices
-   * remain durable. Never remove the marker before the reduced set is saved. */
+  /** persist() after removing sessions. If that fails, the old file still
+   * holds the removed bearers: record it in the marker, or, if even that
+   * cannot be written, delete the file so nothing is restored from it. */
+  private persistRemoval(): void {
+    if (this.closed) throw new Error("Session registry is closed.");
+    try {
+      this.persist();
+    } catch (error) {
+      this.unsaved = true;
+      try {
+        this.writeMarker(MARKER_UNSAVED);
+      } catch {
+        try { unlinkSync(this.options.file); } catch {}
+      }
+      throw error;
+    }
+  }
+
+  /** Overwrites the marker's bytes in place (both states are equally long). */
+  private writeMarker(state: string): void {
+    const fd = openSync(this.openMarker, "r+");
+    try {
+      writeSync(fd, state, 0);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  }
+
+  /** Call after HTTP/stream shutdown. A failed close leaves the open marker;
+   * account sessions survive that unless it records a lost removal. Paired
+   * devices remain durable. Never remove the marker before the reduced set
+   * is saved. */
   close(): void {
     if (this.closed) return;
     try {
@@ -558,11 +619,11 @@ export class SessionRegistry {
     this.sessions = this.sessions.filter((session) => !ids.has(session.id));
     for (const session of revoked) this.forget(session.id);
     try {
-      this.persist();
+      this.persistRemoval();
     } catch {
-      // Revocation stays effective in memory and streams close. The boot
-      // marker prevents old account bearers from reviving after an unclean
-      // restart, even if membership is later restored and all writes failed.
+      // Revocation stays effective in memory and streams close. The marker
+      // now records the lost removal, so old account bearers do not revive
+      // after a restart, even if membership is later restored.
       console.error("Could not persist email session revocation.");
     }
   }
@@ -620,7 +681,7 @@ export class SessionRegistry {
     this.sessions = this.sessions.filter((s) => s.id !== id);
     if (this.sessions.length === before) return false;
     this.forget(id);
-    this.persist();
+    this.persistRemoval();
     return true;
   }
 
