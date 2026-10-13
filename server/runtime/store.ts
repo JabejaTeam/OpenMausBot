@@ -104,6 +104,9 @@ export interface RuntimeStore {
   /** The root of this id's tree. */
   root(id: string): Assignment | undefined;
   all(filter?: { rootId?: string; nonTerminal?: boolean; ownerThreadId?: string }): Assignment[];
+  /** Fork: a counter every row write moves (insert, update, prune), so a
+   * reader can reuse what it read while nothing changed (runtime-coordinator). */
+  version?(): number;
   /** Insert a new row and its event in one transaction. */
   insert(a: Assignment, event: { kind: EventKind; detail?: string; at?: number }): void;
   /** Write the whole row and (optionally) an event in one transaction. */
@@ -281,8 +284,11 @@ export function openRuntimeStore(path: string): RuntimeStore {
     statements.event.run(id, event.at ?? Date.now(), event.kind, event.detail ?? null);
   };
 
+  // Fork: moved by every row write; read by version().
+  let writes = 0;
   return {
     path,
+    version: () => writes,
     get(id) {
       const row = statements.get.get(id) as Row | undefined;
       return row ? readAssignment(row) : undefined;
@@ -308,12 +314,14 @@ export function openRuntimeStore(path: string): RuntimeStore {
       return (db.prepare(sql).all(...params) as Row[]).map(readAssignment);
     },
     insert(a, event) {
+      writes += 1;
       transaction(() => {
         statements.insert.run(a.id, ...columns(a));
         writeEvent(a.id, event);
       });
     },
     update(a, event) {
+      writes += 1;
       transaction(() => {
         const changes = statements.update.run(...columns(a), a.id).changes;
         if (changes === 0) throw new Error(`runtime.db: assignment ${a.id} does not exist`);
@@ -348,6 +356,7 @@ export function openRuntimeStore(path: string): RuntimeStore {
       });
     },
     prune(before) {
+      writes += 1;
       return transaction(() => {
         const roots = (statements.prunable.all(before) as Row[]).map(row => String(row.id));
         let removed = 0;

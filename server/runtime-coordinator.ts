@@ -198,10 +198,21 @@ export class RuntimeCoordinator implements Coordinator {
 
   all(): HandoffView[] {
     this.ready();
+    // Fork: one read per store version. Every bot and thread on the wire
+    // asks this (awaitingTeammates); read from SQLite and parsed each time,
+    // a /api/bots snapshot on a busy workspace took 41 s and held the
+    // event loop, so a restart with reconnecting clients never came up.
+    const version = this.store.version?.();
+    if (version !== undefined && this.allCache?.version === version) return [...this.allCache.views];
     const rows = this.store.all();
     const byId = new Map(rows.map(row => [row.id, row]));
-    return rows.map(row => view(row, row.parentId ? byId.get(row.parentId) : undefined));
+    const views = rows.map(row => view(row, row.parentId ? byId.get(row.parentId) : undefined));
+    if (version !== undefined) this.allCache = { version, views };
+    return [...views];
   }
+  private allCache?: { version: number; views: HandoffView[] };
+  /** Fork: outstandingDirect for every thread at once, per store version. */
+  private outstandingCache?: { version: number; byThread: Map<string, HandoffView[]> };
 
   children(id: string): HandoffView[] {
     this.ready();
@@ -402,6 +413,24 @@ export class RuntimeCoordinator implements Coordinator {
    * its result returns to nobody). */
   outstandingDirect(threadId: string): HandoffView[] {
     this.ready();
+    const version = this.store.version?.();
+    if (version !== undefined) {
+      if (this.outstandingCache?.version !== version) {
+        const byThread = new Map<string, HandoffView[]>();
+        const rows = this.store.all();
+        const byId = new Map(rows.map(row => [row.id, row]));
+        for (const n of rows) {
+          if (isTerminal(n) || !n.parentId || n.reply === "none") continue;
+          const parent = byId.get(n.parentId);
+          if (!parent || isTerminal(parent)) continue;
+          const thread = parent.assignee.destination.threadId;
+          if (!this.direct(parent, thread)) continue;
+          byThread.set(thread, [...byThread.get(thread) ?? [], view(n, parent)]);
+        }
+        this.outstandingCache = { version, byThread };
+      }
+      return [...this.outstandingCache.byThread.get(threadId) ?? []];
+    }
     const out: HandoffView[] = [];
     for (const n of this.live()) {
       if (!n.parentId || n.reply === "none") continue;
