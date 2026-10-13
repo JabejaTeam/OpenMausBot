@@ -5,7 +5,7 @@
 // row, its lead (the PM); a bot without a team is its own row. No headings:
 // like Messages, the row you last wrote to is on top (lib/simple-ui-groups).
 import { useState } from "react";
-import { ChevronLeft, PanelLeft } from "lucide-react";
+import { CalendarDays, ChevronLeft, PanelLeft } from "lucide-react";
 import { useStore, visibleMessages, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -311,6 +311,16 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
           className={circle}
         >
           <McpMark />
+        </button>
+        <button
+          type="button"
+          onClick={() => dispatch({ type: "showRoutines" })}
+          aria-label={t("sidebar.nav.routines")}
+          title={t("sidebar.nav.routines")}
+          aria-pressed={state.activeView === "routines"}
+          className={cn(circle, state.activeView === "routines" && "text-accent")}
+        >
+          <CalendarDays size={18} />
         </button>
       </div>
     </aside>
