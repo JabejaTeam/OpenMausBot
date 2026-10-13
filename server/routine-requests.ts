@@ -90,6 +90,7 @@ const routineToolDefinitionSchema = z.object({
   continuity: z.boolean().optional(),
   overlap: z.enum(["skip", "queue"]).optional(),
   mail: z.enum(["draft", "send"]).optional(),
+  notify: z.boolean().optional(),
   runOnStartup: z.boolean().optional(),
 }).strict();
 
@@ -219,6 +220,7 @@ const storedDefinitionSchema = z.object({
   continuity: z.boolean().optional(),
   overlap: z.enum(["skip", "queue"]).optional(),
   mail: z.enum(["draft", "send"]).optional(),
+  notify: z.boolean().optional(),
   runOnStartup: z.boolean().optional(),
 }).strict();
 const storedChangesSchema = storedDefinitionSchema
@@ -603,6 +605,7 @@ function normalizeDefinition(input: RoutineToolDefinitionInput, now: number): Ro
     ...(input.continuity === true ? { continuity: true } : {}),
     ...(input.overlap === "queue" ? { overlap: "queue" as const } : {}),
     ...(input.mail === "send" ? { mail: "send" as const } : {}),
+    ...(input.notify === true ? { notify: true } : {}),
     ...(input.runOnStartup === true ? { runOnStartup: true } : {}),
   };
 }
@@ -618,6 +621,7 @@ function normalizeChanges(input: RoutineToolChangesInput, now: number): RoutineR
   if (input.continuity !== undefined) changes.continuity = input.continuity === true;
   if (input.overlap !== undefined) changes.overlap = input.overlap;
   if (input.mail !== undefined) changes.mail = input.mail;
+  if (input.notify !== undefined) changes.notify = input.notify === true;
   if (input.runOnStartup !== undefined) changes.runOnStartup = input.runOnStartup === true;
   return changes;
 }
@@ -845,6 +849,7 @@ function effectiveDefinition(operation: RoutineRequestOperation, manager: Routin
     ...(existing.continuity ? { continuity: true } : {}),
     ...(existing.overlap ? { overlap: existing.overlap } : {}),
     ...(existing.mail === "send" ? { mail: "send" as const } : {}),
+    ...(existing.notify ? { notify: true } : {}),
     ...(existing.runOnStartup ? { runOnStartup: true } : {}),
   };
   if (operation.action !== "update") return base;
@@ -933,6 +938,7 @@ function cardCopy(
       `Continuity: ${definition.continuity ? "Carries the previous run's report into the next run" : "Each run starts fresh"}`,
       `While busy: ${definition.overlap === "queue" ? "Queue one scheduled run; skip further occurrences until it starts" : "Skip overlapping scheduled occurrences"}`,
       `Email: ${definition.mail === "send" ? "May send Gmail directly" : "Gmail drafts only, never sent"}`,
+      `Notify: ${definition.notify ? "A finished run shows as unread" : "Quiet when finished; only questions and failures show as unread"}`,
       ...(definition.runOnStartup || (operation.action === "update" && operation.changes.runOnStartup !== undefined)
         ? [`On startup: ${definition.runOnStartup ? "Also runs once each time OpenMausBot starts" : "Runs only on its schedule"}`]
         : []),
@@ -963,6 +969,7 @@ function inputFromDefinition(definition: RoutineRequestDefinition, botId: string
     ...(definition.continuity ? { continuity: true } : {}),
     ...(definition.overlap === "queue" ? { overlap: "queue" as const } : {}),
     ...(definition.mail === "send" ? { mail: "send" as const } : {}),
+    ...(definition.notify ? { notify: true } : {}),
     ...(definition.runOnStartup ? { runOnStartup: true } : {}),
   };
 }
@@ -982,6 +989,7 @@ function updateFromChanges(
   if (changes.continuity !== undefined) patch.continuity = changes.continuity;
   if (changes.overlap !== undefined) patch.overlap = changes.overlap;
   if (changes.mail !== undefined) patch.mail = changes.mail;
+  if (changes.notify !== undefined) patch.notify = changes.notify;
   if (changes.runOnStartup !== undefined) patch.runOnStartup = changes.runOnStartup;
   return patch;
 }
@@ -1059,6 +1067,7 @@ function revalidateOperation(operation: RoutineRequestOperation, manager: Routin
         || Boolean(routine.continuity) !== Boolean(definition.continuity)
         || (routine.overlap ?? "skip") !== (definition.overlap ?? "skip")
         || (routine.mail ?? "draft") !== (definition.mail ?? "draft")
+        || Boolean(routine.notify) !== Boolean(definition.notify)
         || Boolean(routine.runOnStartup) !== Boolean(definition.runOnStartup)
         || (routine.attachments?.length ?? 0) > 0) return false;
       // An omitted start means "every N minutes", not a new phase each time

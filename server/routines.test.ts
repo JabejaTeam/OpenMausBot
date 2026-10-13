@@ -145,6 +145,39 @@ describe("a routine's mail setting (fork)", () => {
   });
 });
 
+describe("a routine's notify setting (fork)", () => {
+  const start = Date.parse("2026-09-13T08:00:00Z");
+  const input = () => ({ name: "Nightly dream", prompt: "Reflect", botId: "maus-1",
+    schedule: { type: "interval" as const, everyMinutes: 5, anchorAt: start } });
+
+  it("is quiet by default, survives a reload, and switches back off", () => {
+    const h = harness(start);
+    expect(h.manager.create(input()).notify).toBeUndefined();
+    expect(h.manager.create({ ...input(), notify: false }).notify).toBeUndefined();
+    const loud = h.manager.create({ ...input(), notify: true });
+    expect(loud.notify).toBe(true);
+    expect(h.manager.update(loud.id, { name: "Daily report" })?.notify).toBe(true);
+    expect(new RoutineManager(h.options).listRoutines().find((r) => r.id === loud.id)?.notify).toBe(true);
+    expect(h.manager.update(loud.id, { notify: false })?.notify).toBeUndefined();
+  });
+
+  it("lights up a completion only when notify is on; questions and failures always", () => {
+    const h = harness(start);
+    const quiet = h.manager.create(input());
+    const loud = h.manager.create({ ...input(), notify: true });
+    const marks = (routineId: string, status: RoutineRun["status"]) => h.manager.runMarksUnread({ routineId, status });
+    expect(marks(quiet.id, "completed")).toBe(false);
+    expect(marks(loud.id, "completed")).toBe(true);
+    for (const status of ["waiting", "failed", "missed"] as const) {
+      expect(marks(quiet.id, status)).toBe(true);
+      expect(marks(loud.id, status)).toBe(true);
+    }
+    for (const status of ["queued", "running", "cancelled"] as const) expect(marks(loud.id, status)).toBe(false);
+    // a deleted routine falls back to quiet
+    expect(marks("gone", "completed")).toBe(false);
+  });
+});
+
 describe("bounded scheduled overlap and run health", () => {
   const start = Date.parse("2026-09-13T08:00:00Z");
   const input = () => ({ name: "Health check", prompt: "Check the fixture", botId: "maus-1",

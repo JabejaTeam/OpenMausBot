@@ -4394,6 +4394,8 @@
   "routines.mailSend": "May send directly",
   "routines.mailHelpDraft": "Mail from this routine lands in your Gmail drafts and is never sent.",
   "routines.mailHelpSend": "Mail from this routine goes out directly, with your Gmail signature.",
+  "routines.notifyLabel": "Notify me when it's done",
+  "routines.notifyHelp": "Off: a finished run stays quiet, without an unread dot. Questions and failures always notify you.",
   "bloub.shapeLabel": "Shape",
   "bloub.expressionLabel": "Expression",
   "bloub.colorLabel": "Colour",

@@ -10,7 +10,7 @@ import { redactSecretsInText } from "./redact.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import { normalizeCronSchedule, nextCronRuns, type RoutineCronSchedule } from "../shared/routine-schedule.ts";
-import { isRoutineProblemRun } from "../shared/routines.ts";
+import { isRoutineProblemRun, routineRunMarksUnread } from "../shared/routines.ts";
 import { ROUTINE_PARTS, type PartPair, type RoutinePart } from "./package-parts.ts";
 
 export interface RoutineIntervalWindow {
@@ -103,6 +103,9 @@ export interface Routine {
   /** Fork: "send" lets this routine's Gmail leave directly. Absent means
    * its runs (and work they delegate) may only create Gmail drafts. */
   mail?: "send";
+  /** Fork: a completed run marks its conversation unread. Absent means quiet;
+   * waiting/failed/missed always do (shared routineRunMarksUnread). */
+  notify?: boolean;
   /** Also run once each time OpenMausBot starts, for a computer that is often
    * off at the scheduled time. Absent means off, so older files load as-is. */
   runOnStartup?: boolean;
@@ -255,6 +258,8 @@ export interface RoutineInput {
   overlap?: "skip" | "queue";
   /** Fork: "send" lets runs send Gmail directly; "draft" (default) drafts only. */
   mail?: "send" | "draft";
+  /** Fork: true marks a completed run unread; false/absent keeps it quiet. */
+  notify?: boolean;
   runOnStartup?: boolean;
   /** Omission preserves routing; null resets it to the bot's main thread. */
   resultsThreadId?: string | null;
@@ -821,6 +826,7 @@ function sanitizeInput(input: RoutineInput, after: number): Omit<Routine, "id" |
     ...(continuity ? { continuity: true } : {}),
     ...(input.overlap === "queue" ? { overlap: "queue" as const } : {}),
     ...(input.mail === "send" ? { mail: "send" as const } : {}),
+    ...(input.notify === true ? { notify: true } : {}),
     // A one-time routine has no schedule to keep running beside it.
     ...(input.runOnStartup === true && schedule.type !== "once" ? { runOnStartup: true } : {}),
   };
@@ -1006,6 +1012,12 @@ export class RoutineManager {
     const run = this.runs.find((r) => r.threadId === threadId && ["queued", "running", "waiting"].includes(r.status));
     if (!run) return null;
     return this.routines.find((r) => r.id === run.routineId)?.mail === "send" ? "send" : "draft";
+  }
+
+  /** Fork: whether this run, in its current status, marks the conversation
+   * it reports to unread — its routine's "notify me" setting decides. */
+  runMarksUnread(run: Pick<RoutineRun, "routineId" | "status">): boolean {
+    return routineRunMarksUnread(this.routines.find((r) => r.id === run.routineId), run.status);
   }
 
   listRoutines(): Routine[] {
@@ -1231,6 +1243,7 @@ export class RoutineManager {
       continuity: patch.continuity ?? routine.continuity,
       overlap: Object.hasOwn(patch, "overlap") ? patch.overlap : routine.overlap,
       mail: Object.hasOwn(patch, "mail") ? patch.mail : routine.mail,
+      notify: patch.notify ?? routine.notify,
       runOnStartup: patch.runOnStartup ?? routine.runOnStartup,
     }, now);
     if (this.targetState(clean) === "missing") throw new Error(this.missingTargetMessage(clean.target));
@@ -1260,6 +1273,7 @@ export class RoutineManager {
       if (!clean.continuity) delete routine.continuity;
       if (clean.overlap !== "queue") delete routine.overlap;
       if (clean.mail !== "send") delete routine.mail;
+      if (!clean.notify) delete routine.notify;
       if (!clean.runOnStartup) delete routine.runOnStartup;
       if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) {
         delete routine.timeoutMinutes;

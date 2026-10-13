@@ -62,6 +62,8 @@ export interface RoutineRequestDefinition {
   overlap?: "skip" | "queue";
   /** Fork: Gmail drafts only (default), or "send" to let mail go out. */
   mail?: "draft" | "send";
+  /** Fork: true marks a completed run unread. Default quiet; only when the person asks. */
+  notify?: boolean;
   /** Also run once each time OpenMausBot starts. Repeating routines only. */
   runOnStartup?: boolean;
 }

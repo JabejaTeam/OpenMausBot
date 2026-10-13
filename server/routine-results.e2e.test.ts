@@ -31,8 +31,11 @@ it("reports every run into the bot's main thread while fresh executions, approva
     const originalThread = (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id).threadId;
     const { routine } = await api("POST", "/api/routines", {
       name: "Persistent report", prompt: "Report this run's state.", botId: bot.id, enabled: false,
+      // Fork: completed runs are quiet unless the routine asks to notify.
+      notify: true,
       schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
     }, 201);
+    expect(routine.notify).toBe(true);
     const completed: any[] = [];
     for (let index = 0; index < 2; index++) {
       const { run } = await api("POST", `/api/routines/${routine.id}/run`, undefined, 201);
@@ -143,6 +146,14 @@ it("reports every run into the bot's main thread while fresh executions, approva
     expect((await messages(live)).find((message) => message.routineRun?.runId === replacement.id)?.routineRun)
       .toMatchObject({ status: "completed", executionThreadId: (await runState(replacement.id)).threadId });
     expect((await currentBot()).tasks.some((task: any) => task.title.endsWith("· Results") && task.threadId !== legacy.threadId)).toBe(false);
+    // Fork: with notify off, a completed run still posts its card but leaves
+    // the conversation read.
+    expect((await api("PATCH", `/api/routines/${routine.id}`, { notify: false })).routine.notify).toBeUndefined();
+    await api("POST", `/api/bots/${bot.id}/read`, { threadId: live });
+    const { run: quiet } = await api("POST", `/api/routines/${routine.id}/run`, undefined, 201);
+    await expect.poll(async () => (await runState(quiet.id))?.status, { timeout: 15_000 }).toBe("completed");
+    expect((await messages(live)).find((message) => message.routineRun?.runId === quiet.id)?.routineRun).toMatchObject({ status: "completed" });
+    expect((await currentBot()).tasks.find((task: any) => task.threadId === live).unread).toBe(false);
     evidence.push({ cards, final: await api("GET", "/api/routines"), bot: await currentBot(), fallback });
   } finally {
     broker?.destroy();

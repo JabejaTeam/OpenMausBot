@@ -373,6 +373,9 @@ function routineFields(args: Json): { fields: Json; error?: string } {
   if (args.mail !== undefined && args.mail !== "draft" && args.mail !== "send") {
     return { fields, error: "mail must be draft or send." };
   }
+  if (args.notify != null && typeof args.notify !== "boolean") {
+    return { fields, error: "notify must be true or false." };
+  }
   if (args.clear_timeout != null && typeof args.clear_timeout !== "boolean") {
     return { fields, error: "clear_timeout must be true or false." };
   }
@@ -392,6 +395,7 @@ function routineFields(args: Json): { fields: Json; error?: string } {
   if (typeof args.continuity === "boolean") fields.continuity = args.continuity;
   if (args.overlap !== undefined) fields.overlap = args.overlap;
   if (args.mail !== undefined) fields.mail = args.mail;
+  if (typeof args.notify === "boolean") fields.notify = args.notify;
   if (typeof runOnStartup === "boolean") fields.runOnStartup = runOnStartup;
   return { fields };
 }

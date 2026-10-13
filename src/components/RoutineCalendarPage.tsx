@@ -380,6 +380,7 @@ export function EventEditor({
   const [intervalTimeoutDefaultApplied, setIntervalTimeoutDefaultApplied] = useState(Boolean(existingRoutine));
   const [overlap, setOverlap] = useState<"skip" | "queue">(existingRoutine?.overlap ?? "skip");
   const [mail, setMail] = useState<"draft" | "send">(existingRoutine?.mail === "send" ? "send" : "draft");
+  const [notify, setNotify] = useState(Boolean(existingRoutine?.notify));
   const [continuity, setContinuity] = useState(Boolean(existingRoutine?.continuity));
   const [runOnStartup, setRunOnStartup] = useState(Boolean(existingRoutine?.runOnStartup));
   const [recurrence, setRecurrence] = useState<RecurrenceChoice>(recurrenceFor(schedule, initialAt));
@@ -555,6 +556,7 @@ export function EventEditor({
           timeoutMinutes,
           overlap,
           mail,
+          notify,
           // Room goals can't carry a report yet, and a one-time run has no next run.
           continuity: routineTarget === "bot" && recurrence !== "none" && continuity,
           runOnStartup: recurrence !== "none" && runOnStartup,
@@ -882,6 +884,16 @@ export function EventEditor({
             </span>
           </label>
         );
+  // Fork: quiet by default; the person opts a routine in to an unread dot.
+  const notifyControl = kind === "routine" && (
+          <label className={cn("flex items-start gap-3 rounded-xl border border-hairline/40 bg-inset/40 px-3.5 py-3", advanced && "ml-8")}>
+            <input type="checkbox" aria-label={t("routines.notifyLabel")} checked={notify} onChange={(event) => setNotify(event.target.checked)} className="mt-0.5 accent-accent" />
+            <span>
+              <span className="block text-[12.5px] font-medium text-ink">{t("routines.notifyLabel")}</span>
+              <span className="mt-1 block text-[11px] leading-relaxed text-ink-secondary">{t("routines.notifyHelp")}</span>
+            </span>
+          </label>
+        );
   const resultsControl = kind === "routine" && !isRoomGoal && <div className={cn(advanced && "ml-8")}>
             <ResultsDestination bot={bots.find((bot) => bot.id === botIds[0])} value={resultsThreadId} allowCurrent={Boolean(existingRoutine)} onChange={setResultsThreadId} />
           </div>;
@@ -1042,6 +1054,7 @@ export function EventEditor({
             <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={5} placeholder={isRoomGoal ? "What should the team accomplish?" : kind === "routine" ? (advanced ? "Add instructions for the bot" : t("routines.editor.instructionsPlaceholder")) : "Add description or agenda"} className="min-w-0 flex-1 resize-y rounded-xl border border-hairline/50 bg-inset px-3.5 py-3 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent" />
           </div>
           {continuityControl}
+          {notifyControl}
 
           {advanced && attachmentsRow}
 

@@ -4394,6 +4394,8 @@
   "routines.mailSend": "Mag rechtstreeks versturen",
   "routines.mailHelpDraft": "E-mail van deze routine komt in je Gmail-concepten terecht en wordt nooit verstuurd.",
   "routines.mailHelpSend": "E-mail van deze routine wordt rechtstreeks verstuurd, met je Gmail-handtekening.",
+  "routines.notifyLabel": "Meld mij als het klaar is",
+  "routines.notifyHelp": "Uit: een afgewerkte run blijft stil, zonder ongelezen bolletje. Vragen en fouten melden zich altijd.",
   "bloub.shapeLabel": "Vorm",
   "bloub.expressionLabel": "Expressie",
   "bloub.colorLabel": "Kleur",

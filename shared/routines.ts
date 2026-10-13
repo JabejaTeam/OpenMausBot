@@ -80,6 +80,14 @@ export function isRoutineProblemRun(run: { status: RoutineRunStatus }): boolean 
   return ROUTINE_PROBLEM_STATUSES.includes(run.status);
 }
 
+/** Fork: whether a run in this status lights up the conversation it reports
+ * to. A run that needs the person (waiting) or went wrong always does; a
+ * plain completion only when the routine has "notify me" on. */
+export function routineRunMarksUnread(routine: { notify?: boolean } | undefined, status: RoutineRunStatus): boolean {
+  if (status === "waiting" || isRoutineProblemRun({ status })) return true;
+  return status === "completed" && routine?.notify === true;
+}
+
 /** The logs view's status filter: every run, the composite problem set the
  * indicators count, or one exact status. */
 export type RoutineRunStatusFilter = "all" | "problems" | RoutineRunStatus;
@@ -100,6 +108,8 @@ export interface Routine {
   overlap?: "skip" | "queue";
   /** Fork: "send" lets runs send Gmail directly; absent means drafts only. */
   mail?: "draft" | "send";
+  /** Fork: a completed run marks its conversation unread. Absent means quiet. */
+  notify?: boolean;
   /** Each run starts with the previous run's report. */
   continuity?: boolean;
   /** Also run once each time OpenMausBot starts. */
@@ -166,6 +176,8 @@ export interface RoutineInput {
   overlap?: "skip" | "queue";
   /** Fork: "send" lets runs send Gmail directly; "draft" (default) drafts only. */
   mail?: "send" | "draft";
+  /** Fork: true marks a completed run unread; false/absent keeps it quiet. */
+  notify?: boolean;
   /** Each run starts with the previous run's report. */
   continuity?: boolean;
   runOnStartup?: boolean;

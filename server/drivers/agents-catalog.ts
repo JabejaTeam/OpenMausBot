@@ -200,6 +200,10 @@ const ROUTINE_FIELDS_SCHEMA = {
     enum: ["draft", "send"],
     description: "Gmail from this routine's runs: draft (default) saves Gmail drafts only; send lets mail go out directly. Use send only when the person said the mail may be sent without them.",
   },
+  notify: {
+    type: "boolean",
+    description: "Show a finished run as unread. Defaults to false (quiet); questions and failures always show. Set true only when the person asked to be notified.",
+  },
   run_on_startup: {
     type: "boolean",
     description: "Repeating routines only: also run once each time OpenMausBot starts, besides the schedule, for a computer often off when it is due. Defaults to false.",

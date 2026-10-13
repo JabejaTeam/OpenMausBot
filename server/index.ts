@@ -459,6 +459,7 @@ import { asSchedule, RoutineRequestService } from "./routine-requests.ts";
 import { directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { createOptionsCard } from "./options-card.ts";
 import { isPersonalChief, parseRelayQuestionInput } from "../shared/relay-question.ts";
+import { routineRunMarksUnread } from "../shared/routines.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
 import { ModelRequestService } from "./model-requests.ts";
@@ -12868,6 +12869,12 @@ function routineRunFallbackText(card: NonNullable<Message["routineRun"]>): strin
 /** Upsert one durable lifecycle card per run. Replaying the same transition,
  * including restart recovery, patches the existing run id instead of adding
  * another chat message. */
+/** Fork: a run lights up its conversation only when it needs the person,
+ * went wrong, or completed with the routine's "notify me" on. */
+function routineRunLightsUp(run: RoutineRun): boolean {
+  return routines ? routines.runMarksUnread(run) : routineRunMarksUnread(undefined, run.status);
+}
+
 function syncRoutineRunToSource(run: RoutineRun): string | null {
   const source = routineSourceOwner(run);
   if (!source) {
@@ -12875,7 +12882,7 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
     if (execution?.routineRunId === run.id) {
       store.patchTask(run.botId, execution.threadId, {
         routineRunId: undefined,
-        ...(["waiting", "completed", "failed", "missed"].includes(run.status) ? { unread: true } : {}),
+        ...(routineRunLightsUp(run) ? { unread: true } : {}),
       });
     }
     return null;
@@ -12921,7 +12928,7 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
 
   // Merely queueing/running is ambient progress. Attention and terminal
   // states become unread in the conversation where the user asked for them.
-  if (statusChanged && ["waiting", "completed", "failed", "missed"].includes(run.status)) {
+  if (statusChanged && routineRunLightsUp(run)) {
     if (source.group) store.patchGroup(source.group.id, { unread: true });
     else store.patchTask(source.bot.id, sourceThreadId, { unread: true });
   }
@@ -13726,6 +13733,7 @@ const agentRoutine = (
     continuity: routine.continuity === true,
     overlap: routine.overlap ?? "skip",
     runOnStartup: routine.runOnStartup === true,
+    notify: routine.notify === true,
     skippedRuns: routine.skippedRuns ?? 0,
     lastSkippedAt: routineTimestamp(routine.lastSkippedAt),
     failureStreak: routine.failureStreak ?? 0,
