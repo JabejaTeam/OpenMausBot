@@ -6,4 +6,8 @@
 # beast; another host gets the built release copied over.
 # name	host	container	port	live	data
 jabeja	beast	omb	8799	omb-data/home/omb-server	omb-data/home/.openmausbot
-# ripal	node1	omb-ripal	8799	omb-ripal/home/omb-server	omb-ripal/home/.openmausbot	(example: ssh alias, port and paths still to be decided)
+# ripal runs inside VM hermes-vm on node1 (159.69.74.253), port published on
+# 100.86.49.68:8811 (tailnet only). Its paths are absolute, not under $HOME, and
+# there is no ssh alias "hermes-vm" yet (reached via node1 + incus exec), so
+# deploy-beast.sh --instance ripal does not work as written yet.
+ripal	hermes-vm	omb-ripal	8799	/opt/omb-klanten/ripal/home/omb-server	/opt/omb-klanten/ripal/home/.openmausbot
