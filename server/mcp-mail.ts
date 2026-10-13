@@ -12,7 +12,8 @@
 //   "crm":     { "url": "...",     "outbound": { "tools": ["send_*", "notify-customer"] } }
 //
 // The presets are measured against the real servers (Softeria
-// ms-365-mcp-server 0.148.2's endpoints.json, deltix odoo-mcp 0.27) and
+// ms-365-mcp-server 0.148.2's endpoints.json, deltix odoo-mcp 0.27, Jabeja
+// billit-mcp src/server.ts) and
 // mirror the tool list of Hermes' mail-verzendrem plugin.
 //
 // Where a mail sits in a tool's arguments differs per server, but the key
@@ -28,7 +29,7 @@ import { htmlToText, plainToHtml, validAddress, type MailMode } from "./email-ou
 
 type Args = Record<string, unknown>;
 
-export const MCP_MAIL_PRESETS = ["ms365", "odoo"] as const;
+export const MCP_MAIL_PRESETS = ["ms365", "odoo", "billit"] as const;
 export type McpMailPreset = (typeof MCP_MAIL_PRESETS)[number];
 
 export interface McpMailSpec {
@@ -152,6 +153,21 @@ const PRESETS: Record<McpMailPreset, Record<string, McpMailRule>> = {
     // dry_run (the default) only previews; a commit mails partner_ids and
     // followers. The confirmation token binds the body, so no edits.
     "odoo-send-message": { editable: false, sends: (args) => args.dry_run !== undefined && args.dry_run !== null && !pyTruthy(args.dry_run) },
+  },
+  // Billit (Jabeja billit-mcp): every write is a dry run unless confirm is
+  // exactly true, the way the server reads it (isBevestigd).
+  billit: {
+    // Peppol, e-mail or post: irreversible, held whenever it would go.
+    "billit-send-order": { editable: false, sends: (args) => args.confirm === true },
+    // The escape hatch reaches any v1 endpoint; a confirmed write to one
+    // that sends (orders/commands/send, peppol/sendOrder, a mail command)
+    // is held. A GET or a dry run passes.
+    "billit-request": {
+      editable: false,
+      sends: (args) => args.confirm === true
+        && String(args.method ?? "GET").toUpperCase() !== "GET"
+        && /send|peppol|mail/i.test(String(args.path ?? "")),
+    },
   },
 };
 

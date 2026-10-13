@@ -66,6 +66,22 @@ describe("which calls send", () => {
     expect(outgoingRule(odoo, "odoo_log_note", { ...message, dry_run: false })).toBeUndefined();
   });
 
+  it("holds a confirmed Billit send and a confirmed escape-hatch call to a send endpoint, never a dry run or a read", () => {
+    const billit = { preset: "billit" as const };
+    expect(outgoingRule(billit, "billit_send_order", { orderIDs: [1], transportType: "Peppol" })).toBeUndefined();
+    expect(outgoingRule(billit, "billit_send_order", { orderIDs: [1], transportType: "Peppol", confirm: true })).toEqual(expect.objectContaining({ editable: false }));
+    expect(outgoingRule(billit, "billit_send_order", { orderIDs: [1], confirm: "true" })).toBeUndefined();
+    const send = { method: "POST", path: "/v1/orders/commands/send", body: { Transporttype: "Peppol", OrderIDs: [1] } };
+    expect(outgoingRule(billit, "billit_request", send)).toBeUndefined();
+    expect(outgoingRule(billit, "billit_request", { ...send, confirm: true })).toBeDefined();
+    expect(outgoingRule(billit, "billit_request", { ...send, method: "post", confirm: true })).toBeDefined();
+    expect(outgoingRule(billit, "billit_request", { method: "POST", path: "/v1/peppol/sendOrder", confirm: true })).toBeDefined();
+    expect(outgoingRule(billit, "billit_request", { method: "GET", path: "/v1/peppol/participantInformation/BE0123", confirm: true })).toBeUndefined();
+    expect(outgoingRule(billit, "billit_request", { path: "/v1/orders/commands/send", confirm: true })).toBeUndefined();
+    expect(outgoingRule(billit, "billit_request", { method: "PATCH", path: "/v1/orders/1", body: { Paid: true }, confirm: true })).toBeUndefined();
+    expect(outgoingRule(billit, "billit_create_invoice", { confirm: true })).toBeUndefined();
+  });
+
   it("adds configured tools with wildcards", () => {
     const spec = { tools: ["notify_*", "send-invoice"] };
     expect(outgoingRule(spec, "notify-customer", {})).toEqual({ editable: false });
