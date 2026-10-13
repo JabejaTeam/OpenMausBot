@@ -31,6 +31,9 @@ export function ThreadChannelPicker({ variant = "label" }: { variant?: "label" |
   const people = [...new Set(state.bots.flatMap((bot) => (bot.tasks ?? [])
     .filter((task) => task.access && task.access !== "own" && task.person)
     .map((task) => task.person!)))]
+    // A key with no person behind it (a removed account or device) is no
+    // teammate to pick; the one you are on stays while names still load.
+    .filter((key) => personName(key) || channel === `person:${key}`)
     .map((key) => ({ key, name: personName(key) ?? t("chat.share.someone") }))
     .sort((a, b) => a.name.localeCompare(b.name));
   const options: { value: ThreadChannel; label: string }[] = [
