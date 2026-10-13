@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts";
+import { parseMcpMailSpec, type McpMailSpec } from "./mcp-mail.ts";
 
 /** One server as kept in config.json `mcpServers`. The shape is the block
  * Claude Code, Cursor and Claude Desktop write, so a pasted entry is a
@@ -15,6 +16,9 @@ export interface McpPeople {
    * names the shared entry already has. Never on a people-only server:
    * that would let anyone grant themselves access. */
   selfService?: boolean;
+  /** Fork: which of its tools send mail, so they wait on the email card
+   * (server/mcp-mail.ts). Kept by every edit that does not name it. */
+  outbound?: McpMailSpec;
 }
 export interface StoredStdioMcpServer extends StdioMcpSpec, McpPeople {
   enabled: boolean;
@@ -135,6 +139,10 @@ const secretValue = z.string().max(16_384);
 const keptSecret = z.union([secretValue, z.literal(true)]);
 const peopleSchema = z.record(z.string(), z.record(z.string(), secretValue));
 const peopleMutationSchema = z.record(z.string(), z.record(z.string(), keptSecret));
+const outboundSchema = z.unknown().superRefine((value, ctx) => {
+  const parsed = parseMcpMailSpec(value);
+  if (!parsed.ok) ctx.addIssue({ code: "custom", message: parsed.error });
+});
 
 const stdioEntrySchema = z.object({
   command: z.string().trim().min(1).max(1_024),
@@ -144,6 +152,7 @@ const stdioEntrySchema = z.object({
   people: peopleSchema.optional(),
   peopleOnly: z.boolean().optional(),
   selfService: z.boolean().optional(),
+  outbound: outboundSchema.optional(),
 }).strict();
 
 const stdioMutationSchema = stdioEntrySchema.extend({
@@ -175,6 +184,7 @@ const remoteEntrySchema = z.object({
   peopleOnly: z.boolean().optional(),
   selfService: z.boolean().optional(),
   recall: z.string().trim().max(2_048).nullable().optional(),
+  outbound: outboundSchema.optional(),
 }).strict();
 
 const remoteMutationSchema = remoteEntrySchema.extend({
@@ -304,6 +314,7 @@ function parseStdio(raw: unknown, mutation: boolean, existing?: StoredMcpServer)
   if (!people.ok) return people;
   const flags = peopleFields(people.people, parsed.data, mutation, existing);
   if (!flags.ok) return flags;
+  const outbound = outboundField(parsed.data.outbound, mutation, existing);
   return {
     ok: true,
     server: {
@@ -312,6 +323,7 @@ function parseStdio(raw: unknown, mutation: boolean, existing?: StoredMcpServer)
       env: env.values,
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
       ...flags.fields,
+      ...outbound,
     },
   };
 }
@@ -341,6 +353,7 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
   if (!people.ok) return people;
   const flags = peopleFields(people.people, parsed.data, mutation, existing);
   if (!flags.ok) return flags;
+  const outbound = outboundField(parsed.data.outbound, mutation, existing);
   const oauth = resolveOAuthClient(parsed.data.oauth, existing && isRemoteMcpServer(existing) ? existing.oauth : undefined);
   if (!oauth.ok) return oauth;
   return {
@@ -353,8 +366,17 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
       ...(recall ? { recall } : {}),
       ...flags.fields,
+      ...outbound,
     },
   };
+}
+
+/** Fork: the outbound setting, validated by the schema; an edit that leaves
+ * it out keeps the saved one, so the settings form never drops it. */
+function outboundField(value: unknown, mutation: boolean, existing?: StoredMcpServer): { outbound?: McpMailSpec } {
+  if (value === undefined) return mutation && existing?.outbound ? { outbound: existing.outbound } : {};
+  const parsed = parseMcpMailSpec(value);
+  return parsed.ok ? { outbound: parsed.spec } : {};
 }
 
 /** File-authored entries are on unless they say otherwise. A newly added

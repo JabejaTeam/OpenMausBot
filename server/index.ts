@@ -138,6 +138,8 @@ import {
 import * as composio from "./composio.ts";
 import { connectorCallFromFrame, connectorRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import * as outbox from "./email-outbox.ts";
+import * as mcpMail from "./mcp-mail.ts";
+import { withMailGates } from "./mcp-mail-mount.ts";
 import { connectorCardText } from "./connector-card-text.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { buildRecall } from "./recall.ts";
@@ -342,7 +344,7 @@ import { RESTART_EXIT_CODE } from "./restart.ts";
 import { holdIncludedServices, trialCreditCredential } from "./included-services.ts";
 import { CloudCreditProvider } from "./cloud-credit-provider.ts";
 import { TRIAL_CREDIT_OWN_AI } from "./trial-credit.ts";
-import type { ProviderInstance } from "./contracts.ts";
+import type { McpServerSpec, ProviderInstance } from "./contracts.ts";
 import { readyToRun, selectDefaultModelSelection, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts";
 import { workTopicOf } from "./work-topic.ts";
 import { ensureThreadWorktree, removeThreadWorktree, threadWorktreePath, threadWorktreeSystemPrompt } from "./thread-worktrees.ts";
@@ -2426,7 +2428,7 @@ type InternalCapability = {
   threadId: string;
   generation: string;
   depth: number;
-  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone" | "data";
+  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone" | "data" | "mail";
   skillAuthoring: boolean;
   createdBots: number;
   createdRooms?: number;
@@ -2787,6 +2789,17 @@ function agentsIntegration(
   };
 }
 
+
+/** Fork: custom MCP servers that send mail are mounted behind the mail gate
+ * (server/mcp-mail-gate.ts), which asks /api/internal/mcp-mail with this
+ * turn's bearer before a message leaves. */
+function withMailGate(custom: Record<string, McpServerSpec>, botId: string, threadId: string, generation: string): Record<string, McpServerSpec> {
+  return withMailGates(custom, mcpMail.mcpMailSpecs(cfg.mcpServers), () => ({
+    url: `http://127.0.0.1:${PORT}`,
+    token: mintInternalCapability({ botId, threadId, generation, depth: 0, kind: "mail", skillAuthoring: false, createdBots: 0, openedThreads: 0 }),
+    // Codex refuses ELECTRON_RUN_AS_NODE on a custom server; only Electron needs it.
+  }), process.versions.electron ? AGENTS_NODE_FLAG : undefined);
+}
 
 /** Engine lifecycle hooks (item 0.2): a turn-scoped bearer the engine's hook
  * helper presents on /api/internal/hook. OMB_HOOKS=0 turns the channel off. */
@@ -10659,7 +10672,7 @@ async function startTurn(
         // Per-person values follow whoever this work is for (the same person
         // as the turn's [Person], so delegated work keeps the asker's values);
         // an automation (routine, webhook) is for nobody and gets the shared values.
-        const custom = await withMcpSignIn(engineMcpServers(bot, opts?.automationSource ? undefined : turnPerson), mcpOAuth);
+        const custom = withMailGate(await withMcpSignIn(engineMcpServers(bot, opts?.automationSource ? undefined : turnPerson), mcpOAuth), bot.id, threadId, dispatchClaimId);
         if (Object.keys(custom).length) integrations.custom = custom;
       }
       // CLI engines work inside the bot's own workspace directory rather
@@ -13415,7 +13428,7 @@ async function runGroupMemberTurn(
   // user-configured MCP servers: same gating as the 1:1 site above, with the
   // values of the person the room's current request is for.
   if (instance.adapter.capabilities.customMcp === true) {
-    const custom = await withMcpSignIn(engineMcpServers(bot, threadPersonKey(threadId)), mcpOAuth);
+    const custom = withMailGate(await withMcpSignIn(engineMcpServers(bot, threadPersonKey(threadId)), mcpOAuth), bot.id, threadId, internalGeneration);
     if (Object.keys(custom).length) integrations.custom = custom;
   }
   // Connected-app discovery is intentionally awaited before a provider owns
@@ -17392,7 +17405,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const parsed = z.object({
         botId: z.string().regex(/^[\w-]{1,128}$/),
         threadId: z.string().regex(/^[\w-]{1,128}$/),
-        kind: z.enum(["agents", "connectors", "computer", "data"]).default("agents"),
+        kind: z.enum(["agents", "connectors", "computer", "data", "mail"]).default("agents"),
         depth: z.number().int().min(0).max(MAX_COMMS_DEPTH).default(0),
         skillAuthoring: z.boolean().default(false),
         deliversSavedFiles: z.boolean().default(false),
@@ -17436,6 +17449,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ? "phone"
         : path.startsWith("/api/internal/connectors/")
         ? "connectors"
+        : path.startsWith("/api/internal/mcp-mail")
+        ? "mail"
         : path === "/api/internal/computer-control" || path === "/api/internal/computer/mcp"
           ? "computer"
           : "agents";
@@ -19801,6 +19816,84 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           throw error;
         }
+      }
+      // Fork: a custom MCP server's mail gate holds a sending call here
+      // (server/mcp-mail.ts): in a routine allowed to send it goes, else the
+      // person gets the email card and this answers once they chose.
+      if (method === "POST" && path === "/api/internal/mcp-mail") {
+        const body = await readInternalBody();
+        const threadId = internalCapability.threadId;
+        const server = typeof body.server === "string" ? body.server : "";
+        const tool = typeof body.tool === "string" ? body.tool : "";
+        const args = body.arguments && typeof body.arguments === "object" && !Array.isArray(body.arguments) ? body.arguments as Record<string, unknown> : {};
+        const spec = mcpMail.mcpMailSpecs(cfg.mcpServers)[server];
+        const rule = spec ? mcpMail.outgoingRule(spec, tool, args) : undefined;
+        if (!spec || !rule) return json(res, 200, { action: "send", arguments: args });
+        const decided = { threadId, botId: internalSender.id, botName: internalSender.name, tool: `mcp__${server}__${tool}` };
+        if (mcpMail.mayLeaveUnattended(threadMailMode(threadId), spec, mcpMail.readMail(args))) {
+          appendDecision(DATA_DIR, { ...decided, decision: "auto-approved", source: "outbound", rule: "routine-mail:send" });
+          return json(res, 200, { action: "send", arguments: args });
+        }
+        const owner = connectorThread(internalSender.id, threadId);
+        const held = outboundRequests.open({ botId: internalSender.id, threadId, tool: decided.tool, timeoutMs: OUTBOUND_HOLD_MS });
+        const shown = mcpMail.mailCard({ server, tool, args, rule, requestId: held.requestId });
+        const card = store.appendMessage(threadId, {
+          role: "bot",
+          kind: "email",
+          ...(owner?.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}),
+          email: shown,
+        });
+        appendDecision(DATA_DIR, { ...decided, requestId: held.requestId, summary: `${server}: ${shown.subject || tool} → ${shown.to.join(", ")}`.slice(0, 240), decision: "card-shown", source: "outbound" });
+        showWaitingOnPersonChip(threadId, held.requestId, internalSender, "approval");
+        const waitingHere = () => owner?.group ? activeGroupTurnForBot(internalSender.id)?.threadId === threadId : store.taskByThread(internalSender.id, threadId)?.busy;
+        if (waitingHere()) {
+          if (owner?.group) store.setActivity(internalSender.id, "waiting-on-you");
+          else store.setTaskActivity(internalSender.id, threadId, "waiting-on-you");
+        }
+        notify(buildNotification("approval", internalSender, threadId, `${shown.subject || tool} → ${shown.to.join(", ") || server}`, { avatarUrl: internalSender.avatarUrl }));
+        // The gate gone (the turn stopped, the engine gave up): nobody waits.
+        let gone = false;
+        res.on("close", () => {
+          if (res.writableFinished) return;
+          gone = true;
+          outboundRequests.resolve({ threadId, requestId: held.requestId, behavior: "deny" });
+        });
+        const answer = await held.answer;
+        outboundRequests.forget(held.requestId);
+        settleWaitingOnPersonChips(threadId, held.requestId);
+        if (internalCapabilityIsActive(internalCapability) && waitingHere()) {
+          if (owner?.group) store.setActivity(internalSender.id, "working");
+          else store.setTaskActivity(internalSender.id, threadId, "working");
+        }
+        const current = store.messagesFor(threadId).find((message) => message.id === card.id)?.email;
+        if (answer === "allow" && current && !gone) {
+          const edited = current.to.join() !== shown.to.join() || current.cc.join() !== shown.cc.join() || current.bcc.join() !== shown.bcc.join()
+            || current.subject !== shown.subject || current.body !== shown.body;
+          return json(res, 200, {
+            action: "send",
+            arguments: mcpMail.argsWithEdits(args, shown, current),
+            cardId: card.id,
+            note: mcpMail.sentNote(current, edited),
+          });
+        }
+        if (current && current.status === "editable") {
+          store.patchMessage(threadId, card.id, {
+            email: { ...current, status: "failed", error: answer === "timeout" ? "Nobody answered in time; nothing was sent." : "The bot stopped waiting; nothing was sent." },
+          });
+        }
+        if (gone) return;
+        return json(res, 200, { action: "refuse", text: answer === "timeout" ? mcpMail.TIMEOUT_TEXT : mcpMail.DISCARDED_TEXT });
+      }
+      if (method === "POST" && path === "/api/internal/mcp-mail/done") {
+        const body = await readInternalBody();
+        const threadId = internalCapability.threadId;
+        const message = store.messagesFor(threadId).find((candidate) => candidate.id === body.cardId && candidate.email?.mcp);
+        if (!message?.email || message.email.status !== "working") return json(res, 404, { error: "no such email" });
+        const failed = body.ok !== true;
+        store.patchMessage(threadId, message.id, {
+          email: { ...message.email, status: failed ? "failed" : "sent", error: failed ? String(body.error ?? "The mail app did not accept it").slice(0, 240) : undefined },
+        });
+        return json(res, 200, { status: failed ? "failed" : "sent" });
       }
       if (method === "POST" && path === "/api/internal/connectors/mcp") {
         const body = await readInternalBody();
@@ -26336,6 +26429,28 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 403, { error: "Only the person this conversation is for can send this email." });
       }
       const action = m[3] as "send" | "draft" | "discard";
+      // Fork: a custom MCP server's mail (server/mcp-mail.ts). Its gate is
+      // still holding the call: the answer goes there, and only Send or
+      // Discard exist — never a draft, never "always".
+      if (card.mcp) {
+        const requestId = card.mcp.requestId;
+        if (card.status !== "editable") return json(res, 409, { error: "this email was already handled" });
+        if (!outboundRequests.pending(threadId).includes(requestId)) {
+          store.patchMessage(threadId, message.id, { email: { ...card, status: "failed", error: "This request expired; nothing was sent. Ask the bot again." } });
+          return json(res, 409, { error: "this email request expired" });
+        }
+        if (action === "draft") return json(res, 400, { error: "This email can only be sent or discarded." });
+        if (action === "discard") {
+          store.patchMessage(threadId, message.id, { email: { ...card, status: "discarded", error: undefined } });
+          outboundRequests.resolve({ threadId, requestId, behavior: "deny" });
+          return json(res, 200, { status: "discarded" });
+        }
+        const edits = mcpMail.cleanMcpEdits(body, card);
+        if ("error" in edits) return json(res, 400, { error: edits.error });
+        store.patchMessage(threadId, message.id, { email: { ...card, ...edits.draft, status: "working", error: undefined } });
+        outboundRequests.resolve({ threadId, requestId, behavior: "allow" });
+        return json(res, 200, { status: "working" });
+      }
       const resume = (done: EmailCardData) => dispatchConnectorResume({
         botId: m![1], threadId, resumeKey: `email-${message.id}`, labels: [], prompt: outbox.cardOutcomeText(action, done),
       });

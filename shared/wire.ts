@@ -683,6 +683,17 @@ export interface EmailCardData {
   signature?: string;
   draftId?: string;
   messageId?: string;
+  /** Fork: the mail leaves through a custom MCP server's own tool, held
+   * until the person sends or discards it here (server/mcp-mail.ts). */
+  mcp?: {
+    server: string;
+    tool: string;
+    requestId: string;
+    /** false: the person reads it and sends it as it is, or discards it. */
+    editable: boolean;
+    /** The call's arguments, for what the card cannot show as fields. */
+    raw: string;
+  };
 }
 
 export interface SecretRequestCardData {

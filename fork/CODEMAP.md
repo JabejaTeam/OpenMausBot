@@ -43,6 +43,12 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
 ## Fork routes and people
 - New fork HTTP routes go in `server/routes/fork-people.ts` (route table), not inline in index.ts.
 - Thread worktrees: `server/thread-worktrees.ts`. Outgoing Gmail: `server/email-outbox.ts`.
+- Mail through a custom MCP server (Outlook/ms365, Odoo, …): `outbound` on the server in
+  config.json `mcpServers` (preset `"ms365"`/`"odoo"`, `tools`, `unattendedTo`). Rules and the
+  card: `server/mcp-mail.ts`; every such server is mounted behind `server/mcp-mail-gate.ts`
+  (`withMailGate` in index.ts → `server/mcp-mail-mount.ts`), which holds a sending call on
+  `/api/internal/mcp-mail` until the person sends or discards the email card. All approval
+  modes, Full included; a routine with mail "send" passes. Tests: `server/mcp-mail*.test.ts`.
 
 ## Tests, build, deploy (all on THE BEAST)
 - `fork/beast.sh` (sourced, SSOT): host, one workspace per worktree `~/omb-fork/wt/<worktree>`
