@@ -522,6 +522,7 @@ import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./
 import { applyPendingWorkspaceRestore, readLastWorkspaceRestore, type WorkspaceRestoreResult } from "./workspace-backup.ts";
 import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } from "./custom-domain.ts";
 import { allowedScopes, createEmailSignIn, parseAllowList } from "./account-signin.ts";
+import { createSesCodeClient, sesKeyFromEnv } from "./fork-signin-mail.ts";
 import { ProviderAuthSessions } from "./provider-auth-sessions.ts";
 import {
   clearSessionCookie,
@@ -886,8 +887,11 @@ const decider = createDecider({ config: () => cfg, dataDir: DATA_DIR });
 const customDomainVerifier = createCustomDomainVerifier({ environmentId: ENVIRONMENT_ID });
 // "Sign in with your email" on /pair: the allow-list is read per call so a
 // Settings change or an env bootstrap applies without a restart.
+// Jabeja fork: with SES keys the code mail is ours (server/fork-signin-mail.ts).
+const SES_KEY = sesKeyFromEnv(process.env);
 const emailSignIn = createEmailSignIn({
   allow: signInAllowList,
+  ...(SES_KEY ? { client: createSesCodeClient({ key: SES_KEY, publicUrl: () => publicUrl() ?? "" }) } : {}),
 });
 let customDomainRevision = 0;
 function savedCustomDomain(): string | null {

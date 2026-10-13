@@ -42,6 +42,7 @@ const SKIP = /(^|\/)(node_modules|dist[^/]*|release|\.cache)(\/|$)|\.test\.|\.no
 const ASSETS = [
   ["fork/hubigen/icon-1024.png", "electron/resources/app-icon.png"],
   ["fork/hubigen/app-icon.svg", "public/app-icon.svg"],
+  ["fork/hubigen/wordmark-mail.png", "public/wordmark-mail.png"],
 ];
 
 function* files(root, rel) {

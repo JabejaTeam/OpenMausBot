@@ -54,12 +54,12 @@ export function createEmailSignIn(options: {
   allow: SignInAllowList | (() => SignInAllowList);
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
-  client?: ControlPlaneClient;
+  client?: Pick<ControlPlaneClient, "requestOTP" | "verifyOTP" | "signOut">;
 }): EmailSignIn {
   const env = options.env ?? process.env;
   const allow = () => (typeof options.allow === "function" ? options.allow() : options.allow);
-  let client: ControlPlaneClient | null = options.client ?? null;
-  const controlPlane = (): ControlPlaneClient => {
+  let client: Pick<ControlPlaneClient, "requestOTP" | "verifyOTP" | "signOut"> | null = options.client ?? null;
+  const controlPlane = (): Pick<ControlPlaneClient, "requestOTP" | "verifyOTP" | "signOut"> => {
     if (client) return client;
     const url = resolveCompanionControlPlaneURL({ isPackaged: true, environment: env });
     if (!url) throw new Error("OMB_CONTROL_PLANE_URL is set but is not an https address");

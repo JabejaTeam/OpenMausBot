@@ -2,6 +2,7 @@
   "name": "Hubigen",
   "appId": "be.jabeja.hubigen",
   "website": "https://hubigen.com",
+  "mailFrom": "Hubigen <noreply@hubigen.com>",
   "downloads": "https://download.hubigen.com",
   "updateFeed": "https://download.hubigen.com/mac",
   "release": 6
