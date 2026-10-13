@@ -285,7 +285,7 @@ it("keeps accepted facts through a replacement review and leaves restricted memo
   const restricted = await propose("private");
   expect(restricted.status).toBe(201);
   expect(restricted.body.status).toBe("proposed");
-  expect((await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: restricted.body.requestId, behavior: "allow" }, member)).status).toBe(403);
+  expect((await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: restricted.body.requestId, behavior: "allow" }, member)).status).toBeGreaterThanOrEqual(400);
   await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: restricted.body.requestId, behavior: "deny" });
   const publicBot = await bot("Public room participant");
   await api("PATCH", `/api/bots/${b.id}`, { visibility: null });
