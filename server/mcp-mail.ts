@@ -108,8 +108,9 @@ const MAIL: McpMailRule = { editable: true };
 const AS_IS: McpMailRule = { editable: false };
 /** A new event invites its attendees only when it has some. */
 const INVITES: McpMailRule = { editable: false, sends: (args) => find(args, new Set(["attendees"])) !== undefined };
-/** Accepting or declining tells the organiser, unless sendResponse is false. */
-const RESPONDS: McpMailRule = { editable: false, sends: (args) => find(args, new Set(["sendresponse"])) !== false };
+/** Accepting or declining tells the organiser, unless the body Graph receives
+ * says sendResponse: false. Read only there: a false elsewhere is a decoy. */
+const RESPONDS: McpMailRule = { editable: false, sends: (args) => record(args.body)?.sendResponse !== false };
 
 const PRESETS: Record<McpMailPreset, Record<string, McpMailRule>> = {
   ms365: {

@@ -52,6 +52,9 @@ describe("which calls send", () => {
     }
     expect(outgoingRule(ms365, "accept-calendar-event", { eventId: "1", body: {} })).toBeDefined();
     expect(outgoingRule(ms365, "decline-calendar-event", { eventId: "1", body: { sendResponse: false } })).toBeUndefined();
+    // a sendResponse: false anywhere but the body Graph receives does not count
+    expect(outgoingRule(ms365, "decline-calendar-event", { eventId: "1", note: { sendResponse: false }, body: { sendResponse: true } })).toBeDefined();
+    expect(outgoingRule(ms365, "decline-calendar-event", { eventId: "1", sendResponse: false, body: {} })).toBeDefined();
   });
 
   it("lets an Odoo dry run pass and holds the commit, read the way Odoo reads it", () => {
