@@ -23,6 +23,9 @@ const nodeSchema = z.object({
   /** Fork: a code agent's assignment in its own fresh thread, independent of
    * its siblings, so its result may resume the sender before theirs. */
   independent: z.boolean().optional(),
+  /** Fork: children whose results a finished resume of this node already
+   * read, so a later resume hands only what is new (no repeated reports). */
+  handedResults: z.array(z.string()).optional(),
   /** Server restarts that cut off this node's turn; past the limit it fails. */
   restarts: z.number().int().nonnegative().default(0),
   /** Its last turn was cut off by a restart; the next run says so. */
@@ -600,6 +603,8 @@ export class RoomHandoffs {
       }
       const controller = new AbortController();
       this.controllers.set(n.id, controller);
+      // Fork: the results this resume shows; once it finishes they count as handed.
+      const shown = resumed ? this.children(n.id).filter(terminal).map(c => c.id) : [];
       const running = this.hooks.run(n, resumed, controller.signal);
       // The run read the interruption note when it built its turn text.
       if (n.interrupted) { delete n.interrupted; this.save(); }
@@ -610,6 +615,7 @@ export class RoomHandoffs {
         try {
           if (terminal(n)) return;
           n.result = result.text.slice(0, 12_000);
+          if (result.ok && shown.length) n.handedResults = [...new Set([...(n.handedResults ?? []), ...shown])];
           if (owed()) n.status = "waiting";
           else if (!result.ok) this.cancelTree(n, n.result || "Room agent failed", "failed");
           else { n.status = "completed"; this.stampProgress(root); }

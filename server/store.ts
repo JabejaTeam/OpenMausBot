@@ -2727,22 +2727,17 @@ export class Store {
       t.workTopic === topic && t.archivedAt === undefined && (!mine || mine(t.threadId)));
   }
 
-  /** Fork: start `threadId` as a copy of `from`'s Claude session (the driver
-   * resumes a "fork:" cursor with --fork-session), so a parallel assignment
-   * knows everything the card thread knows. The copy's record says the
-   * session holds none of its own messages yet, so its assignment is handed on
-   * the first turn. False when `from` has no Claude session to copy. */
-  seedForkTask(botId: string, threadId: string, from: TaskRecord): boolean {
+  /** Fork: record that `threadId` is a parallel copy of card thread
+   * `fromThreadId`, so the card thread is told what it did (unreportedForks).
+   * The copy starts its own session in its own worktree with a short brief of
+   * the card (forkCardBrief in index.ts), not a copy of the card's session:
+   * that copied 400k+ uncached tokens per turn and pinned the copy to the
+   * shared folder. */
+  markForkOf(botId: string, threadId: string, fromThreadId: string): void {
     const task = this.taskByThread(botId, threadId);
-    const cursor = from.resumeCursors.claude;
-    if (!task || from.lastInstanceId !== "claude" || typeof cursor !== "string" || cursor.startsWith("fork:")) return false;
-    const session = `fork:${cursor}`;
-    task.resumeCursors = { claude: session };
-    task.lastInstanceId = "claude";
-    task.handedMessages = { claude: { session, config: from.handedMessages?.claude?.config, ids: [] } };
-    task.forkOf = from.threadId;
+    if (!task) return;
+    task.forkOf = fromThreadId;
     this.saveBots();
-    return true;
   }
 
   /** Fork: the copies of this card thread whose results it has not been

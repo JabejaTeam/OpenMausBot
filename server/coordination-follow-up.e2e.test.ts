@@ -128,7 +128,8 @@ it("resumes the sender with a parallel assignment's result while its sibling is 
   f.plan[f.chief.id] = { turns: [
     { steps: [{ arguments: f.assign }, { arguments: { bot_ids: [f.clerk.id], message: "Book the Q3 customer invoices", parallel: true } }], reply: "Two jobs started" },
     { reply: "Customer invoices are booked; supplier invoices still running", expectContextIncludes: ["Booked", "still running"] },
-    { reply: "Both booked" },
+    // The final resume hands only the new result; the one already handed is named, not repeated.
+    { reply: "Both booked", expectContextIncludes: ["Book the Q3 supplier invoices", "Already handed to you"], expectContextExcludes: ["Book the Q3 customer invoices"] },
   ] };
   f.plan[f.clerk.id] = { gateFile: f.gate, gateWhenIncludes: "supplier invoices", reply: "Booked" };
   f.save();
@@ -166,7 +167,7 @@ it("gives a code agent one thread per card: another card runs beside it, a follo
   expect(f.clerkNodes()[2].threadId).toBe(supplier.threadId);
 }), 60_000);
 
-it("starts a parallel assignment on a card as a copy of that card's thread, and tells the card's thread what it did", () => fixture(async f => {
+it("starts a parallel assignment on a card fresh with a brief of the card, and tells the card's thread what it did", () => fixture(async f => {
   await f.api(`/api/bots/${f.clerk.id}`, { kind: "code" }, "PATCH");
   f.plan[f.chief.id] = { turns: [
     { steps: [{ arguments: { bot_ids: [f.clerk.id], message: "Kaart aaaa1111: build the invoice list" } }], reply: "List started" },
@@ -178,7 +179,7 @@ it("starts a parallel assignment on a card as a copy of that card's thread, and 
   ] };
   f.plan[f.clerk.id] = { turns: [
     { reply: "Invoice list built in commit aaa111" },
-    { reply: "CSV export built in commit bbb222" },
+    { reply: "CSV export built in commit bbb222", expectContextIncludes: ["Invoice list built in commit aaa111"] },
     { reply: "Sorted", expectContextIncludes: ["CSV export built in commit bbb222"] },
   ] };
   f.save();
@@ -190,8 +191,9 @@ it("starts a parallel assignment on a card as a copy of that card's thread, and 
   const [list, exportJob] = f.clerkNodes();
   expect(exportJob.threadId).not.toBe(list.threadId);
   const turns = f.evidence().filter((t: any) => t.botId === f.clerk.id);
-  // The copy resumed the card thread's own session under a new id.
-  expect(turns[1]).toMatchObject({ forkSession: true, resume: turns[0].resume ?? expect.any(String) });
+  // A fresh session (so it gets its own worktree), not a copy of the card's session.
+  expect(turns[1].forkSession).toBe(false);
+  expect(turns[1].resume).toBeUndefined();
   expect(turns[1].threadId).toBe(exportJob.threadId);
   await f.say("Sort it by date");
   await done("Sort done");
