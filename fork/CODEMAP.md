@@ -67,8 +67,9 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
   `UPDATE_AGENTS_CATALOG_GOLDENS=1`).
 - `fork/deploy-beast.sh [--instance NAME | --all] [--force] [--allow-rollback]`: build the current
   commit on beast, back up, roll out, health check (≈30 s). Instances (container, port, live/data dir,
-  ssh host) live in `fork/instances.tsv`; default `jabeja`. Another host gets the release copied from
-  beast. Refuses when live has commits HEAD lacks (rebase on fork/main), one rollout at a time per host
+  ssh host or jump chain `hop>container>target>vm`, e.g. ripal via beast → omb → node1 → incus VM)
+  live in `fork/instances.tsv`; default `jabeja`. Another host gets the release copied from
+  beast; `on_host`/`copy_to_host` in the script are the one way to reach a host. Refuses when live has commits HEAD lacks (rebase on fork/main), one rollout at a time per host
   (`~/omb-fork/deploy.lock`), waits for the BUILD_/DEPLOY_OK/FAIL log lines.
 
 ## Office view (3D)

@@ -1,13 +1,15 @@
 # Jabeja fork only: every live OpenMausBot that fork/deploy-beast.sh rolls out
 # to, one per line (SSOT). Same image everywhere; each its own container,
 # port, code and data. The port is the server's inside its container; paths
-# are relative to $HOME on the host; the live folder holds DEPLOYED_COMMIT.
-# Host "beast" means $BEAST_HOST (fork/beast.sh). Builds always run on the
-# beast; another host gets the built release copied over.
+# are absolute when they start with /, else relative to $HOME on the host; the
+# live folder holds DEPLOYED_COMMIT. Host "beast" means $BEAST_HOST
+# (fork/beast.sh); another ssh alias is used as is; a jump chain
+# hop>container>target>vm means ssh hop, docker exec -i container ssh target,
+# incus exec vm (see host_cmd in fork/deploy-beast.sh). Builds always run on
+# the beast; another host gets the built release copied over.
 # name	host	container	port	live	data
 jabeja	beast	omb	8799	omb-data/home/omb-server	omb-data/home/.openmausbot
 # ripal runs inside VM hermes-vm on node1 (159.69.74.253), port published on
-# 100.86.49.68:8811 (tailnet only). Its paths are absolute, not under $HOME, and
-# there is no ssh alias "hermes-vm" yet (reached via node1 + incus exec), so
-# deploy-beast.sh --instance ripal does not work as written yet.
-ripal	hermes-vm	omb-ripal	8799	/opt/omb-klanten/ripal/home/omb-server	/opt/omb-klanten/ripal/home/.openmausbot
+# 100.86.49.68:8811 (tailnet only). node1 only lets in the beast's container
+# omb, so it is reached through that; commands in the VM run as root.
+ripal	beast>omb>root@159.69.74.253>hermes-vm	omb-ripal	8799	/opt/omb-klanten/ripal/home/omb-server	/opt/omb-klanten/ripal/home/.openmausbot
