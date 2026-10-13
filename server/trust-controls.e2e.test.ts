@@ -264,7 +264,7 @@ it("never treats arbitrary workbench code as a counted daily allowance", async (
   expect(relayed).toHaveLength(before);
 });
 
-it("keeps accepted facts through a replacement review and rejects autonomous restricted memory", async () => {
+it("keeps accepted facts through a replacement review and leaves restricted memory to an admin", async () => {
   const b = await bot("Team facts");
   const token = await mint(b.id, b.threadId, "agents");
   const propose = (detail: string) => api("POST", "/api/internal/team-memory",
@@ -282,7 +282,11 @@ it("keeps accepted facts through a replacement review and rejects autonomous res
   entries = (await api("GET", "/api/team-memory?section=")).body.entries;
   expect(entries.filter((entry: any) => entry.status === "accepted")).toHaveLength(1);
   await api("PATCH", `/api/bots/${b.id}`, { visibility: "admins" });
-  expect((await propose("private")).status).toBe(403);
+  const restricted = await propose("private");
+  expect(restricted.status).toBe(201);
+  expect(restricted.body.status).toBe("proposed");
+  expect((await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: restricted.body.requestId, behavior: "allow" }, member)).status).toBe(403);
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: restricted.body.requestId, behavior: "deny" });
   const publicBot = await bot("Public room participant");
   await api("PATCH", `/api/bots/${b.id}`, { visibility: null });
   const room = await api("POST", "/api/groups", { name: "Restricted room", memberIds: [publicBot.id, b.id] });
@@ -291,7 +295,7 @@ it("keeps accepted facts through a replacement review and rejects autonomous res
   await api("PATCH", `/api/bots/${b.id}`, { visibility: "admins" });
   const roomToken = await mint(publicBot.id, roomThread, "agents");
   expect((await api("POST", "/api/internal/team-memory", { fromBotId: publicBot.id, fromThreadId: roomThread,
-    kind: "term", name: "Private room term", detail: "cannot share with sibling bots" }, roomToken)).status).toBe(403);
+    kind: "term", name: "Private room term", detail: "waits for an admin" }, roomToken)).body.status).toBe("proposed");
   expect((await api("POST", "/api/team-memory?section=", { kind: "term", name: "Human", detail: "approved by admin" })).status).toBe(201);
 });
 
