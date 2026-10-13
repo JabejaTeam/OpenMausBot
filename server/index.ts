@@ -680,6 +680,7 @@ import { findAntigravityLeftovers, removeAntigravityLeftovers } from "./drivers/
 import { createLiveRoutes } from "./routes/live.ts";
 import { createUsageRoutes } from "./routes/usage.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
+import { startSseHeartbeat } from "./sse-heartbeat.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -20618,18 +20619,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // A comment keeps intermediaries from idling the connection, while a
       // data frame is visible to EventSource clients and resets their own
       // liveness watchdog. Heartbeats carry no id and never advance replay.
-      const keepalive = setInterval(() => {
-        // an expired session's stream ends at the next heartbeat
-        if (client.sessionId && !sessions.isLive(client.sessionId)) {
-          res.end();
-          return;
-        }
-        try {
-          res.write(`: keepalive\n\ndata: ${JSON.stringify({ kind: "ping" })}\n\n`);
-        } catch {}
-      }, SSE_HEARTBEAT_MS);
+      // An expired session's stream ends at the next heartbeat (fork: sse-heartbeat.ts).
+      const stopHeartbeat = startSseHeartbeat(res, SSE_HEARTBEAT_MS, `: keepalive\n\ndata: ${JSON.stringify({ kind: "ping" })}\n\n`,
+        () => !client.sessionId || sessions.isLive(client.sessionId));
       req.on("close", () => {
-        clearInterval(keepalive);
+        stopHeartbeat();
         sseClients.delete(client);
       });
       return;
