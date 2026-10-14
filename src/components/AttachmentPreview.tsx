@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   Check,
@@ -62,6 +63,36 @@ export function previewImage(path: string, name = attachmentBasename(path)): Pre
 export function wrappedImageIndex(index: number, step: -1 | 1, count: number): number {
   if (count <= 0) return 0;
   return (index + step + count) % count;
+}
+
+// Fork: zoom in the preview (pinch on a trackpad arrives as ctrl+wheel,
+// Safari also sends gesture events). The view is a scale plus a translation
+// of the image from the centre of its box, in screen pixels.
+export interface ZoomView {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+export const ZOOM_MIN = 1;
+export const ZOOM_MAX = 8;
+
+/** Keep the image inside its box: no panning further than the zoom made it larger. */
+export function clampZoomView(view: ZoomView, box: { width: number; height: number }): ZoomView {
+  if (view.scale <= ZOOM_MIN) return { scale: ZOOM_MIN, x: 0, y: 0 };
+  const maxX = ((view.scale - 1) * box.width) / 2;
+  const maxY = ((view.scale - 1) * box.height) / 2;
+  return { scale: view.scale, x: Math.min(maxX, Math.max(-maxX, view.x)), y: Math.min(maxY, Math.max(-maxY, view.y)) };
+}
+
+/**
+ * Zoom by `factor` around a point (relative to the box centre) so the spot
+ * under the pointer stays under the pointer.
+ */
+export function zoomAround(view: ZoomView, factor: number, point: { x: number; y: number }, box: { width: number; height: number }): ZoomView {
+  const scale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, view.scale * factor));
+  const ratio = scale / view.scale;
+  return clampZoomView({ scale, x: point.x - (point.x - view.x) * ratio, y: point.y - (point.y - view.y) * ratio }, box);
 }
 
 export type PreviewKeyAction = "close" | "previous" | "next" | null;
@@ -499,6 +530,78 @@ export function AttachmentPreviewDialog({
   const [loadedSources, setLoadedSources] = useState<Set<string>>(() => new Set());
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // Zoom survives switching images, so two versions compare at the same spot.
+  const [view, setView] = useState<ZoomView>({ scale: 1, x: 0, y: 0 });
+  const stageRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ x: number; y: number; view: ZoomView } | null>(null);
+  const gestureRef = useRef(1);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const box = () => stage.getBoundingClientRect();
+    const pointIn = (event: { clientX: number; clientY: number }) => {
+      const rect = box();
+      return { x: event.clientX - rect.left - rect.width / 2, y: event.clientY - rect.top - rect.height / 2 };
+    };
+    // Non-passive, or the browser zooms the whole page on a pinch.
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        const factor = Math.exp(-event.deltaY * 0.01);
+        setView((v) => zoomAround(v, factor, pointIn(event), box()));
+      } else {
+        // Two-finger scroll pans a zoomed image.
+        if (viewRef.current.scale <= 1) return;
+        event.preventDefault();
+        setView((v) => clampZoomView({ ...v, x: v.x - event.deltaX, y: v.y - event.deltaY }, box()));
+      }
+    };
+    // Safari on macOS: pinch comes as gesture events with a running scale.
+    const onGestureStart = (event: Event) => {
+      event.preventDefault();
+      gestureRef.current = 1;
+    };
+    const onGestureChange = (event: Event) => {
+      event.preventDefault();
+      const scale = (event as Event & { scale: number; clientX: number; clientY: number }).scale;
+      const factor = scale / gestureRef.current;
+      gestureRef.current = scale;
+      setView((v) => zoomAround(v, factor, pointIn(event as unknown as MouseEvent), box()));
+    };
+    stage.addEventListener("wheel", onWheel, { passive: false });
+    stage.addEventListener("gesturestart", onGestureStart);
+    stage.addEventListener("gesturechange", onGestureChange);
+    return () => {
+      stage.removeEventListener("wheel", onWheel);
+      stage.removeEventListener("gesturestart", onGestureStart);
+      stage.removeEventListener("gesturechange", onGestureChange);
+    };
+  }, []);
+
+  const onDoubleClick = (event: ReactMouseEvent) => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const rect = stage.getBoundingClientRect();
+    const point = { x: event.clientX - rect.left - rect.width / 2, y: event.clientY - rect.top - rect.height / 2 };
+    setView((v) => (v.scale > 1 ? { scale: 1, x: 0, y: 0 } : zoomAround(v, 2.5, point, rect)));
+  };
+  const onPointerDown = (event: ReactPointerEvent) => {
+    if (view.scale <= 1 || event.button !== 0) return;
+    dragRef.current = { x: event.clientX, y: event.clientY, view };
+    (event.target as Element).setPointerCapture?.(event.pointerId);
+  };
+  const onPointerMove = (event: ReactPointerEvent) => {
+    const drag = dragRef.current;
+    const stage = stageRef.current;
+    if (!drag || !stage) return;
+    setView(clampZoomView({ ...drag.view, x: drag.view.x + event.clientX - drag.x, y: drag.view.y + event.clientY - drag.y }, stage.getBoundingClientRect()));
+  };
+  const onPointerUp = () => {
+    dragRef.current = null;
+  };
 
   useLayoutEffect(() => {
     closeRef.current = onClose;
@@ -619,7 +722,15 @@ export function AttachmentPreviewDialog({
             </button>
           </div>
         </header>
-        <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 sm:p-8">
+        <div
+          ref={stageRef}
+          onDoubleClick={onDoubleClick}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          className={cn("relative flex min-h-0 flex-1 touch-none items-center justify-center overflow-hidden p-4 sm:p-8", view.scale > 1 && "cursor-grab active:cursor-grabbing")}
+        >
           {!loaded && !failed && (
             <div className="absolute inset-4 flex animate-pulse items-center justify-center rounded-xl bg-white/[0.055] sm:inset-8" role="status">
               <span className="flex items-center gap-2 text-[13px] text-white/55">
@@ -646,8 +757,10 @@ export function AttachmentPreviewDialog({
               alt={current.name}
               onLoad={() => setLoadedSources((sources) => new Set(sources).add(current.src))}
               onError={() => setFailedSource(current.src)}
+              draggable={false}
+              style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
               className={cn(
-                "block max-h-full max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-150",
+                "block max-h-full max-w-full select-none rounded-lg object-contain shadow-2xl transition-opacity duration-150",
                 loaded ? "opacity-100" : "opacity-0",
               )}
             />

@@ -8,6 +8,7 @@ import {
   MarkdownImagePreview,
   OutsideWorkspaceFile,
   canonicalDownloadFilename,
+  clampZoomView,
   contentDispositionFilename,
   imageGalleryLayout,
   isExternalImageSource,
@@ -17,6 +18,7 @@ import {
   safeDownloadFilename,
   saveFailureText,
   wrappedImageIndex,
+  zoomAround,
 } from "./AttachmentPreview";
 
 describe("attachment image navigation", () => {
@@ -211,5 +213,20 @@ describe("local Markdown image lifecycle", () => {
     )).toBe(
       "/api/threads/thread-one/messages/message-two/file?preview=1&ref=42",
     );
+  });
+});
+
+describe("preview zoom", () => {
+  const box = { width: 400, height: 300 };
+
+  it("keeps the spot under the pointer in place and stays within 1x-8x", () => {
+    const zoomed = zoomAround({ scale: 1, x: 0, y: 0 }, 2, { x: 100, y: 50 }, box);
+    expect(zoomed).toEqual({ scale: 2, x: -100, y: -50 });
+    expect(zoomAround(zoomed, 100, { x: 0, y: 0 }, box).scale).toBe(8);
+    expect(zoomAround(zoomed, 0.01, { x: 0, y: 0 }, box)).toEqual({ scale: 1, x: 0, y: 0 });
+  });
+
+  it("does not pan past the edge of the zoomed image", () => {
+    expect(clampZoomView({ scale: 2, x: 999, y: -999 }, box)).toEqual({ scale: 2, x: 200, y: -150 });
   });
 });
