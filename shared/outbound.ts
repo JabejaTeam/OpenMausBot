@@ -110,48 +110,6 @@ export interface ConnectorCall {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-// Fork: modules a read-only workbench script may import. Nothing here opens
-// a connection or starts a process.
-const WORKBENCH_SAFE_MODULES = new Set([
-  "json", "re", "datetime", "time", "math", "statistics", "collections", "itertools",
-  "html", "textwrap", "csv", "base64", "unicodedata", "zoneinfo", "decimal",
-]);
-// Names that reach outside the sandbox or hide what is called: network and
-// process modules, dynamic execution, attribute lookup by string, private
-// attributes, and Composio helpers other than run_composio_tool. Any '#' is
-// refused: a comment inside brackets can split '.' from '_x'. Non-ASCII
-// is refused outright: Python NFKC-folds identifiers (ｅｘｅｃ is exec).
-const WORKBENCH_UNSAFE = /\b(?:exec|eval|compile|getattr|setattr|delattr|globals|locals|vars|breakpoint|proxy_execute|upload_local_file|execute_tool|run_tool|requests|urllib|httpx?|aiohttp|socket|subprocess|popen|system|smtplib|ftplib|ctypes|composio|os|sys|modules|builtins|importlib|shutil|pty|signal|spawn\w*|multiprocessing|threading|asyncio|ssl|attrgetter|methodcaller|get_type_hints|ForwardRef|Formatter|get_field|reduce)\b|__\w+__|\.\s*(?:\\\s*)?_|[^\t\n\r -~]|#|\w*execute\w*\s*\(/i;
-const WORKBENCH_TOOL_CALL = /\brun_composio_tool\b/g;
-const WORKBENCH_LITERAL_CALL = /\brun_composio_tool\s*\(\s*(?:tool_slug\s*=\s*)?["']([A-Z][A-Z0-9_]*)["']/g;
-
-/** Fork: the app tools a workbench script runs, when it provably only reads:
- * every run_composio_tool call names a literal read-only tool, it imports
- * only safe modules, and nothing in it can reach the network, run a process
- * or compute a call. Null otherwise; the caller then treats it as opaque.
- * A heuristic over source text: anything it cannot see through fails closed. */
-export function readOnlyWorkbenchCalls(code: unknown): ConnectorCall[] | null {
-  if (typeof code !== "string" || !code.trim()) return null;
-  // proxy_execute etc. are caught by WORKBENCH_UNSAFE; run_composio_tool is
-  // the one helper allowed, so mask it before that check.
-  if (WORKBENCH_UNSAFE.test(code.replace(WORKBENCH_TOOL_CALL, "tool_call"))) return null;
-  // Every import must be its own line, so the allowlist below sees them all.
-  let importLines = 0;
-  for (const line of code.split("\n")) {
-    const imported = line.match(/^\s*(?:from\s+([\w.]+)\s+import\b|import\s+(.+))/);
-    if (!imported) continue;
-    importLines++;
-    if (/[;\\]/.test(line)) return null;
-    const modules = imported[1] ? [imported[1]] : imported[2].split(",").map((part) => part.trim().split(/\s+/)[0]);
-    if (!modules.every((module) => WORKBENCH_SAFE_MODULES.has(module.split(".")[0]))) return null;
-  }
-  if ((code.match(/\bimport\b/g) ?? []).length !== importLines) return null;
-  const slugs = [...code.matchAll(WORKBENCH_LITERAL_CALL)].map((match) => match[1]);
-  if (slugs.length !== (code.match(WORKBENCH_TOOL_CALL) ?? []).length) return null;
-  if (!slugs.every((slug) => isReadOnlyTool(slug) && !isOutboundTool(slug))) return null;
-  return [...new Set(slugs)].map((slug) => ({ slug }));
-}
-
 /** Composio's session exposes a handful of meta tools and runs the app
  * tools inside them: a multi-execute call carries a list of slugs with
  * arguments. Arbitrary workbench/bash code is opaque: it requires an
@@ -170,11 +128,6 @@ export function connectorCallsIn(name: string, args: unknown): ConnectorCall[] {
       calls.push({ slug, ...(item.arguments !== undefined ? { arguments: item.arguments } : {}) });
     }
     return calls;
-  }
-  if (name === "COMPOSIO_REMOTE_WORKBENCH") {
-    // Fork: a script that provably only reads runs without a card.
-    const reads = readOnlyWorkbenchCalls(isRecord(args) ? args.code_to_execute ?? args.code : undefined);
-    if (reads) return reads;
   }
   if (name === "COMPOSIO_REMOTE_WORKBENCH" || name === "COMPOSIO_REMOTE_BASH_TOOL") {
     // Arbitrary code can compute tool names and repeat calls. Its app and

@@ -473,6 +473,7 @@ import { describeTool } from "./activity.ts";
 import { OutboundCounts } from "./outbound-counts.ts";
 import { OutboundRequestService } from "./outbound-requests.ts";
 import { DEFAULT_OUTBOUND_POLICY, connectorCallsIn, outboundCallsIn } from "../shared/outbound.ts";
+import { readOnlyWorkbenchCalls } from "./workbench-readonly.ts";
 import { connectorAccessDecision, describeConnectorScopes } from "../shared/connector-scopes.ts";
 import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
@@ -21334,7 +21335,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // The app tools this call would actually run, seen through Composio's
         // meta tools (a multi-execute list, workbench code), and the ones
         // among them that send.
-        const outboundCalls = rpc?.method === "tools/call" && typeof rpcParams?.name === "string"
+        // Fork: a workbench script Python proves read-only runs as its reads.
+        const workbenchArgs = rpcParams?.arguments as { code_to_execute?: unknown; code?: unknown } | undefined;
+        const workbenchReads = rpc?.method === "tools/call" && rpcParams?.name === "COMPOSIO_REMOTE_WORKBENCH"
+          ? await readOnlyWorkbenchCalls(workbenchArgs?.code_to_execute ?? workbenchArgs?.code)
+          : null;
+        const outboundCalls = workbenchReads ? [] : rpc?.method === "tools/call" && typeof rpcParams?.name === "string"
           ? outboundCallsIn(rpcParams.name, rpcParams.arguments)
           : [];
         const outboundTool = outboundCalls.length ? outboundCalls[0].slug : null;
@@ -21345,9 +21351,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // ── connection scopes ──
         // Checked first: an app this bot may not touch is refused outright,
         // never turned into a question for the person.
-        const connectorCalls = rpc?.method === "tools/call" && typeof rpcParams?.name === "string"
+        const connectorCalls = workbenchReads ?? (rpc?.method === "tools/call" && typeof rpcParams?.name === "string"
           ? connectorCallsIn(rpcParams.name, rpcParams.arguments)
-          : [];
+          : []);
         const access = connectorAccessDecision(currentSender.connectorScopes, connectorCalls, serviceSlugs);
         if (!access.ok) {
           const described = describeTool(access.slug);
