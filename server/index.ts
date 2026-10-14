@@ -21337,8 +21337,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // among them that send.
         // Fork: a workbench script Python proves read-only runs as its reads.
         const workbenchArgs = rpcParams?.arguments as { code_to_execute?: unknown; code?: unknown } | undefined;
-        const workbenchReads = rpc?.method === "tools/call" && rpcParams?.name === "COMPOSIO_REMOTE_WORKBENCH"
+        // App reads still go through scopes below; a bot with explicit tool
+        // grants only gets file-only scripts this way.
+        const workbenchChecked = rpc?.method === "tools/call" && rpcParams?.name === "COMPOSIO_REMOTE_WORKBENCH"
           ? await readOnlyWorkbenchCalls(workbenchArgs?.code_to_execute ?? workbenchArgs?.code)
+          : null;
+        const workbenchReads = workbenchChecked && (!workbenchChecked.length || currentSender.connectorTools === undefined)
+          ? workbenchChecked
           : null;
         const outboundCalls = workbenchReads ? [] : rpc?.method === "tools/call" && typeof rpcParams?.name === "string"
           ? outboundCallsIn(rpcParams.name, rpcParams.arguments)

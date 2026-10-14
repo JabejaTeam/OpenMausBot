@@ -10,7 +10,7 @@ describe("fork: read-only workbench scripts (python ast)", () => {
   });
 
   it("passes comments, non-ASCII strings, functions and comprehensions", async () => {
-    const code = "# één samenvatting\nfrom datetime import datetime\ndef short(t):\n    return t[:80]\nrows = [short(m['subject']) for m in data] if (data := []) else []\nprint(f\"{len(rows)} mails – {datetime.now():%H:%M}\")";
+    const code = "# één samenvatting\nfrom datetime import datetime\ndef short(t):\n    return t[:80]\ndata = []\nrows = [short(m['subject']) for m in data if m]\nwith open('/mnt/files/x.json') as f:\n    raw = f.read()\nprint(f\"{len(rows)} mails – {datetime.now():%H:%M}\")";
     expect(await slugs(code)).toEqual([]);
   });
 
@@ -43,6 +43,17 @@ describe("fork: read-only workbench scripts (python ast)", () => {
     ["a decorator", "def d(f): return f\n@d\ndef g(): pass"],
     ["fullwidth exec", "ｅｘｅｃ(payload)"],
     ["a syntax error", "def ("],
+    ["a builtin shadowed only on a branch that never runs", "if False:\n    exec = print\nexec(payload)"],
+    ["a workbench global reached past a dead binding", "if False:\n    send_email = print\nsend_email(to='x')"],
+    ["a name bound only inside a loop", "for x in []:\n    proxy = 1\nproxy('POST')"],
+    ["a name bound only inside try", "try:\n    helper = print\nexcept Exception:\n    pass\nhelper()"],
+    ["del", "x = 1\ndel x"],
+    ["shadowing a safe builtin", "print = 1"],
+    ["a function using a later global", "def f():\n    return later()\nlater = print\nf()"],
+    ["open for writing", "open('/tmp/x', 'w')"],
+    ["open passed around", "o = open\no('/tmp/x', 'w')"],
+    ["an import inside a block", "if True:\n    import json"],
+    ["walrus", "if (x := 1):\n    pass"],
     ["an empty script", "  "],
   ])("stays opaque for %s", async (_, code) => {
     expect(await readOnlyWorkbenchCalls(code)).toBeNull();
