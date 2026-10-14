@@ -36,6 +36,9 @@ describe("fork: read-only workbench scripts", () => {
     ["a module reached through sys.modules", 'import typing\ntyping.sys.modules["sub" + "process"].run(["curl", "x"])'],
     ["a private module attribute", 'import datetime\ndatetime._sys.modules["x"]'],
     ["os via pathlib", "from pathlib import Path\nPath('x')"],
+    ["operator.attrgetter", 'import operator\nimport datetime\noperator.attrgetter("_s" + "ys")(datetime)'],
+    ["string.Formatter field lookup", 'import string\nstring.Formatter().get_field("0." + "_sys", [d], {})'],
+    ["typing forward refs", 'import typing\ntyping.get_type_hints(f)'],
     ["os.spawn", "import json\njson.os.spawnl(0, 'x')"],
   ])("stays opaque for %s", (_, code) => {
     expect(workbench(code)).toEqual(OPAQUE);
