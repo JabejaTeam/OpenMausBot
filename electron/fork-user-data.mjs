@@ -15,19 +15,24 @@ import path from "node:path";
 export const OLD_NAME = "openmausbot";
 const CARRIED_DIRS = ["Local Storage"];
 
-/** Copy the old folder's plain settings into `to`, once: only when `to`
- * does not exist yet and `from` does. Returns the names it copied. */
+// Written once it ran. Not "the folder is new": Electron makes the folder
+// before main.mjs runs, so it always exists by then.
+const MARKER = ".carried-over-from-openmausbot";
+
+/** Copy the old folder's plain settings into `to`, once (MARKER), never over
+ * a file `to` already has. Returns the names it copied. */
 export function carryOverUserData(from, to) {
-  if (from === to || fs.existsSync(to) || !fs.existsSync(from)) return [];
+  if (from === to || !fs.existsSync(from) || fs.existsSync(path.join(to, MARKER))) return [];
   fs.mkdirSync(to, { recursive: true, mode: 0o700 });
   const copied = [];
   for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
     const plainFile = entry.isFile() && entry.name.endsWith(".json");
     const plainDir = entry.isDirectory() && CARRIED_DIRS.includes(entry.name);
-    if (!plainFile && !plainDir) continue;
+    if ((!plainFile && !plainDir) || fs.existsSync(path.join(to, entry.name))) continue;
     fs.cpSync(path.join(from, entry.name), path.join(to, entry.name), { recursive: true, preserveTimestamps: true });
     copied.push(entry.name);
   }
+  fs.writeFileSync(path.join(to, MARKER), `${new Date().toISOString()}\n`);
   return copied;
 }
 

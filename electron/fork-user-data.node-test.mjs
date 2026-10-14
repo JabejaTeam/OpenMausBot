@@ -29,19 +29,26 @@ test("takes over the plain settings, never what the old keychain key encrypted",
   assert.equal(fs.existsSync(path.join(from, "credentials.bin")), true);
 });
 
-test("only once: an existing folder is never touched", () => {
+test("a folder Electron already made still gets them, without overwriting what it has", () => {
   const { from, to } = oldFolder();
-  fs.mkdirSync(to);
-  fs.writeFileSync(path.join(to, "environments.json"), '{"activeId":"mine"}');
+  fs.mkdirSync(path.join(to, "Cache"), { recursive: true });
+  fs.writeFileSync(path.join(to, "window-state.json"), '{"mine":true}');
+  assert.deepEqual(carryOverUserData(from, to).sort(), ["Local Storage", "environments.json"]);
+  assert.equal(fs.readFileSync(path.join(to, "window-state.json"), "utf8"), '{"mine":true}');
+});
+
+test("only once: after the first start nothing comes back", () => {
+  const { from, to } = oldFolder();
+  carryOverUserData(from, to);
+  fs.rmSync(path.join(to, "environments.json"));
   assert.deepEqual(carryOverUserData(from, to), []);
-  assert.equal(fs.readFileSync(path.join(to, "environments.json"), "utf8"), '{"activeId":"mine"}');
+  assert.equal(fs.existsSync(path.join(to, "environments.json")), false);
 });
 
 test("nothing to carry without an old folder", () => {
   const { root } = oldFolder();
   const to = path.join(root, "Hubigen");
   assert.deepEqual(carryOverUserData(path.join(root, "nope"), to), []);
-  assert.equal(fs.existsSync(to), false);
 });
 
 test("the app named openmausbot itself is left alone", () => {
