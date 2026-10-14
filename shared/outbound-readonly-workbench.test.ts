@@ -42,6 +42,7 @@ describe("fork: read-only workbench scripts", () => {
     ["a fullwidth identifier", "\uff45\uff58\uff45\uff43(payload)"],
     ["a private attribute after whitespace", "import datetime\ndatetime. _sys"],
     ["a private attribute after a line continuation", "import datetime\ndatetime.\\\n_sys"],
+    ["a comment between dot and private attribute", "import datetime\n(datetime. # x\n _sys)"],
     ["os.spawn", "import json\njson.os.spawnl(0, 'x')"],
   ])("stays opaque for %s", (_, code) => {
     expect(workbench(code)).toEqual(OPAQUE);
