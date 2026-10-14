@@ -53,6 +53,7 @@ import {
 } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
 import { runKeepWarmPing, type KeepWarmContract } from "./claude-keepwarm.ts";
+import { applyFailover, mayFailOver, notePrimaryRefused } from "./claude-failover.ts";
 import { permissionCommand, permissionLaunchCwd } from "./permission-command.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts";
@@ -1363,6 +1364,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       nativePermissionMode: string | null;
       /** launched with --replay-user-messages (see CLAUDE_REPLAY_FLOOR) */
       replaysUserMessages: boolean;
+      /** fork: launched on the second account (claude-failover.ts) */
+      onFallback: boolean;
       /** the running turn, or null between turns */
       turn: {
         turnId: string;
@@ -1381,6 +1384,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         limit?: ClaudeLimit | null;
         /** the turn failed on its account's usage limit, and said so */
         limitReached?: boolean;
+        /** fork: the main account's limit refused this turn; its close
+         * relaunches it on the second account (claude-failover.ts) */
+        failover?: boolean;
         /** what failed this turn is already in front of the person: a
          * sign-in, update or usage-limit error, or the CLI's own api-error
          * text. An error `result` says nothing more. */
@@ -1781,6 +1787,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
 
       const env = environment(turnModel);
+      const onFallback = applyFailover(env, config.configDir, input.environment);
       const authSettings = isolated && !injected.injected
         ? readClaudeAuthSettings(env, input.environment) : {};
       // Harness hooks (item 0.2): one helper command for the events the
@@ -2032,6 +2039,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         sawInit: false,
         nativePermissionMode: null,
         replaysUserMessages,
+        onFallback,
         turn: { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false, pendingSteers: new Set(), deferred: null, continuationGrace: null, continuationSilence: null },
         idleTimer: null,
         closing: false,
@@ -2101,6 +2109,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (!t || t.limitReached) return;
         t.limitReached = t.explained = true;
         t.limit = claudeLimitRefusal(frame.api_error_params?.rate_limit_info) ?? t.limit;
+        // fork: the main account is spent — the turn moves to the second
+        // account in silence; its close relaunches it (finalizeClose).
+        if (!session.onFallback && !t.stopRequested && mayFailOver(config.configDir, input.environment)) {
+          notePrimaryRefused(t.limit ?? null);
+          t.failover = true;
+          closeSession(threadId, "usage limit: second account");
+          return;
+        }
         const said = typeof words === "string" && USAGE_LIMIT.test(words) ? words : undefined;
         emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: claudeLimitMessage(t.limit ?? null, said) });
       };
@@ -2310,6 +2326,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             // rate_limit_event did and nothing failed the turn before it.
             if (o.is_error === true && !session.turn?.authFailed && (session.turn?.limit ||
                 o.api_error === "usage_limit_reached" || USAGE_LIMIT.test(String(o.result ?? "")))) reachLimit(o, o.result);
+            // fork: the relaunch on the second account settles this turn
+            if (session.turn?.failover) break;
             // Any other error result nothing has explained yet is a turn that
             // failed without an api-error frame: its own words say why, so a
             // failed turn is never an empty one. A Stop is no failure.
@@ -2486,9 +2504,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           // no retry budget spent. (A fresh process is never retained, so
           // this happens at most once per turn.)
           const endedBeforeTurn = session.turn.awaitingInit === true;
+          // fork: the main account's limit refused the turn; it resumes the
+          // same session on the second account at once (claude-failover.ts).
+          const failover = session.turn.failover === true;
+          const failoverAfterWork = failover && session.turn.sawStreamDelta;
           if (
             !retry.cancelled &&
-            (endedBeforeTurn || (
+            (endedBeforeTurn || failover || (
               code !== 0 &&
               verdict.transient &&
               !session.turn.sawStreamDelta &&
@@ -2516,7 +2538,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             sessions.delete(threadId);
             session.turn = null;
             let delayMs = 0;
-            if (!endedBeforeTurn) {
+            if (!endedBeforeTurn && !failover) {
               retry.attempt++;
               delayMs = computeBackoff(retry.attempt - 1);
               emit({
@@ -2553,7 +2575,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 const cursor = session.sessionId ?? sessionId ?? undefined;
                 // The reset was consumed by the initial launch. Retry the
                 // new session, never the context that launch replaced.
-                await sendTurn({ ...turn, sessionReset: false, resumeCursor: cursor }, turnId);
+                await sendTurn({
+                  ...turn,
+                  sessionReset: false,
+                  resumeCursor: cursor,
+                  // the session already holds what the refused turn did
+                  ...(failoverAfterWork ? { text: "Je vorige stap werd onderbroken door een gebruikslimiet. Ga verder waar je gebleven was.", images: undefined } : {}),
+                }, turnId);
               } catch (e) {
                 if (active.get(threadId)?.turnId === turnId) active.delete(threadId);
                 retryState.delete(threadId);

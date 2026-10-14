@@ -22,6 +22,9 @@
 //                      | usage-limit (the account's usage limit refused the
 //                        call: the api-error frame and result 2.1.295 sends,
 //                        code usage_limit_reached, carrying the refused window)
+//   FAKE_CLAUDE_UNLIMITED_TOKEN with usage-limit: a CLAUDE_CODE_OAUTH_TOKEN
+//                      equal to this is an account with room left (fork:
+//                      claude-failover.ts), whose turns run normally.
 //   FAKE_CLAUDE_API_ERROR text for the api-error frame (default: overloaded;
 //                      for usage-limit, the weekly limit's words).
 //   FAKE_CLAUDE_RATE_LIMIT JSON rate_limit_info: each turn reports it in a
@@ -783,7 +786,8 @@ const playTurn = (prompt: JsonValue, late = false) => {
 
   const resumedError = process.env.FAKE_CLAUDE_RESUMED_API_ERROR === "1" && argv.includes("--resume") && !resumedErrorPlayed;
   if (resumedError) resumedErrorPlayed = true;
-  if (mode === "usage-limit") {
+  const unlimited = Boolean(process.env.FAKE_CLAUDE_UNLIMITED_TOKEN) && process.env.CLAUDE_CODE_OAUTH_TOKEN === process.env.FAKE_CLAUDE_UNLIMITED_TOKEN;
+  if (mode === "usage-limit" && !unlimited) {
     // captured from 2.1.295 for an account past its weekly limit
     const text = process.env.FAKE_CLAUDE_API_ERROR ?? "You've hit your weekly limit \u00b7 resets Oct 12 at 2:30pm (Asia/Calcutta)";
     out({

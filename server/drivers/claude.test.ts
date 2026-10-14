@@ -42,6 +42,7 @@ import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { ephemeralWorkspaceTokenPath } from "../workspace-backup-policy.ts";
 import * as procs from "../procs.ts";
 import * as localInject from "./local-inject.ts";
+import { resetFailover } from "./claude-failover.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
 /** The process that played the latest turn a FAKE_CLAUDE_DUMP recorded. */
@@ -670,6 +671,39 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.some((event) => event.type === "item.completed" && event.itemType === "assistant_text")).toBe(false);
     expect(recorder.events.some((event) => event.type === "content.delta")).toBe(false);
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "quota" });
+  });
+
+  // fork (claude-failover.ts): with a second account's token on file, the
+  // main account's limit moves the turn there instead of failing it.
+  it("runs a turn its main account's limit refused on the second account, then keeps using it", async () => {
+    const tokenFile = join(DATA_DIR, "claude-fallback-token");
+    const dump = join(scratch, "dump.json");
+    writeFileSync(tokenFile, "second-account-token\n");
+    process.env.FAKE_CLAUDE_UNLIMITED_TOKEN = "second-account-token";
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    try {
+      const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+      await create("usage-limit", { FAKE_CLAUDE_RATE_LIMIT: JSON.stringify({ status: "rejected", resetsAt, rateLimitType: "five_hour", isUsingOverage: false }) });
+      await instance.adapter.sendTurn({ threadId: "t-failover", text: "hi" });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(recorder.events.filter((event) => event.type === "runtime.error")).toEqual([]);
+      // one logical turn: the relaunch keeps its id and settles it once
+      expect(new Set(recorder.events.filter((event) => event.type === "turn.started").map((event) => event.turnId)).size).toBe(1);
+      expect(recorder.events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+      expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+      expect(JSON.parse(readFileSync(dump, "utf8")).env.CLAUDE_CODE_OAUTH_TOKEN).toBe("second-account-token");
+
+      // the next thread starts on the second account straight away
+      recorder.events.length = 0;
+      await instance.adapter.sendTurn({ threadId: "t-failover-2", text: "hi" });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+    } finally {
+      rmSync(tokenFile, { force: true });
+      delete process.env.FAKE_CLAUDE_UNLIMITED_TOKEN;
+      delete process.env.FAKE_CLAUDE_DUMP;
+      resetFailover();
+    }
   });
 
   // Pesto on 2.1.272 (Oct 8-9): the CLI's rate_limit_event refused the
