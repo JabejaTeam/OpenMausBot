@@ -1,4 +1,4 @@
-// Jabeja fork: the channel picker on top of the office's thread column
+// Jabeja fork: the channel picker on top of the thread column
 // (src/lib/thread-channel.ts). A popup button, as a Mac toolbar has one:
 // My conversations, Team, then each teammate who has conversations here.
 import { Check, ChevronDown, Users } from "lucide-react";

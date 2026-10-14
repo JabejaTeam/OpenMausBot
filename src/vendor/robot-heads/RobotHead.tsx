@@ -6,7 +6,7 @@ import { CTX, RobotRenderer, frameFor, type Palette } from './tv/render';
 import { linear } from './tv/light';
 import { parseColor } from './color';
 import { layout, subscribe, pointer } from './ticker';
-import { MAX_STEP_MS } from '@/lib/office-motion';
+import { MAX_STEP_MS } from '@/lib/frame-budget';
 
 /* fork: update-rate LOD — heads up to 96 px move at 15 fps, which reads the
    same at that size; bigger (or hovered) ones at the app's 30 fps budget.

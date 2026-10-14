@@ -79,7 +79,6 @@ const FORK_LINES: Record<string, number> = {
   "src/components/SettingsModal.tsx": 1303,
   "src/components/Sidebar.tsx": 3061,
   "src/components/TeamLibraryPanel.tsx": 1154,
-  "src/components/office/office-scene.ts": 1251,
   "src/state/store.tsx": 4605,
   "src/vendor/robot-heads/tv/render.ts": 1040,
 };

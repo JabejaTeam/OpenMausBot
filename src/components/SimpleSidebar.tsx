@@ -242,8 +242,8 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
           style={noDragStyle}
           onClick={() => setThreadColumn(!threadColumn)}
           aria-pressed={threadColumn}
-          aria-label={t(threadColumn ? "office.hideThreads" : "office.showThreads")}
-          title={t(threadColumn ? "office.hideThreads" : "office.showThreads")}
+          aria-label={t(threadColumn ? "threadColumn.hide" : "threadColumn.show")}
+          title={t(threadColumn ? "threadColumn.hide" : "threadColumn.show")}
           className={cn(circle, "max-md:hidden", !threadColumn && "text-ink-secondary")}
         >
           <PanelLeft size={18} />
@@ -350,7 +350,7 @@ export function SimpleThreadColumn() {
       )}
     >
       <nav
-        aria-label={t("office.threadsAria", { name: botLabelLine(bot) })}
+        aria-label={t("threadColumn.aria", { name: botLabelLine(bot) })}
         className={cn(
           "flex h-full w-64 flex-col border-l border-hairline/40 bg-inset [--threads-bg:var(--color-inset)] transition-transform duration-200 ease-out motion-reduce:transition-none",
           !shown && "-translate-x-full",
@@ -362,8 +362,8 @@ export function SimpleThreadColumn() {
           <button
             type="button"
             onClick={() => setThreadColumn(false)}
-            aria-label={t("office.hideThreads")}
-            title={t("office.hideThreads")}
+            aria-label={t("threadColumn.hide")}
+            title={t("threadColumn.hide")}
             className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
           >
             <ChevronLeft size={17} />

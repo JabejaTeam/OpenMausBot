@@ -1,6 +1,6 @@
 // Above a Chief's composer, only when questions wait on the person: how many,
 // on the right (a click jumps to the oldest). Teammates at work are not
-// listed here — the header and the office already show who is busy.
+// listed here — the header already shows who is busy.
 import type { Bot, Message } from "@/state/store";
 import { isOpenRelay } from "./RelayCard";
 

@@ -12,7 +12,7 @@ import { BLINK_DUR, BLINKS } from "@/vendor/bloub/face";
 import { DEMI_VIEWBOX, RAYON } from "@/vendor/bloub/repere";
 import { COLOR_BY_ID, SHAPE_BY_ID, mixHex } from "@/vendor/bloub/skins";
 import { STATE_BY_ID, type StateId } from "@/vendor/bloub/states";
-import { MAX_STEP_MS } from "@/lib/office-motion";
+import { MAX_STEP_MS } from "@/lib/frame-budget";
 import type { BloubColorId, BloubExpressionId, BloubShapeId } from "../../shared/bloub-look";
 
 /**
@@ -24,7 +24,7 @@ export const BLOUB_STILL_AT = 1;
 
 /** An awake bloub draws at 20 fps: a blink (0.18 s) still gets its frames,
  * and every frame costs the page a style, layout and paint pass, so fewer is
- * the saving that counts. Never above the office's 30 fps budget. */
+ * the saving that counts. Never above the app's 30 fps budget. */
 const FRAME_MS = Math.max(MAX_STEP_MS, 1000 / 20);
 
 /** What shows through the eye holes. bloub uses the page colour; avatars sit

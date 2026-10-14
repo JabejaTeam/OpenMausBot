@@ -1,7 +1,7 @@
 // Fork: a bot's threads as Messages lists conversations — a search field and
 // a compose button on top, then every thread in one scrolling list. Shown in
-// the office panel and in the Simple UI's thread column; whether that column
-// shows is one choice for both (useThreadColumn).
+// the Simple UI's thread column; whether that column shows is one choice
+// (useThreadColumn).
 import { useState, useSyncExternalStore } from "react";
 import { Search, SquarePen } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
@@ -33,7 +33,7 @@ export function setThreadColumn(shown: boolean): void {
   for (const listener of listeners) listener();
 }
 
-/** Whether the thread column shows beside the bot list (and the office chat). */
+/** Whether the thread column shows beside the bot list. */
 export function useThreadColumn(): boolean {
   return useSyncExternalStore(
     (listener) => {

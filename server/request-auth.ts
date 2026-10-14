@@ -309,8 +309,6 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/push\/desk$/ },
   // fork: who a conversation is shared with; only its person changes it (the route checks)
   { methods: ["GET", "PUT"], path: /^\/api\/threads\/[\w-]+\/shares$/ },
-  // fork: everyone sees how the 3D office's teams look; changing it is admin
-  { methods: ["GET"], path: /^\/api\/team-looks$/ },
   { methods: ["PUT", "DELETE"], path: /^\/api\/mcp\/mine\/[a-z][a-z0-9_-]{0,31}$/ },
   // a pairing code for one's own phone (the route requires an email session)
   { methods: ["POST"], path: /^\/api\/auth\/pairing\/mine$/ },

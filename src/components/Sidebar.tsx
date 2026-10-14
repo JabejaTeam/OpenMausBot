@@ -1080,7 +1080,7 @@ export function BotThreadList({ bot, selected, density, query, pendingQueued, re
    * bot's visible tail; without it the row says Working. */
   activityLabel?: string;
   hidden?: boolean;
-  /** fork: every thread in one scrolling list (the office's thread column), no "Show all" */
+  /** fork: every thread in one scrolling list (the thread column), no "Show all" */
   everything?: boolean;
   /** fork: only this channel's threads (lib/thread-channel); all when absent */
   channel?: ThreadChannel;
