@@ -22,7 +22,10 @@ export default {
   ...upstream,
   appId: product.appId,
   productName: name,
-  extraMetadata: { version },
+  // productName in the app's package.json is what Electron names it by: its
+  // data folder and its "Hubigen Safe Storage" keychain item, not the
+  // OpenMausBot app's "openmausbot" ones (electron/fork-user-data.mjs).
+  extraMetadata: { version, productName: name },
   artifactName: `${name}-\${version}-\${arch}.\${ext}`,
   // Updates only from Hubigen's own feed (the generic provider reads
   // latest-mac.yml there), never upstream's releases.

@@ -3013,13 +3013,15 @@ export class Store {
    * model unless the caller hands it another one: a thread opened from
    * another of this bot's threads keeps the model a person picked there. */
   createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: "ask" | "full",
-    modelSelection?: ModelSelection, cwd?: string): TaskRecord | null {
+    modelSelection?: ModelSelection, cwd?: string, threadId?: string): TaskRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
     if (projectId !== undefined && !this.project(botId, projectId)) return null;
     const createdAt = Date.now();
     const task: TaskRecord = {
-      threadId: newId(),
+      // fork: a caller may pick the id, to record whose thread it is before
+      // the "bot" change below goes out (private threads, routes/tasks.ts)
+      threadId: threadId ?? newId(),
       title: threadTitleFrom(title),
       createdAt,
       updatedAt: createdAt,

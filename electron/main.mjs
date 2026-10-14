@@ -94,7 +94,10 @@ import { cloudPageSenderAllowed, createCloudMove, mintOwnerCode, moveBlocked, mo
 import { createOrgLibrary } from "./org-library.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
+import { carryOverRenamedUserData } from "./fork-user-data.mjs";
 
+// fork: before anything reads the data folder (fork-user-data.mjs)
+carryOverRenamedUserData(app);
 const { desktopCapabilities, nativeDesktopActions } = capabilitiesModule;
 const nativeActions = nativeDesktopActions(process.platform);
 const require = createRequire(import.meta.url);

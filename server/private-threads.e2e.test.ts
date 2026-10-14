@@ -191,6 +191,49 @@ posixOnly("private conversations on a shared workspace", () => {
     expect((await api("PUT", "/api/people/me/navigation", { botId: ids.bot, threadId: "no-such-thread" }, BOB)).status).toBe(404);
   });
 
+  it("announces a member's new conversation as theirs, from the very first live frame", async () => {
+    // The live stream once announced the thread before its person was known:
+    // the member got it as the admin's (hidden), back on their old thread,
+    // and that frame could land after the HTTP answer and undo the switch.
+    const controller = new AbortController();
+    const frames: any[] = [];
+    let hello = false;
+    void (async () => {
+      try {
+        const res = await fetch(`${BASE}/api/events`, { headers: { authorization: `Bearer ${tokens[ADA]}` }, signal: controller.signal });
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let end: number;
+          while ((end = buffer.indexOf("\n\n")) >= 0) {
+            for (const line of buffer.slice(0, end).split("\n")) {
+              if (!line.startsWith("data: ")) continue;
+              const frame = JSON.parse(line.slice(6));
+              if (frame.kind === "hello") hello = true;
+              else frames.push(frame);
+            }
+            buffer = buffer.slice(end + 2);
+          }
+        }
+      } catch { /* aborted */ }
+    })();
+    try {
+      expect(await waitFor(async () => hello, 10_000)).toBe(true);
+      const created = await api("POST", `/api/bots/${ids.bot}/tasks`, {}, ADA);
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const fresh = created.body.task.threadId;
+      const first = await waitFor(async () => frames.find((frame) => frame.kind === "bot" && frame.bot?.id === ids.bot), 10_000);
+      expect(first?.bot.threadId).toBe(fresh);
+      expect(first?.bot.tasks.find((task: any) => task.threadId === fresh)?.access).toBe("own");
+    } finally {
+      controller.abort();
+    }
+  });
+
   it("keeps everything open to the owner on this machine", async () => {
     expect((await api("GET", `/api/threads/${ids.adaThread}/messages`)).status).toBe(200);
   });

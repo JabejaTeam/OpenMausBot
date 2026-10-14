@@ -8,7 +8,7 @@ import { approvalModeFor, isApprovalMode, type ApprovalMode } from "../../shared
 import { threadLinkUrl } from "../../shared/thread-link.ts";
 import type { WireBot, WireTask } from "../../shared/wire.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
-import type { ModelSelection, ProviderInstance } from "../contracts.ts";
+import { newId, type ModelSelection, type ProviderInstance } from "../contracts.ts";
 import type { Coordinator } from "../coordinator.ts";
 import type { Handoffs } from "../delta-context.ts";
 import type { hostedModelPolicy } from "../hosted-models.ts";
@@ -183,11 +183,15 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
       if (body.projectId !== undefined && (typeof body.projectId !== "string" || !store.project(bot.id, body.projectId))) {
         return json(res, 400, { error: "projectId must belong to this bot" });
       }
-      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, true, body.projectId, undefined, body.approvalMode, undefined, cwd);
-      if (!task) return json(res, 500, { error: "couldn't create that task" });
       // Who opened it decides who may answer its cards on a shared workspace.
-      if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
-      forkNavigated(auth, bot.id, task.threadId);
+      // Fork: recorded (with where they are) before createTask announces the
+      // thread, or a member's live frame shows it as someone else's — hidden,
+      // and back on their old thread (every conversation is private).
+      const threadId = newId();
+      if (auth.kind === "session") threadStarters.set(threadId, actorKey(auth));
+      forkNavigated(auth, bot.id, threadId);
+      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, true, body.projectId, undefined, body.approvalMode, undefined, cwd, threadId);
+      if (!task) return json(res, 500, { error: "couldn't create that task" });
       return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)$/);
