@@ -13,3 +13,6 @@ jabeja	beast	omb	8799	omb-data/home/omb-server	omb-data/home/.openmausbot
 # 100.86.49.68:8811 (tailnet only). node1 only lets in the beast's container
 # omb, so it is reached through that; commands in the VM run as root.
 ripal	beast>omb>root@159.69.74.253>hermes-vm	omb-ripal	8799	/opt/omb-klanten/ripal/home/omb-server	/opt/omb-klanten/ripal/home/.openmausbot
+# demo = App Store review instance (container omb-demo, own network, no secrets);
+# bots.jabeja.be routes appreview@hubigen.com there. See server/fork-review-login.ts.
+demo	beast	omb-demo	8799	omb-demo/home/omb-server	omb-demo/home/.openmausbot
