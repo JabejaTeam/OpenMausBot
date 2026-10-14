@@ -31,6 +31,12 @@ describe("fork: read-only workbench scripts", () => {
     ["dunder access", "().__class__.__base__"],
     ["the composio sdk", "composio.tools.execute('GMAIL_SEND_EMAIL')"],
     ["an empty script", "  "],
+    ["an import after a semicolon", "x = 1; import socket"],
+    ["an import inside a block", "if True:\n    x = 1; import os"],
+    ["a module reached through sys.modules", 'import typing\ntyping.sys.modules["sub" + "process"].run(["curl", "x"])'],
+    ["a private module attribute", 'import datetime\ndatetime._sys.modules["x"]'],
+    ["os via pathlib", "from pathlib import Path\nPath('x')"],
+    ["os.spawn", "import json\njson.os.spawnl(0, 'x')"],
   ])("stays opaque for %s", (_, code) => {
     expect(workbench(code)).toEqual(OPAQUE);
   });

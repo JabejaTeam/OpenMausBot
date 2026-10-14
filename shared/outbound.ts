@@ -115,12 +115,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const WORKBENCH_SAFE_MODULES = new Set([
   "json", "re", "datetime", "time", "math", "statistics", "collections", "itertools", "functools",
   "html", "textwrap", "csv", "base64", "string", "unicodedata", "pprint", "typing", "dataclasses",
-  "zoneinfo", "decimal", "difflib", "operator", "copy", "pathlib", "glob",
+  "zoneinfo", "decimal", "difflib", "operator", "copy",
 ]);
 // Names that reach outside the sandbox or hide what is called: network and
 // process modules, dynamic execution, attribute lookup by string, and
 // Composio helpers other than run_composio_tool.
-const WORKBENCH_UNSAFE = /\b(?:exec|eval|compile|getattr|setattr|delattr|globals|locals|vars|breakpoint|proxy_execute|upload_local_file|execute_tool|run_tool|requests|urllib|httpx?|aiohttp|socket|subprocess|popen|system|smtplib|ftplib|ctypes|composio)\b|__\w+__|\w*execute\w*\s*\(/i;
+const WORKBENCH_UNSAFE = /\b(?:exec|eval|compile|getattr|setattr|delattr|globals|locals|vars|breakpoint|proxy_execute|upload_local_file|execute_tool|run_tool|requests|urllib|httpx?|aiohttp|socket|subprocess|popen|system|smtplib|ftplib|ctypes|composio|os|sys|modules|builtins|importlib|shutil|pty|signal|spawn\w*|multiprocessing|threading|asyncio|ssl)\b|__\w+__|\._|\w*execute\w*\s*\(/i;
 const WORKBENCH_TOOL_CALL = /\brun_composio_tool\b/g;
 const WORKBENCH_LITERAL_CALL = /\brun_composio_tool\s*\(\s*(?:tool_slug\s*=\s*)?["']([A-Z][A-Z0-9_]*)["']/g;
 
@@ -134,12 +134,17 @@ export function readOnlyWorkbenchCalls(code: unknown): ConnectorCall[] | null {
   // proxy_execute etc. are caught by WORKBENCH_UNSAFE; run_composio_tool is
   // the one helper allowed, so mask it before that check.
   if (WORKBENCH_UNSAFE.test(code.replace(WORKBENCH_TOOL_CALL, "tool_call"))) return null;
+  // Every import must be its own line, so the allowlist below sees them all.
+  let importLines = 0;
   for (const line of code.split("\n")) {
     const imported = line.match(/^\s*(?:from\s+([\w.]+)\s+import\b|import\s+(.+))/);
     if (!imported) continue;
+    importLines++;
+    if (/[;\\]/.test(line)) return null;
     const modules = imported[1] ? [imported[1]] : imported[2].split(",").map((part) => part.trim().split(/\s+/)[0]);
     if (!modules.every((module) => WORKBENCH_SAFE_MODULES.has(module.split(".")[0]))) return null;
   }
+  if ((code.match(/\bimport\b/g) ?? []).length !== importLines) return null;
   const slugs = [...code.matchAll(WORKBENCH_LITERAL_CALL)].map((match) => match[1]);
   if (slugs.length !== (code.match(WORKBENCH_TOOL_CALL) ?? []).length) return null;
   if (!slugs.every((slug) => isReadOnlyTool(slug) && !isOutboundTool(slug))) return null;
