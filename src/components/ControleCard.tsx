@@ -8,15 +8,29 @@ import type { ControleLijst, ControleWijziging } from "../../shared/controle-car
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { api, type Message } from "@/state/store";
+import { AttachmentPreviewDialog } from "./AttachmentPreview";
 
 const BUTTON = "rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors active:scale-[0.98] disabled:opacity-50";
 const CHIP = "rounded-full bg-control px-2 py-0.5 text-[11px] text-ink-secondary";
 
 function Beeld({ wijziging, weergave }: { wijziging: ControleWijziging; weergave: "voor" | "na" }) {
+  const [open, setOpen] = useState(false);
   const src = weergave === "voor" && wijziging.voorUrl ? wijziging.voorUrl : wijziging.naUrl;
   const kader = weergave === "na" ? wijziging.kader : null;
+  // Groot bekijken in de app zelf (dezelfde viewer als bijlagen), met voor en
+  // na als twee beelden: pijltjes of ← → wisselen ertussen.
+  const beelden = [
+    ...(wijziging.voorUrl ? [{ src: wijziging.voorUrl, name: `${t("controle.card.before")} · ${wijziging.titel}`, openUrl: wijziging.voorUrl }] : []),
+    { src: wijziging.naUrl, name: `${t("controle.card.after")} · ${wijziging.titel}`, openUrl: wijziging.naUrl },
+  ];
   return (
-    <a href={src} target="_blank" rel="noreferrer" className="block max-h-[420px] overflow-auto rounded-lg border border-hairline/50 bg-panel/40">
+    <>
+    <button
+      type="button"
+      onClick={() => setOpen(true)}
+      aria-label={t("controle.card.enlarge")}
+      className="block max-h-[420px] w-full cursor-zoom-in overflow-auto rounded-lg border border-hairline/50 bg-panel/40 text-left"
+    >
       <span className="relative block">
         <img src={src} alt={wijziging.titel} className="block w-full" />
         {kader && (
@@ -32,7 +46,16 @@ function Beeld({ wijziging, weergave }: { wijziging: ControleWijziging; weergave
           />
         )}
       </span>
-    </a>
+    </button>
+    {open && (
+      <AttachmentPreviewDialog
+        image={beelden[beelden.length - 1]}
+        images={beelden}
+        initialIndex={weergave === "voor" && wijziging.voorUrl ? 0 : beelden.length - 1}
+        onClose={() => setOpen(false)}
+      />
+    )}
+    </>
   );
 }
 
