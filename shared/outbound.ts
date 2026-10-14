@@ -117,9 +117,10 @@ const WORKBENCH_SAFE_MODULES = new Set([
   "html", "textwrap", "csv", "base64", "unicodedata", "zoneinfo", "decimal",
 ]);
 // Names that reach outside the sandbox or hide what is called: network and
-// process modules, dynamic execution, attribute lookup by string, and
-// Composio helpers other than run_composio_tool.
-const WORKBENCH_UNSAFE = /\b(?:exec|eval|compile|getattr|setattr|delattr|globals|locals|vars|breakpoint|proxy_execute|upload_local_file|execute_tool|run_tool|requests|urllib|httpx?|aiohttp|socket|subprocess|popen|system|smtplib|ftplib|ctypes|composio|os|sys|modules|builtins|importlib|shutil|pty|signal|spawn\w*|multiprocessing|threading|asyncio|ssl|attrgetter|methodcaller|get_type_hints|ForwardRef|Formatter|get_field|reduce)\b|__\w+__|\._|\w*execute\w*\s*\(/i;
+// process modules, dynamic execution, attribute lookup by string, private
+// attributes, and Composio helpers other than run_composio_tool. Non-ASCII
+// is refused outright: Python NFKC-folds identifiers (ｅｘｅｃ is exec).
+const WORKBENCH_UNSAFE = /\b(?:exec|eval|compile|getattr|setattr|delattr|globals|locals|vars|breakpoint|proxy_execute|upload_local_file|execute_tool|run_tool|requests|urllib|httpx?|aiohttp|socket|subprocess|popen|system|smtplib|ftplib|ctypes|composio|os|sys|modules|builtins|importlib|shutil|pty|signal|spawn\w*|multiprocessing|threading|asyncio|ssl|attrgetter|methodcaller|get_type_hints|ForwardRef|Formatter|get_field|reduce)\b|__\w+__|\.\s*(?:\\\s*)?_|[^\t\n\r -~]|\w*execute\w*\s*\(/i;
 const WORKBENCH_TOOL_CALL = /\brun_composio_tool\b/g;
 const WORKBENCH_LITERAL_CALL = /\brun_composio_tool\s*\(\s*(?:tool_slug\s*=\s*)?["']([A-Z][A-Z0-9_]*)["']/g;
 
