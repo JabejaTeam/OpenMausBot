@@ -189,7 +189,7 @@ export type ComputerControlState = { held: boolean; helpReason: string | null; h
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "email" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "email" | "signin" | "controle" | "routine.run" | "goal.run" | "digest" | "compaction" | "call";
   text?: string;
   /** digest messages: what the turn did, rendered in `text` and structured here. */
   digest?: TurnDigest;
@@ -202,6 +202,8 @@ export interface Message {
   email?: EmailCardData;
   secret?: SecretRequestCardData;
   signIn?: import("../../shared/wire").SignInRequestCardData;
+  /** Fork: the controle card (src/components/ControleCard.tsx). */
+  controle?: import("../../shared/controle-card").ControleCardData;
   /** Lifecycle mirror for a routine whose real work lives in a fresh task. */
   routineRun?: RoutineRunCardData;
   /** Durable lifecycle receipt for a goal-driven channel run. */

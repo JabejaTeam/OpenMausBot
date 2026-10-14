@@ -57,6 +57,7 @@ import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
 import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
 import { EmailCard } from "./EmailCard";
+import { ControleCard } from "./ControleCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { SignInRequestCard } from "./SignInRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
@@ -529,6 +530,8 @@ export const Transcript = memo(function Transcript({
             <ConnectorCard botId={m.from.botId} threadId={group.threadId} message={m} />
           ) : m.kind === "email" && m.email && m.from?.botId ? (
             <EmailCard botId={m.from.botId} threadId={group.threadId} message={m} />
+          ) : m.kind === "controle" && m.controle && m.from?.botId ? (
+            <ControleCard botId={m.from.botId} threadId={group.threadId} message={m} />
           ) : m.kind === "options" && m.card?.requestId && m.card.questionRequest ? (
             <div className="flex justify-start">
               <MessageBoundary fallbackText={m.card.subtitle || m.card.title || ""}>

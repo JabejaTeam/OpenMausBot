@@ -494,6 +494,12 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       text: `Rendered the native options card in this Watcher thread (message ${String(result.messageId ?? "created")}). Wait for the person's click or custom response; the card itself authorizes no external action.`,
     };
   }
+  if (name === "show_controle_card") {
+    // The server checks the bot is linked to a client; the card reads the rest itself.
+    const { ok, body } = await apiResponse("/api/internal/controle-card", { method: "POST", body: "{}" });
+    if (!ok) return { text: String(body.error ?? "Could not show the controle card."), isError: true };
+    return { text: "The controle card is now in this conversation. The person reviews the changes on it; end your turn with at most one short sentence." };
+  }
   if (name === "relay_question") {
     const parsed = parseRelayQuestionInput(args);
     if (!parsed.ok) return { text: parsed.error, isError: true };

@@ -596,6 +596,7 @@ import {
 import { json, onJsonBody, onParsedBody, parsedBodyOf, readBody } from "./harness/http.ts";
 import { ROUTES, dispatchRoutes } from "./routes/table.ts";
 import { createForkPeopleRoutes } from "./routes/fork-people.ts";
+import { controleConfigFromEnv, createControleRoutes, handleControleInternal } from "./controle-card.ts";
 import { createForkPushRoutes } from "./routes/fork-push.ts";
 import { PushDevices } from "./push-devices.ts";
 import { ApnsSender, apnsConfigFromEnv, clearOnPhones, pushToPerson } from "./apns.ts";
@@ -638,6 +639,8 @@ import { withScopeHint } from "./connector-scope-hint.ts";
 import { startSseHeartbeat } from "./sse-heartbeat.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
+// Fork: the controle card's link to jabeja-admin, read once at boot (server/controle-card.ts).
+const CONTROLE = controleConfigFromEnv(process.env);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
 // Behind a proxy or tunnel, the base URL senders should use (docs/self-hosting.md).
 const WEBHOOK_PUBLIC_URL = process.env.OMB_WEBHOOK_PUBLIC_URL || undefined;
@@ -2749,6 +2752,8 @@ function agentsIntegration(
       OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
       // A Chief can hand a teammate's question on to the person as a card.
       OMB_RELAY_QUESTIONS: isPersonalChief(store.bot(botId)) ? "1" : "0",
+      // Fork: show_controle_card only for a bot linked to a client (server/controle-card.ts).
+      OMB_CONTROLE_CARD: CONTROLE?.bots.has(botId) ? "1" : "0",
       OMB_MEMORY_ENABLED: store.bot(botId)?.memoryEnabled === false ? "0" : "1",
       // The shared-computer tools are advertised only while the workspace
       // gate is on; the routes behind them refuse regardless.
@@ -17996,6 +18001,14 @@ ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: (
 // its file, so New bot cannot disagree with it. No organization: none.
 const orgInstallStatuses = () => orgLibrary?.installStatuses() ?? new Map();
 ROUTES.push(createBotPresetRoutes({ presets: presetStore, orgStatuses: orgInstallStatuses }));
+// Fork: the controle card's own calls (server/controle-card.ts).
+ROUTES.push(createControleRoutes({
+  config: () => CONTROLE,
+  personName: (auth) => auth.kind === "session"
+    ? readPersonProfile(personKey(auth.session))?.name?.trim() || auth.session.email || auth.session.label || "onbekend"
+    : cfg.profile?.name?.trim() || "eigenaar",
+  botThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)),
+}));
 ROUTES.push(createForkPeopleRoutes({
   personKey,
   mcpServers: () => cfg.mcpServers,
@@ -19226,6 +19239,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           ? json(res, 201, { messageId: result.messageId })
           : json(res, result.status, { error: result.error });
       }
+      // Fork: show_controle_card (server/controle-card.ts matches its own path).
+      const controle = await handleControleInternal({
+        path, method, config: CONTROLE, store, sender: internalSender, threadId: internalCapability.threadId,
+        ownsThread: Boolean(connectorThread(internalSender.id, internalCapability.threadId)), requireActive: requireActiveInternalCapability,
+      });
+      if (controle) return json(res, controle.status, controle.body);
       if (method === "POST" && path === "/api/internal/relay-question") {
         if (!isPersonalChief(internalSender)) return json(res, 403, { error: "relay_question is for the person's own Chief of Staff." });
         const parsed = parseRelayQuestionInput(await readInternalBody());

@@ -1243,6 +1243,8 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
  * secret receives it through instanceConfigs() narrowing, and to every other
  * child these are someone else's keys riding along in `...process.env`. */
 export const WORKSPACE_CREDENTIAL_ENV = [
+  // Fork: the controle card's shared secret with jabeja-admin (server/controle-card.ts).
+  "OMB_CONTROLE_SECRET",
   "XAI_API_KEY",
   "MISTRAL_API_KEY",
   "CEREBRAS_API_KEY",

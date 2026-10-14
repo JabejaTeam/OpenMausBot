@@ -446,7 +446,7 @@ export interface WireMessage {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "email" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "email" | "signin" | "controle" | "routine.run" | "goal.run" | "digest" | "compaction" | "call";
   text?: string;
   digest?: TurnDigest;
   compaction?: {
@@ -472,6 +472,8 @@ export interface WireMessage {
   secret?: SecretRequestCardData;
   /** signin rows: the bot asked the person to sign in to a site themselves. */
   signIn?: SignInRequestCardData;
+  /** Fork: controle rows, screenshots of the testlab to review (server/controle-card.ts). */
+  controle?: import("./controle-card.ts").ControleCardData;
   /** One idempotently updated status card for a routine run. */
   routineRun?: RoutineRunCardData;
   /** Terminal receipt for a bounded multi-bot channel goal. */
