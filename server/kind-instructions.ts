@@ -85,6 +85,12 @@ export function kindStartsFreshPerAssignment(kind?: BotKind): boolean {
   return kind === "code";
 }
 
+/** Code agents never ask the person: a question ends their reply to the
+ * requester (the Manager), which answers it or asks the person itself. */
+export function kindAsksRequester(kind?: BotKind): boolean {
+  return kind === "code";
+}
+
 /** The workspace rules for one bot, as system-prompt blocks. They come from
  * the admin, so they win over conflicting working rules the bot got anywhere
  * else: its own standing instructions, whoever created it, its memory, or a

@@ -298,7 +298,7 @@ import type { McpServerSpec, ProviderInstance } from "./contracts.ts";
 import { readyToRun, selectDefaultModelSelection, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts";
 import { workTopicOf } from "./work-topic.ts";
 import { ensureThreadWorktree, removeThreadWorktree, threadWorktreePath, threadWorktreeSystemPrompt } from "./thread-worktrees.ts";
-import { kindInstructionsSystemPrompt, kindStartsFreshPerAssignment, kindTakesSharedContext, teamContextPrompt } from "./kind-instructions.ts";
+import { kindAsksRequester, kindInstructionsSystemPrompt, kindStartsFreshPerAssignment, kindTakesSharedContext, teamContextPrompt } from "./kind-instructions.ts";
 import { notePerson, personTurnPreamble, readPersonProfile, updatePersonProfile } from "./person-profiles.ts";
 import { isBotKind } from "../shared/wire.ts";
 import { personKeyFor, personKeyForEmail } from "./person-key.ts";
@@ -6085,6 +6085,8 @@ const coordinator: Coordinator = createCoordinator({
         assignee: store.bot(node.botId)?.name ?? "Teammate",
         person,
         ...(thread !== undefined ? { thread } : {}),
+        // Fork: a code agent's question goes to whoever asked, never the person.
+        ...(parent && kindAsksRequester(store.bot(node.botId)?.kind) ? { asksRequester: true } : {}),
       };
     },
     // A teammate ended its turn on a question for the person: one chip where

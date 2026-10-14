@@ -577,7 +577,11 @@ export class RuntimeCoordinator implements Coordinator {
     // A root is the person's own conversation: a NEEDS INPUT line there is a
     // question in the chat, answered by a typed line that starts a new root;
     // only cards park a root. A child's line parks it for the requester.
-    const question = root ? undefined : needsInputQuestion(result.text);
+    // Fork: an assignee that asks its requester (kindAsksRequester) never
+    // parks on the person: its question is its reply, and the requester is
+    // resumed with it.
+    const asksRequester = !root && a.reply === "resume" && this.host.names(node, parent && this.project(parent)).asksRequester === true;
+    const question = root || asksRequester ? undefined : needsInputQuestion(result.text);
     if (question !== undefined) return { kind: "needs_input", question, ...evidence(result) };
     return { kind: "completed", text: result.text, ...evidence(result) };
   }

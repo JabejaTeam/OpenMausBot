@@ -313,6 +313,9 @@ export interface EnvelopeNames {
   person?: string;
   /** The requester conversation's title, when there is one. */
   thread?: string;
+  /** Fork: the assignee asks its requester, never the person
+   * (kindAsksRequester): a resumed requester answers or asks the person itself. */
+  asksRequester?: boolean;
 }
 
 /** What the runtime needs from the server. Every method is synchronous and
