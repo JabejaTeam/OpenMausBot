@@ -67,11 +67,13 @@ def attribute(node, bound):
 
 def call(node, bound):
     func = node.func
+    if isinstance(func, ast.Name) and func.id in (TOOL, "open") and any(isinstance(a, ast.Starred) for a in node.args): fail()
     if isinstance(func, ast.Name) and func.id == TOOL:
         slug = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == "tool_slug"), None)
         if not (isinstance(slug, ast.Constant) and isinstance(slug.value, str)): fail()
         slugs.append(slug.value)
     elif isinstance(func, ast.Name) and func.id == "open":
+        if len(node.args) > 2 or any(k.arg not in ("file", "mode", "encoding", "errors", "newline") for k in node.keywords): fail()
         mode = node.args[1] if len(node.args) > 1 else next((k.value for k in node.keywords if k.arg == "mode"), None)
         if mode is not None and not (isinstance(mode, ast.Constant) and mode.value in ("r", "rb")): fail()
     else:
