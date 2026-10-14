@@ -525,6 +525,7 @@ import { applyPendingWorkspaceRestore, readLastWorkspaceRestore, type WorkspaceR
 import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } from "./custom-domain.ts";
 import { allowedScopes, createEmailSignIn, parseAllowList } from "./account-signin.ts";
 import { createSesCodeClient, sesKeyFromEnv } from "./fork-signin-mail.ts";
+import { reviewLoginFromEnv, withReviewLogin } from "./fork-review-login.ts";
 import { ProviderAuthSessions } from "./provider-auth-sessions.ts";
 import {
   clearSessionCookie,
@@ -892,10 +893,14 @@ const customDomainVerifier = createCustomDomainVerifier({ environmentId: ENVIRON
 // "Sign in with your email" on /pair: the allow-list is read per call so a
 // Settings change or an env bootstrap applies without a restart.
 // Jabeja fork: with SES keys the code mail is ours (server/fork-signin-mail.ts).
+// OMB_REVIEW_LOGIN (demo instance only) adds a fixed code for App Store review (server/fork-review-login.ts).
 const SES_KEY = sesKeyFromEnv(process.env);
+const SES_CLIENT = SES_KEY ? createSesCodeClient({ key: SES_KEY, publicUrl: () => publicUrl() ?? "" }) : undefined;
+const REVIEW_LOGIN = reviewLoginFromEnv(process.env);
+const SIGNIN_CLIENT = REVIEW_LOGIN ? withReviewLogin(SES_CLIENT, REVIEW_LOGIN) : SES_CLIENT;
 const emailSignIn = createEmailSignIn({
   allow: signInAllowList,
-  ...(SES_KEY ? { client: createSesCodeClient({ key: SES_KEY, publicUrl: () => publicUrl() ?? "" }) } : {}),
+  ...(SIGNIN_CLIENT ? { client: SIGNIN_CLIENT } : {}),
 });
 let customDomainRevision = 0;
 function savedCustomDomain(): string | null {
