@@ -380,7 +380,7 @@ export function SidebarPopoverMenu({
         sheetClass,
         anchored ? "z-[60]" : "absolute z-40",
         placement === "below" && "top-full right-0 mt-1 w-72 max-w-[calc(100vw-2rem)]",
-        placement === "below-start" && "top-full left-0 mt-1 w-72 max-w-[calc(100vw-2rem)]",
+        placement === "below-start" && "top-full left-0 mt-1 max-h-[min(50vh,22rem)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto",
         motion.className,
       )}
     >

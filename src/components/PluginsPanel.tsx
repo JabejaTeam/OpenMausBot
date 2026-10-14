@@ -797,7 +797,7 @@ export function PluginsPanel() {
             ))}
             {moreCategories.length > 0 && (
               <SidebarPopoverMenu
-                placement="below"
+                placement="below-start"
                 ariaLabel={t("apps.moreCategories")}
                 items={moreCategories.map((name) => ({ key: name, label: name, active: category === name, onSelect: () => pickCategory(name) }))}
                 renderTrigger={({ open }) => (
