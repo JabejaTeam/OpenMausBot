@@ -1,10 +1,11 @@
-// Fork: the controle card (server/controle-card.ts). One change at a time from
-// the testlab: what changed and why, before and after with a thin frame round
-// the change, and approve / reject (with feedback) / skip. Every click goes
+// Fork: the controle card (server/controle-card.ts). One change (= one commit)
+// at a time from the testlab: what changed and why, before and after with a
+// thin frame round the change, paging through every screenshot that shows it,
+// and approve / reject (with feedback) / skip for all of them at once. Every click goes
 // straight to jabeja-admin as the person who clicked; the bot takes no turn.
 import { useCallback, useEffect, useState } from "react";
-import { Check, ExternalLink, Loader2, MessageSquare, RefreshCw, ScanEye } from "lucide-react";
-import type { ControleLijst, ControleWijziging } from "../../shared/controle-card";
+import { Check, ChevronLeft, ChevronRight, ExternalLink, Loader2, MessageSquare, RefreshCw, ScanEye } from "lucide-react";
+import { beeldenVan, type ControleBeeld, type ControleLijst } from "../../shared/controle-card";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { api, type Message } from "@/state/store";
@@ -13,10 +14,10 @@ import { AttachmentPreviewDialog } from "./AttachmentPreview";
 const BUTTON = "rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors active:scale-[0.98] disabled:opacity-50";
 const CHIP = "rounded-full bg-control px-2 py-0.5 text-[11px] text-ink-secondary";
 
-function Beeld({ wijziging, weergave }: { wijziging: ControleWijziging; weergave: "voor" | "na" }) {
+function Beeld({ wijziging, weergave }: { wijziging: ControleBeeld & { titel: string }; weergave: "voor" | "na" }) {
   const [open, setOpen] = useState(false);
   const src = weergave === "voor" && wijziging.voorUrl ? wijziging.voorUrl : wijziging.naUrl;
-  const kader = weergave === "na" ? wijziging.kader : null;
+  const kader = src === wijziging.naUrl ? wijziging.kader : null;
   // Groot bekijken in de app zelf (dezelfde viewer als bijlagen), met voor en
   // na als twee beelden: pijltjes of ← → wisselen ertussen.
   const beelden = [
@@ -63,6 +64,7 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
   const [lijst, setLijst] = useState<ControleLijst | null>(null);
   const [laadFout, setLaadFout] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
+  const [scherm, setScherm] = useState(0);
   const [weergave, setWeergave] = useState<"voor" | "na">("na");
   const [afkeuren, setAfkeuren] = useState(false);
   const [feedback, setFeedback] = useState("");
@@ -92,6 +94,9 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
   }, [laad]);
 
   const huidig = lijst?.wijzigingen[index];
+  const beelden = huidig ? beeldenVan(huidig) : [];
+  const beeld = beelden[Math.min(scherm, beelden.length - 1)];
+  const blader = (stap: number) => setScherm((i) => (i + stap + beelden.length) % beelden.length);
 
   const volgende = (tekst: string | null, weg: boolean) => {
     setMelding(tekst);
@@ -99,6 +104,7 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
     setFeedback("");
     setFout(null);
     setWeergave("na");
+    setScherm(0);
     if (!lijst) return;
     if (weg) {
       const rest = lijst.wijzigingen.filter((_, i) => i !== index);
@@ -132,9 +138,11 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
   };
 
   const onKey = (event: React.KeyboardEvent) => {
-    if ((event.target as HTMLElement).tagName === "TEXTAREA" || !huidig?.voorUrl) return;
-    if (event.key === "ArrowLeft") setWeergave("voor");
+    if ((event.target as HTMLElement).tagName === "TEXTAREA" || !beeld) return;
+    if (event.key === "ArrowLeft" && beeld.voorUrl) setWeergave("voor");
     if (event.key === "ArrowRight") setWeergave("na");
+    if (event.key === "ArrowUp" && beelden.length > 1) blader(-1);
+    if (event.key === "ArrowDown" && beelden.length > 1) blader(1);
   };
 
   return (
@@ -192,9 +200,12 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
                 </div>
               </div>
               <div className="flex flex-col gap-0.5 text-[13px] leading-relaxed">
-                <div>
-                  <span className="text-ink-secondary">{t("controle.card.changed")}</span>&nbsp; {huidig.anders ?? <span className="text-ink-tertiary">{t("controle.card.noExplanation")}</span>}
-                </div>
+                {/* The title is already the commit's subject: "Anders" only when it says more. */}
+                {huidig.anders !== huidig.titel && (
+                  <div>
+                    <span className="text-ink-secondary">{t("controle.card.changed")}</span>&nbsp; {huidig.anders ?? <span className="text-ink-tertiary">{t("controle.card.noExplanation")}</span>}
+                  </div>
+                )}
                 {huidig.kaart && (
                   <div>
                     <span className="text-ink-secondary">{t("controle.card.why")}</span>&nbsp; {huidig.kaart.klaarAls[0] ?? huidig.kaart.title}
@@ -202,7 +213,20 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
                 )}
               </div>
 
-              {huidig.voorUrl && (
+              {beelden.length > 1 && beeld && (
+                <div className="flex items-center gap-1.5 text-[12.5px]">
+                  <button type="button" aria-label={t("controle.card.prevScreenshot")} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink" onClick={() => blader(-1)}>
+                    <ChevronLeft size={14} aria-hidden />
+                  </button>
+                  <span className="tabular-nums text-ink-secondary">{t("controle.card.screenshot", { n: String(scherm + 1), total: String(beelden.length) })}</span>
+                  <button type="button" aria-label={t("controle.card.nextScreenshot")} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink" onClick={() => blader(1)}>
+                    <ChevronRight size={14} aria-hidden />
+                  </button>
+                  <span className="truncate text-ink">{beeld.plek}</span>
+                  <span className="text-ink-tertiary">· {beeld.scherm}</span>
+                </div>
+              )}
+              {beeld?.voorUrl && (
                 <div className="flex items-center justify-between">
                   <div className="inline-flex overflow-hidden rounded-lg border border-hairline/60" role="group" aria-label={t("controle.card.beforeAfter")}>
                     {(["voor", "na"] as const).map((w) => (
@@ -219,7 +243,7 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
                   <span className="text-[11.5px] text-ink-tertiary">{t("controle.card.keysHint")}</span>
                 </div>
               )}
-              <Beeld wijziging={huidig} weergave={weergave} />
+              {beeld && <Beeld key={beeld.naUrl} wijziging={{ ...beeld, titel: huidig.titel }} weergave={weergave} />}
             </>
           )}
           {melding && <div className="text-[12px] text-ink-secondary">{melding}</div>}
@@ -257,7 +281,7 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
               <div className="flex items-center gap-2">
                 <button type="button" disabled={bezig} className={cn(BUTTON, "bg-accent text-white hover:opacity-90")} onClick={() => void besluit("goed")}>
                   {bezig ? <Loader2 size={12} className="mr-1 inline animate-spin" aria-hidden /> : <Check size={12} className="mr-1 inline" aria-hidden />}
-                  {t("controle.card.approve")}
+                  {huidig.beeldIds.length > 1 ? t("controle.card.approveAll", { n: String(huidig.beeldIds.length) }) : t("controle.card.approve")}
                 </button>
                 <button type="button" disabled={bezig} className={cn(BUTTON, "bg-control text-ink hover:bg-control/80")} onClick={() => setAfkeuren(true)}>
                   <MessageSquare size={12} className="mr-1 inline" aria-hidden />
