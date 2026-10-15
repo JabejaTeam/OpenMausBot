@@ -101,7 +101,17 @@ for attempt in 1 2 3; do
     if [ $? -ne 0 ]; then echo "The typecheck fails on top of the work merged meanwhile: fix it, commit, land again."; exit 1; fi
   fi
   if git -C "$repo" merge -q --ff-only "$branch" 2>/dev/null; then
-    echo "Merged $(git rev-parse --short HEAD) into $main."; exit 0
+    echo "Merged $(git rev-parse --short HEAD) into $main."
+    # Publish right away, so the remote is never behind what landed. A refused push does not undo the landing.
+    if up=$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>/dev/null); then
+      if out=$(git -C "$repo" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 push -q "\${up%%/*}" "$main" 2>&1); then
+        echo "Pushed to $up."
+      else
+        echo "Push to $up failed (the landing itself is done): $out"
+        echo "Report this to whoever gave you the task; do not force-push or work around it."
+      fi
+    fi
+    exit 0
   fi
 done
 echo "$main kept moving while landing: run this again."; exit 1

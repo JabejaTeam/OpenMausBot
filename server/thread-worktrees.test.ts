@@ -98,6 +98,37 @@ it("refuses to land uncommitted work, or work whose typecheck fails on top of ne
   expect(git(repo, "rev-parse", "HEAD")).toBe(before);
 });
 
+it("pushes what landed to the branch's upstream, and a refused push leaves the landing done", async () => {
+  const remote = mkdtempSync(join(tmpdir(), "omb-wt-remote-"));
+  try {
+    git(remote, "init", "-q", "--bare", "-b", "main");
+    git(repo, "remote", "add", "origin", remote);
+    git(repo, "push", "-q", "-u", "origin", "main");
+    const one = await ensureThreadWorktree(repo, BOT, "t1");
+    writeFileSync(join(one, "a.txt"), "two\n");
+    git(one, "commit", "-qam", "work");
+    const result = land(one, "t1");
+    expect(result).toMatchObject({ status: 0, out: expect.stringContaining("Pushed to origin/main") });
+    expect(git(remote, "rev-parse", "main")).toBe(git(repo, "rev-parse", "HEAD"));
+
+    // Someone else moved the remote: the push is refused, the local landing still counts.
+    const other = mkdtempSync(join(tmpdir(), "omb-wt-other-"));
+    git(other, "clone", "-q", remote, ".");
+    writeFileSync(join(other, "c.txt"), "x\n");
+    git(other, "add", "c.txt");
+    git(other, "commit", "-qm", "elsewhere");
+    git(other, "push", "-q", "origin", "main");
+    rmSync(other, { recursive: true, force: true });
+    writeFileSync(join(one, "a.txt"), "three\n");
+    git(one, "commit", "-qam", "more work");
+    const refused = land(one, "t1");
+    expect(refused).toMatchObject({ status: 0, out: expect.stringContaining("Push to origin/main failed") });
+    expect(git(repo, "rev-parse", "HEAD")).toBe(git(one, "rev-parse", "HEAD"));
+  } finally {
+    rmSync(remote, { recursive: true, force: true });
+  }
+});
+
 it("hands out a land command that works in a copy made before the command existed", async () => {
   const one = await ensureThreadWorktree(repo, BOT, "t1");
   const script = threadWorktreeLandCommand(repo, "t1").match(/bash "([^"]+)"/)![1]!;
