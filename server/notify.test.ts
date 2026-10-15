@@ -97,6 +97,14 @@ describe("summarize", () => {
     expect(summarize("   padded   ")).toBe("padded");
   });
 
+  it("strips markdown marks, a banner is plain text", () => {
+    expect(summarize("**Nieuw bij Bakkerij De Molen**\n\n> Een _klant_ vraagt naar `brood`."))
+      .toBe("Nieuw bij Bakkerij De Molen Een klant vraagt naar brood.");
+    expect(summarize("## Klaar\n- zie [de offerte](https://x.be/o) en ~~oud~~\n1. *snel*"))
+      .toBe("Klaar zie de offerte en oud snel");
+    expect(summarize("rm -rf ./build_dir 2*3*4 snake_case_name")).toBe("rm -rf ./build_dir 2*3*4 snake_case_name");
+  });
+
   it("clamps long text with an ellipsis", () => {
     const long = summarize("x".repeat(400));
     expect(long).toHaveLength(140);

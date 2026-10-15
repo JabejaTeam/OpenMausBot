@@ -27,8 +27,19 @@ export type { Notification, NotifyKind } from "../shared/notification.ts";
 /** One line, short enough for a lock screen, with the newlines and code
  * fences of a model's answer flattened out of it. */
 export function summarize(text: string, max = 140): string {
-  const line = text.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim();
+  const line = plainText(text.replace(/```[\s\S]*?```/g, " ")).replace(/\s+/g, " ").trim();
   return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
+}
+
+/** Fork: a banner is plain text everywhere (desktop, APNs, the iPhone's
+ * local banner), so markdown marks showed raw: `**Nieuw bij …**`. */
+function plainText(text: string): string {
+  return text
+    .replace(/^[ \t]*(?:#{1,6}[ \t]+|(?:>[ \t]?)+|[-*+][ \t]+|\d+[.)][ \t]+)/gm, "")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/(\*\*|__|~~)(.+?)\1/g, "$2")
+    .replace(/(^|[^\w*])[*_]([^*_\s](?:[^*_]*[^*_\s])?)[*_](?=[^\w*]|$)/g, "$1$2")
+    .replace(/`([^`]+)`/g, "$1");
 }
 
 export interface NotifyBot {
