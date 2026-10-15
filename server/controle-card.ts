@@ -83,6 +83,16 @@ export function createControleCard(args: { config: ControleConfig | null; store:
   return { ok: true, messageId: message.id };
 }
 
+/**
+ * A delivery:"post" webhook to a controle bot (the testlab's "wacht"): a card
+ * in that webhook's one fixed thread instead of the payload text. No model
+ * turn and no new conversation per notice; the card reads the list live.
+ * False for every other bot, which then gets the plain text as usual.
+ */
+export function postControleCard(args: { config: ControleConfig | null; store: ControleCardStore; bot: ControleBot; threadId: string }): boolean {
+  return createControleCard(args).ok;
+}
+
 export interface ControleRouteDeps {
   config(): ControleConfig | null;
   /** The display name of whoever is asking: profile name, else email. */

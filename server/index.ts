@@ -596,7 +596,7 @@ import {
 import { json, onJsonBody, onParsedBody, parsedBodyOf, readBody } from "./harness/http.ts";
 import { ROUTES, dispatchRoutes } from "./routes/table.ts";
 import { createForkPeopleRoutes } from "./routes/fork-people.ts";
-import { controleConfigFromEnv, createControleRoutes, handleControleInternal } from "./controle-card.ts";
+import { controleConfigFromEnv, createControleRoutes, handleControleInternal, postControleCard } from "./controle-card.ts";
 import { createForkPushRoutes } from "./routes/fork-push.ts";
 import { PushDevices } from "./push-devices.ts";
 import { ApnsSender, apnsConfigFromEnv, clearOnPhones, pushToPerson } from "./apns.ts";
@@ -14048,8 +14048,10 @@ const webhooks = new WebhookManager({
   // land wherever the owner (or another automation) had last switched
   // that bot's selection, including a live conversation.
   post: (botId, threadId, text) => {
-    if (!store.bot(botId)) return;
-    store.appendMessage(threadId, { role: "bot", kind: "text", text, webhookPost: true });
+    const bot = store.bot(botId);
+    if (!bot) return;
+    // Fork: a controle bot gets its card instead of the text (server/controle-card.ts).
+    if (!postControleCard({ config: CONTROLE, store, bot, threadId })) store.appendMessage(threadId, { role: "bot", kind: "text", text, webhookPost: true });
     // News in its own thread like any reply: unread, so an activity row
     // reaches it while threads are hidden.
     store.patchTask(botId, threadId, { unread: true });

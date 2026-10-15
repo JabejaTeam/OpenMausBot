@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createHmac } from "node:crypto";
-import { controleConfigFromEnv, createControleCard, createControleRoutes, handleControleInternal, signControle } from "./controle-card.ts";
+import { controleConfigFromEnv, createControleCard, createControleRoutes, handleControleInternal, postControleCard, signControle } from "./controle-card.ts";
 import { PASS } from "./routes/table.ts";
 
 const BOT = "52ebf1de-bb38-479d-bdd5-54705a621de6";
@@ -107,5 +107,16 @@ describe("handleControleInternal", () => {
   });
   it("creates the card", async () => {
     expect(await handleControleInternal({ ...base, path: "/api/internal/controle-card", ownsThread: true })).toMatchObject({ status: 201 });
+  });
+});
+
+describe("postControleCard", () => {
+  it("turns a post webhook to a controle bot into a card in that one thread, and leaves other bots alone", () => {
+    const s = store();
+    expect(postControleCard({ config, store: s, bot, threadId: "vast" })).toBe(true);
+    expect(s.messages).toEqual([expect.objectContaining({ kind: "controle", controle: { clientId: CLIENT } })]);
+    expect(postControleCard({ config, store: s, bot: { ...bot, id: "ander" }, threadId: "vast" })).toBe(false);
+    expect(postControleCard({ config: null, store: s, bot, threadId: "vast" })).toBe(false);
+    expect(s.messages).toHaveLength(1);
   });
 });
