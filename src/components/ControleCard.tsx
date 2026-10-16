@@ -7,7 +7,7 @@
 // it back to planned with the feedback. Every click goes straight to the
 // testlab as the person who clicked; the bot takes no turn.
 import { useCallback, useEffect, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, ExternalLink, Loader2, MessageSquare, RefreshCw, ScanEye } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Loader2, MessageSquare, RefreshCw, ScanEye } from "lucide-react";
 import { beeldenVan, type ControleBeeld, type ControleLijst } from "../../shared/controle-card";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -63,7 +63,23 @@ function Beeld({ wijziging, weergave }: { wijziging: ControleBeeld & { titel: st
   );
 }
 
-export function ControleCard({ botId, threadId }: { botId: string; threadId: string; message: Message }) {
+/** An older controle card: the newest one below shows the same live list, so this one is a single line. */
+function VervangenKaart() {
+  return (
+    <div className="flex w-full justify-start">
+      <div className="flex items-center gap-2 rounded-xl border border-hairline/40 bg-panel/40 px-3 py-2 text-[12.5px] text-ink-secondary">
+        <ScanEye size={13} aria-hidden />
+        {t("controle.card.replaced")}
+      </div>
+    </div>
+  );
+}
+
+export function ControleCard({ botId, threadId, replaced = false }: { botId: string; threadId: string; message: Message; replaced?: boolean }) {
+  return replaced ? <VervangenKaart /> : <LevendeKaart botId={botId} threadId={threadId} />;
+}
+
+function LevendeKaart({ botId, threadId }: { botId: string; threadId: string }) {
   const [lijst, setLijst] = useState<ControleLijst | null>(null);
   const [laadFout, setLaadFout] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
@@ -183,9 +199,6 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
                 <Check size={16} aria-hidden />
               </span>
               {t("controle.card.allDone")}
-              <a href={lijst.link} target="_blank" rel="noreferrer" className="ml-auto inline-flex items-center gap-1 text-[12.5px] text-accent hover:underline">
-                {t("controle.card.openAdmin")} <ExternalLink size={12} aria-hidden />
-              </a>
             </div>
           )}
 
@@ -205,9 +218,9 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
               </div>
               <div className="flex flex-col gap-0.5 text-[13px] leading-relaxed">
                 {/* The title is already the commit's subject: "Anders" only when it says more. */}
-                {huidig.anders !== huidig.titel && (
+                {huidig.anders && huidig.anders !== huidig.titel && (
                   <div>
-                    <span className="text-ink-secondary">{t("controle.card.changed")}</span>&nbsp; {huidig.anders ?? <span className="text-ink-tertiary">{t("controle.card.noExplanation")}</span>}
+                    <span className="text-ink-secondary">{t("controle.card.changed")}</span>&nbsp; {huidig.anders}
                   </div>
                 )}
                 {huidig.kaart && !huidig.kaartId && (
@@ -216,7 +229,7 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
                   </div>
                 )}
               </div>
-              {huidig.kaartId && huidig.kaart && (huidig.kaart.klaarAls.length > 0 || huidig.kaart.testPlan) && (
+              {huidig.kaartId && huidig.kaart && (huidig.kaart.klaarAls.length > 0 || !!huidig.kaart.testPlan?.stappen?.length) && (
                 <div className="flex flex-col gap-2 rounded-lg bg-panel/40 px-3 py-2.5 text-[13px] leading-relaxed">
                   {huidig.kaart.klaarAls.length > 0 && (
                     <div>
@@ -226,15 +239,13 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
                       </ul>
                     </div>
                   )}
-                  {huidig.kaart.testPlan && (huidig.kaart.testPlan.wat || huidig.kaart.testPlan.stappen?.length) && (
+                  {/* The plan's "wat" repeats the title in other words: only the steps. */}
+                  {!!huidig.kaart.testPlan?.stappen?.length && (
                     <div>
                       <div className="text-[11px] font-medium uppercase tracking-wide text-ink-tertiary">{t("controle.card.testPlan")}</div>
-                      {huidig.kaart.testPlan.wat && <div className="mt-0.5 text-ink">{huidig.kaart.testPlan.wat}</div>}
-                      {!!huidig.kaart.testPlan.stappen?.length && (
-                        <ol className="mt-0.5 list-decimal pl-4 text-ink">
-                          {huidig.kaart.testPlan.stappen.map((stap, i) => <li key={i}>{stap}</li>)}
-                        </ol>
-                      )}
+                      <ol className="mt-0.5 list-decimal pl-4 text-ink">
+                        {huidig.kaart.testPlan.stappen.map((stap, i) => <li key={i}>{stap}</li>)}
+                      </ol>
                     </div>
                   )}
                 </div>

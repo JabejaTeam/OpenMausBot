@@ -4452,6 +4452,7 @@
   "controle.card.klaarAls": "Klaar als",
   "controle.card.testPlan": "Testplan",
   "controle.card.noVisualChange": "Geen visuele wijziging: kijk het na met het testplan.",
+  "controle.card.replaced": "Vervangen door de nieuwere controle hieronder.",
   "relay.dismissed": "afgevinkt",
   "relay.waiting": "wacht op je antwoord",
   "relay.reply": "Antwoorden",

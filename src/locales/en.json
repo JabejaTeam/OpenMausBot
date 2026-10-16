@@ -4452,6 +4452,7 @@
   "controle.card.klaarAls": "Done when",
   "controle.card.testPlan": "Test plan",
   "controle.card.noVisualChange": "No visual change: check it against the test plan.",
+  "controle.card.replaced": "Replaced by the newer review below.",
   "relay.dismissed": "checked off",
   "relay.waiting": "waiting for your answer",
   "relay.reply": "Reply",

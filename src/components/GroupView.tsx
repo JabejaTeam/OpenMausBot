@@ -429,6 +429,8 @@ export const Transcript = memo(function Transcript({
     !folds.hiddenIds.has(message.id) &&
     (message.kind !== "activity" || roomActivityVisible(message, showToolCalls)))), [messages, showToolCalls, folds]);
   const newestMessageId = messages.at(-1)?.id;
+  // Fork: only the newest controle card in a thread stays live; older ones fold to one line.
+  const newestControleId = useMemo(() => [...messages].reverse().find((message) => message.kind === "controle")?.id, [messages]);
   const newestUserMessageId = [...messages].reverse().find((message) => message.role === "user")?.id;
   // the open thread's own turn: another thread working beside it leaves
   // this one free to retry
@@ -531,7 +533,7 @@ export const Transcript = memo(function Transcript({
           ) : m.kind === "email" && m.email && m.from?.botId ? (
             <EmailCard botId={m.from.botId} threadId={group.threadId} message={m} />
           ) : m.kind === "controle" && m.controle && m.from?.botId ? (
-            <ControleCard botId={m.from.botId} threadId={group.threadId} message={m} />
+            <ControleCard botId={m.from.botId} threadId={group.threadId} message={m} replaced={m.id !== newestControleId} />
           ) : m.kind === "options" && m.card?.requestId && m.card.questionRequest ? (
             <div className="flex justify-start">
               <MessageBoundary fallbackText={m.card.subtitle || m.card.title || ""}>
