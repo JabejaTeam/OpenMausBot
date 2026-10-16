@@ -25035,7 +25035,7 @@
       "controle.card.loadError": "e524b2481e3d7c2007486b11d7109ad3c2aad39741327351ceff35b2a13ff23e",
       "controle.card.retry": "942087cc2d41e01304b7195558d093d10c72af8e838c7556d6a02d471ee71852",
       "controle.card.allDone": "a38f50032f29091b07af1637a00b8ed1647b796f829d26f6e82c307c41a1c279",
-      "controle.card.openAdmin": "fe16dd3add525848763c0c38ced299a854b96b92aba57cbb8a3c5e5025e27148",
+      "controle.card.openAdmin": "863b06b6687633bb194e34adbf12a35f308338b9e01018267de4b983861f2ea6",
       "controle.card.notAnnounced": "b40572aafd1526f6291b1990c754849361b16ab27adecf4b36a6ce568e568740",
       "controle.card.newPage": "40126b0e9d2e5f2f3a04b635f449a480c469b2ab413e0535b2cfce2865ac8644",
       "controle.card.changed": "2a6141e43be0c2125e3b5d9f74b4ff1261a0b320ff927c83d4d9b1b65585bad7",
@@ -25055,11 +25055,15 @@
       "controle.card.feedbackLabel": "e6cbf7faa1b80e25c56bdb31be1b9fcfce26b6aecd14bc6342bb4eb075e3a829",
       "controle.card.feedbackPlaceholder": "0ed59ae13c25ef090e8168f9c583a3c8349b2adfd084a3abadbbdc4eed4a8d70",
       "controle.card.feedbackRequired": "2dde60543bef4047cec2e4aa05fe4a71d03ad8a94bb7f33e792066a19ddc07e7",
-      "controle.card.send": "5a3c9e978df9121e0fe559c37d4531b2d3300c3622d899fcfa39e3ff1e16f539",
+      "controle.card.send": "f6f4688ff23d50c67053963c251fa0ce64a925cf283537cf066b1f362cb9b778",
       "controle.card.cancel": "19766ed6ccb2f4a32778eed80d1928d2c87a18d7c275ccb163ec6709d3eb2e27",
       "controle.card.approved": "219971b0991137398e3acdef8768d11e3387c7c5444b2e0dd4078d6f439d6ad4",
-      "controle.card.rejected": "587c968b417ef3fe4079dbff0bbb872bb868a77fca0b0b2d51d51c30284f13a9",
-      "controle.card.enlarge": "f7ab0572fbcebe2c92a8334e6f8eed9b1c320b626b010cc7231dab75613bb11b"
+      "controle.card.rejected": "208928aa48d7b28ee482d316679e3f73ea9f5e58b06ca90a63154995ad8ed34b",
+      "controle.card.enlarge": "f7ab0572fbcebe2c92a8334e6f8eed9b1c320b626b010cc7231dab75613bb11b",
+      "controle.card.roadmapCard": "3dd7d32f5c7182e705efdd1f0d5f055d2e12348eabf39659f5ad041ab8c807b6",
+      "controle.card.klaarAls": "0eaed704010ffa66e6cb33be10df13f75f3b63462245c86ee0daafea33b1c9e1",
+      "controle.card.testPlan": "a582942a9281e0a89e527487bfed6543697bd4b03ed764fc759118ab89bc054f",
+      "controle.card.noVisualChange": "fdf3530a9e7f7862c15285251f86ec512f757ff39d22c14edccf7071057f7f43"
     }
   }
 }

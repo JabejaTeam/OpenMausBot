@@ -1,11 +1,12 @@
 // Jabeja fork: the controle card. A bot that is linked to a client (env
 // OMB_CONTROLE_BOTS) can show it with show_controle_card; the card then reads
-// what is left to review for that client straight from jabeja-admin
-// (lib/controle.ts there) and passes each click on as the person who clicked.
-// No model turn per click: the bot only puts the card in the chat.
+// what is left to review for that client straight from the testlab on beast
+// (hermes-ops ops/testlab, one item per roadmap card, then the loose changes)
+// and passes each click on as the person who clicked. No model turn per
+// click: the bot only puts the card in the chat.
 //
-//   OMB_CONTROLE_URL     https://admin.jabeja.be
-//   OMB_CONTROLE_SECRET  shared with jabeja-admin's OMB_CONTROLE_SECRET (HMAC)
+//   OMB_CONTROLE_URL     https://dev-adtrucks.jabeja.be/__testlab
+//   OMB_CONTROLE_SECRET  shared with the testlab (HMAC)
 //   OMB_CONTROLE_BOTS    <botId>=<clientId>,<botId>=<clientId>
 import { createHmac } from "node:crypto";
 import type { RequestAuth } from "./request-auth.ts";
@@ -122,21 +123,23 @@ export function createControleRoutes(deps: ControleRouteDeps): RouteHandler {
     try {
       if (action === "wijzigingen") {
         const result = await jabeja(config, "/wijzigingen", { clientId }, fetcher);
-        return json(res, result.ok ? 200 : 502, result.ok ? result.data : { error: "jabeja-admin gaf geen antwoord" });
+        return json(res, result.ok ? 200 : 502, result.ok ? result.data : { error: "het testlab gaf geen antwoord" });
       }
       const besluit = body?.besluit;
       const beeldIds = body?.beeldIds;
+      // A roadmap card can be approved without any screenshot (no visual change).
+      const kaartId = typeof body?.kaartId === "string" && /^[0-9a-f-]{36}$/i.test(body.kaartId) ? body.kaartId : undefined;
       const feedback = typeof body?.feedback === "string" ? body.feedback.trim().slice(0, 4000) : "";
-      if ((besluit !== "goed" && besluit !== "fout") || !Array.isArray(beeldIds) || !beeldIds.length || !beeldIds.every((id) => typeof id === "string")) {
-        return json(res, 400, { error: "Expected besluit goed|fout and beeldIds." });
+      if ((besluit !== "goed" && besluit !== "fout") || !Array.isArray(beeldIds) || (!beeldIds.length && !kaartId) || !beeldIds.every((id) => typeof id === "string")) {
+        return json(res, 400, { error: "Expected besluit goed|fout and beeldIds or kaartId." });
       }
       if (besluit === "fout" && !feedback) return json(res, 400, { error: "Schrijf wat er anders moet." });
-      const result = await jabeja(config, "/besluit", { clientId, beeldIds, besluit, ...(feedback ? { feedback } : {}), door: deps.personName(auth) }, fetcher);
+      const result = await jabeja(config, "/besluit", { clientId, ...(kaartId ? { kaartId } : {}), beeldIds, besluit, ...(feedback ? { feedback } : {}), door: deps.personName(auth) }, fetcher);
       if (!result.ok) return json(res, result.status === 400 || result.status === 404 ? result.status : 502, { error: String(result.data?.error ?? "Opslaan mislukt") });
       return json(res, 200, { aantal: result.data?.aantal ?? 0 });
     } catch (error) {
       console.error("[controle]", error instanceof Error ? error.message : error);
-      return json(res, 502, { error: "jabeja-admin is niet bereikbaar" });
+      return json(res, 502, { error: "het testlab is niet bereikbaar" });
     }
   };
 }

@@ -1,8 +1,11 @@
-// Fork: the controle card (server/controle-card.ts). One change (= one commit)
-// at a time from the testlab: what changed and why, before and after with a
-// thin frame round the change, paging through every screenshot that shows it,
-// and approve / reject (with feedback) / skip for all of them at once. Every click goes
-// straight to jabeja-admin as the person who clicked; the bot takes no turn.
+// Fork: the controle card (server/controle-card.ts). One item at a time from
+// the testlab: a roadmap card (title, "Klaar als", test plan, and the
+// screenshots that changed for it, or "no visual change"), or a loose change
+// (= one commit). Before and after with a thin frame round the change, paging
+// through every screenshot, and approve / reject (with feedback) / skip for
+// the whole item at once. Approving a card approves the card; rejecting sends
+// it back to planned with the feedback. Every click goes straight to the
+// testlab as the person who clicked; the bot takes no turn.
 import { useCallback, useEffect, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, ExternalLink, Loader2, MessageSquare, RefreshCw, ScanEye } from "lucide-react";
 import { beeldenVan, type ControleBeeld, type ControleLijst } from "../../shared/controle-card";
@@ -126,7 +129,7 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
     try {
       await api(`/api/bots/${encodeURIComponent(botId)}/controle/besluit`, {
         method: "POST",
-        body: JSON.stringify({ threadId, beeldIds: huidig.beeldIds, besluit: keuze, ...(keuze === "fout" ? { feedback: feedback.trim() } : {}) }),
+        body: JSON.stringify({ threadId, ...(huidig.kaartId ? { kaartId: huidig.kaartId } : {}), beeldIds: huidig.beeldIds, besluit: keuze, ...(keuze === "fout" ? { feedback: feedback.trim() } : {}) }),
         timeoutMs: 25_000,
       });
       volgende(keuze === "goed" ? t("controle.card.approved") : t("controle.card.rejected"), true);
@@ -189,7 +192,8 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
           {huidig && (
             <>
               <div className="flex flex-wrap items-center gap-1.5">
-                {huidig.kaart && <span className={CHIP}>{huidig.kaart.title}</span>}
+                {huidig.kaart && !huidig.kaartId && <span className={CHIP}>{huidig.kaart.title}</span>}
+                {huidig.kaartId && <span className={CHIP}>{t("controle.card.roadmapCard")}</span>}
                 {huidig.onverwacht && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-700 dark:text-amber-400">{t("controle.card.notAnnounced")}</span>}
                 {huidig.soort === "nieuw" && <span className={CHIP}>{t("controle.card.newPage")}</span>}
               </div>
@@ -206,12 +210,40 @@ export function ControleCard({ botId, threadId }: { botId: string; threadId: str
                     <span className="text-ink-secondary">{t("controle.card.changed")}</span>&nbsp; {huidig.anders ?? <span className="text-ink-tertiary">{t("controle.card.noExplanation")}</span>}
                   </div>
                 )}
-                {huidig.kaart && (
+                {huidig.kaart && !huidig.kaartId && (
                   <div>
                     <span className="text-ink-secondary">{t("controle.card.why")}</span>&nbsp; {huidig.kaart.klaarAls[0] ?? huidig.kaart.title}
                   </div>
                 )}
               </div>
+              {huidig.kaartId && huidig.kaart && (huidig.kaart.klaarAls.length > 0 || huidig.kaart.testPlan) && (
+                <div className="flex flex-col gap-2 rounded-lg bg-panel/40 px-3 py-2.5 text-[13px] leading-relaxed">
+                  {huidig.kaart.klaarAls.length > 0 && (
+                    <div>
+                      <div className="text-[11px] font-medium uppercase tracking-wide text-ink-tertiary">{t("controle.card.klaarAls")}</div>
+                      <ul className="mt-0.5 list-disc pl-4 text-ink">
+                        {huidig.kaart.klaarAls.map((regel, i) => <li key={i}>{regel}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {huidig.kaart.testPlan && (huidig.kaart.testPlan.wat || huidig.kaart.testPlan.stappen?.length) && (
+                    <div>
+                      <div className="text-[11px] font-medium uppercase tracking-wide text-ink-tertiary">{t("controle.card.testPlan")}</div>
+                      {huidig.kaart.testPlan.wat && <div className="mt-0.5 text-ink">{huidig.kaart.testPlan.wat}</div>}
+                      {!!huidig.kaart.testPlan.stappen?.length && (
+                        <ol className="mt-0.5 list-decimal pl-4 text-ink">
+                          {huidig.kaart.testPlan.stappen.map((stap, i) => <li key={i}>{stap}</li>)}
+                        </ol>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              {beelden.length === 0 && (
+                <div className="rounded-lg border border-dashed border-hairline/70 px-3 py-4 text-center text-[13px] text-ink-secondary">
+                  {t("controle.card.noVisualChange")}
+                </div>
+              )}
 
               {beelden.length > 1 && beeld && (
                 <div className="flex items-center gap-1.5 text-[12.5px]">

@@ -16,3 +16,7 @@ it("pages through every screenshot of a change, or shows the one example", () =>
   expect(beeldenVan({ ...wijziging, beelden })).toEqual(beelden);
   expect(beeldenVan(wijziging)).toEqual([{ plek: "Zoekbalk bovenaan het platform", scherm: "desktop", soort: "gewijzigd", voorUrl: "https://cdn/voor", naUrl: "https://cdn/na", kader: null }]);
 });
+
+it("has no screenshots for a roadmap card with no visual change", () => {
+  expect(beeldenVan({ ...wijziging, kaartId: "k", beeldIds: [], naUrl: null, voorUrl: null, beelden: [] })).toEqual([]);
+});

@@ -26,11 +26,23 @@ export interface ControleBeeld {
   kader: ControleKader | null;
 }
 
+/** The roadmap card a change belongs to: what it asked ("Klaar als") and how to test it. */
+export interface ControleKaartInfo {
+  id: string;
+  title: string;
+  klaarAls: string[];
+  testPlan?: { wat?: string; stappen?: string[]; letop?: string[]; pad?: string } | null;
+}
+
 /**
- * One change to review, as jabeja-admin's /api/external/controle/wijzigingen
- * gives it: one commit (titel = its subject), however many screenshots show it.
+ * One thing to review, as the testlab's /api/external/controle/wijzigingen
+ * gives it: a roadmap card (kaartId: approving it approves the card, even
+ * with no screenshot at all), or a loose change = one commit (titel = its
+ * subject), however many screenshots show it.
  */
 export interface ControleWijziging {
+  /** Set when this is a whole roadmap card: the decision also moves the card. */
+  kaartId?: string;
   beeldIds: string[];
   project: string;
   commit: string;
@@ -39,17 +51,19 @@ export interface ControleWijziging {
   soort: string;
   onverwacht: boolean;
   anders: string | null;
-  kaart: { id: string; title: string; klaarAls: string[] } | null;
+  kaart: ControleKaartInfo | null;
   voorUrl: string | null;
-  naUrl: string;
+  /** null: a card with no visual change. */
+  naUrl: string | null;
   kader: ControleKader | null;
   /** Every screenshot of this change, the example first (older jabeja-admin: absent). */
   beelden?: ControleBeeld[];
 }
 
-/** The screenshots to page through: the list, or the one example. */
+/** The screenshots to page through: the list, or the one example; none for a card with no visual change. */
 export function beeldenVan(w: ControleWijziging): ControleBeeld[] {
-  return w.beelden?.length ? w.beelden : [{ plek: w.titel, scherm: w.schermen[0] ?? "", soort: w.soort, voorUrl: w.voorUrl, naUrl: w.naUrl, kader: w.kader }];
+  if (w.beelden?.length) return w.beelden;
+  return w.naUrl ? [{ plek: w.titel, scherm: w.schermen[0] ?? "", soort: w.soort, voorUrl: w.voorUrl, naUrl: w.naUrl, kader: w.kader }] : [];
 }
 
 export interface ControleLijst {

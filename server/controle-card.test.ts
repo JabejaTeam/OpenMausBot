@@ -72,7 +72,7 @@ describe("createControleRoutes", () => {
     expect((await call(routes(null, false), `/api/bots/${BOT}/controle/wijzigingen`, { threadId: "t" })).status).toBe(404);
   });
 
-  it("asks jabeja-admin for its own client, signed with the shared secret", async () => {
+  it("asks the testlab for its own client, signed with the shared secret", async () => {
     const { calls, fetcher } = fakeFetch({ status: 200, body: { klant: "A&D", wijzigingen: [], link: "l" } });
     const out = await call(routes(fetcher), `/api/bots/${BOT}/controle/wijzigingen`, { threadId: "t", clientId: "ander" });
     expect(out).toMatchObject({ status: 200, body: { klant: "A&D" } });
@@ -91,7 +91,16 @@ describe("createControleRoutes", () => {
     expect(JSON.parse(calls[0].body)).toEqual({ clientId: CLIENT, beeldIds: ["a", "b"], besluit: "fout", feedback: "knop rechts", door: "Yren Delhaye" });
   });
 
-  it("says when jabeja-admin is unreachable", async () => {
+  it("passes a roadmap card on, also without screenshots; without a card it needs screenshots", async () => {
+    const KAART = "5eed0240-0005-4000-8000-000000000001";
+    const { calls, fetcher } = fakeFetch({ status: 200, body: { aantal: 0 } });
+    expect((await call(routes(fetcher), `/api/bots/${BOT}/controle/besluit`, { threadId: "t", besluit: "goed", beeldIds: [] })).status).toBe(400);
+    expect((await call(routes(fetcher), `/api/bots/${BOT}/controle/besluit`, { threadId: "t", besluit: "goed", beeldIds: [], kaartId: "geen-uuid" })).status).toBe(400);
+    expect((await call(routes(fetcher), `/api/bots/${BOT}/controle/besluit`, { threadId: "t", besluit: "goed", beeldIds: [], kaartId: KAART })).status).toBe(200);
+    expect(JSON.parse(calls[0].body)).toEqual({ clientId: CLIENT, kaartId: KAART, beeldIds: [], besluit: "goed", door: "Yren Delhaye" });
+  });
+
+  it("says when the testlab is unreachable", async () => {
     const out = await call(routes(async () => { throw new Error("down"); }), `/api/bots/${BOT}/controle/wijzigingen`, { threadId: "t" });
     expect(out.status).toBe(502);
   });
