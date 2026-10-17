@@ -139,15 +139,18 @@ export function mailHtml(subject: string, text: string, publicUrl: string): stri
 `;
 }
 
-/** The SendEmail body: Simple content, so SES builds the multipart itself;
- * UTF-8 named, or "één" arrives as mojibake. */
-export function sesPayload(to: string, subject: string, text: string, publicUrl: string): string {
+/** The SendEmail body: Simple content, UTF-8 named, or "één" arrives as
+ * mojibake. Plain text only: Microsoft 365 (Ripal, 17-10-2026) silently
+ * quarantined every HTML version of the code mail, with or without the logo
+ * and the hidden preview line, while the same text arrived. mailHtml stays for
+ * when the sending domain is trusted there (SPF + own MAIL FROM). */
+export function sesPayload(to: string, subject: string, text: string): string {
   return JSON.stringify({
     FromEmailAddress: product.mailFrom,
     Destination: { ToAddresses: [to] },
     Content: { Simple: {
       Subject: { Data: subject, Charset: "UTF-8" },
-      Body: { Text: { Data: text, Charset: "UTF-8" }, Html: { Data: mailHtml(subject, text, publicUrl), Charset: "UTF-8" } },
+      Body: { Text: { Data: text, Charset: "UTF-8" } },
     } },
   });
 }
@@ -178,7 +181,7 @@ export function createSesCodeClient(options: {
       if (open && at - open.sentAt < RESEND_AFTER_MS) return { email };
       const code = makeCode();
       const { subject, text } = codeMail(code);
-      const body = sesPayload(email, subject, text, options.publicUrl());
+      const body = sesPayload(email, subject, text);
       let response: Response;
       try {
         response = await fetchImpl(url, { method: "POST", headers: signSes(options.key, url, body), body, signal: AbortSignal.timeout(TIMEOUT_MS) });

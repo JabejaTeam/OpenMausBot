@@ -46,11 +46,9 @@ describe("the Hubigen code mail", () => {
     expect(Content.Simple.Subject.Data).toBe("Je inlogcode voor Hubigen");
     expect(Content.Simple.Body.Text.Data).toContain("    12345678");
     expect(Content.Simple.Body.Text.Charset).toBe("UTF-8");
-    const html = Content.Simple.Body.Html.Data;
-    expect(html).toContain(">12345678</td>");
-    expect(html).toContain('src="https://bots.example.test/wordmark-mail.png"');
-    expect(html).toContain("color-scheme");
-    expect(html).not.toMatch(/OpenMaus/i);
+    // Microsoft 365 quarantines the HTML version: text only.
+    expect(Content.Simple.Body.Html).toBeUndefined();
+    expect(Content.Simple.Body.Text.Data).not.toMatch(/OpenMaus/i);
   });
 
   it("escapes what it puts in the HTML", () => {
