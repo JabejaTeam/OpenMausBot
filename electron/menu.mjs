@@ -19,7 +19,7 @@ import { Menu, app } from "electron";
 /** `onAddCloud` and `sublabels` as in the sidebar's server menu
  * (environments.cjs workspaceMenuTemplate): "Add a Cloud…" under the saved
  * servers, and My Cloud's line in place of its host. */
-export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFromClipboard, onConnect, onForget, onOpenSettings, onOrganizationSignIn, onAddCloud, sublabels = {} }) {
+export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFromClipboard, onConnect, onForget, onOpenSettings, onOrganizationSignIn, onAddCloud, sublabels = {}, serverMenu = true }) {
   const isMac = process.platform === "darwin";
   const active = environments.find((e) => e.id === activeId) ?? null;
   const server = {
@@ -48,7 +48,7 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
     ...(isMac ? [{ label: app.name, submenu: [{ role: "about" }, { label: "Preferences…", accelerator: "CmdOrCtrl+,", click: () => onOpenSettings() }, { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { role: "unhide" }, { type: "separator" }, { role: "quit" }] }] : []),
     { role: "fileMenu" },
     { role: "editMenu" },
-    server,
+    ...(serverMenu ? [server] : []), // fork: a locked Hubigen build has one server (fork-locked-server.mjs)
     { role: "viewMenu" },
     { role: "windowMenu" },
   ];

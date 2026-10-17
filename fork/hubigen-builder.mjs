@@ -25,7 +25,9 @@ export default {
   // productName in the app's package.json is what Electron names it by: its
   // data folder and its "Hubigen Safe Storage" keychain item, not the
   // OpenMausBot app's "openmausbot" ones (electron/fork-user-data.mjs).
-  extraMetadata: { version, productName: name },
+  // lockedServer: the one server this app opens, whose sign-in list decides
+  // who gets in (electron/fork-locked-server.mjs).
+  extraMetadata: { version, productName: name, lockedServer: product.server },
   artifactName: `${name}-\${version}-\${arch}.\${ext}`,
   // Updates only from Hubigen's own feed (the generic provider reads
   // latest-mac.yml there), never upstream's releases.

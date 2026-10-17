@@ -49,6 +49,10 @@ grep -qx "provider: generic" "release/mac-arm64/$name.app/Contents/Resources/app
   || { echo "app-update.yml does not point at $feed:" >&2; cat "release/mac-arm64/$name.app/Contents/Resources/app-update.yml" >&2; exit 1; }
 ! grep -q "^channel:" "release/mac-arm64/$name.app/Contents/Resources/app-update.yml" || { echo "app-update.yml names a channel; the app would not read latest-mac.yml" >&2; exit 1; }
 ! grep -q -- "-x64\." release/latest-mac.yml || { echo "latest-mac.yml lists x64 files" >&2; exit 1; }
+# the app opens only Hubigen's server: without lockedServer a download alone
+# would run (electron/fork-locked-server.mjs)
+grep -aEq "\"lockedServer\": ?\"$(node -p 'require("./shared/product.json").server')\"" "release/mac-arm64/$name.app/Contents/Resources/app.asar" \
+  || { echo "app.asar has no lockedServer; the app would open without access" >&2; exit 1; }
 # The zip is what installed apps update from; it is final now, so it goes up
 # while Apple checks the dmg. The feed still names the old version until the
 # end, so nobody is offered a half-uploaded one.

@@ -95,9 +95,13 @@ import { createOrgLibrary } from "./org-library.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
 import { carryOverRenamedUserData } from "./fork-user-data.mjs";
+import { lockEnvironments, readLockedServer } from "./fork-locked-server.mjs";
 
 // fork: before anything reads the data folder (fork-user-data.mjs)
 carryOverRenamedUserData(app);
+// fork: a Hubigen build shows only this server (fork-locked-server.mjs)
+const LOCKED_SERVER = app.isPackaged ? readLockedServer(app.getAppPath()) : null;
+const locked = (state) => (LOCKED_SERVER ? lockEnvironments(state, LOCKED_SERVER, app.name) : state);
 const { desktopCapabilities, nativeDesktopActions } = capabilitiesModule;
 const nativeActions = nativeDesktopActions(process.platform);
 const require = createRequire(import.meta.url);
@@ -1913,7 +1917,7 @@ ipcMain.on("desktop:unread-count", (event, value) => {
 // Only {id, name, origin} is stored here; the session credential is the
 // HttpOnly cookie /pair set for that origin, kept by Chromium's cookie jar.
 const { LOCAL_ID, activeEnvironment, activeRemote, allowedOrigins, bootEnvironmentDir, parseEnvironments, parseHostedWorkspaceLink, serializeEnvironments, startupEnvironmentDir, withActive, withEnvironment, withLocalEnvironment, withMicrophone, withoutEnvironment, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary, workspaceWindowTitle } = environmentsModule;
-let environmentsState = { environments: [], activeId: LOCAL_ID };
+let environmentsState = locked({ environments: [], activeId: LOCAL_ID });
 let computerSharing;
 const sharingPrompts = new Set();
 
@@ -2049,13 +2053,13 @@ function readEnvironments() {
     // Stamp local entries with whether their dir is absent right now: the
     // renderer offers "forget and delete" and the menu marks the row from
     // this, and it is only true at read time.
-    return {
+    return locked({
       ...state,
       environments: state.environments.map((entry) =>
         entry.kind === "local" ? { ...entry, missing: !fs.existsSync(entry.dataDir) } : { ...entry, missing: false }),
-    };
+    });
   } catch {
-    return { environments: [], activeId: LOCAL_ID };
+    return locked({ environments: [], activeId: LOCAL_ID });
   }
 }
 
@@ -2095,11 +2099,13 @@ function refreshApplicationMenu() {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings");
       },
       ...cloudMenuOptions(),
+      serverMenu: !LOCKED_SERVER,
     }),
   );
 }
 
 function persistEnvironments(next) {
+  next = locked(next); // fork: whatever asked, the locked server stays the only one
   writeEnvironments(next);
   environmentsState = next;
   refreshApplicationMenu();
@@ -2253,6 +2259,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
 }
 
 async function switchEnvironment(id) {
+  if (LOCKED_SERVER) return; // fork: one server, nothing to switch to
   if (id === environmentsState.activeId || (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id))) return;
   const entry = environmentsState.environments.find((candidate) => candidate.id === id);
   if (entry?.kind === "local") return await switchLocalEnvironmentTo(entry.dataDir, entry.id);
@@ -2728,6 +2735,17 @@ function createWindow({ deferNavigation = false } = {}) {
   };
   win.webContents.on("will-navigate", guardNavigation);
   win.webContents.on("will-redirect", guardNavigation);
+  // fork: a locked build never shows the local page, whichever path loads it
+  // (settings, Cloud, organization or pairing links): it goes to the server.
+  if (LOCKED_SERVER) win.webContents.on("did-start-navigation", ({ url, isMainFrame }) => {
+    let origin = null;
+    try {
+      origin = new URL(url).origin;
+    } catch {}
+    if (!isMainFrame || origin !== rendererOrigin()) return;
+    slog(`locked: local page ${new URL(url).pathname} replaced by ${LOCKED_SERVER}`);
+    void win.loadURL(LOCKED_SERVER).catch(() => {});
+  });
   // Subframes: a page may not embed the local server, or any other saved
   // server, inside this preload-bearing window.
   win.webContents.on("will-frame-navigate", (details) => {
@@ -2753,6 +2771,13 @@ function createWindow({ deferNavigation = false } = {}) {
       origin = new URL(validatedURL).origin;
     } catch {}
     if (origin !== remote.origin) return;
+    if (LOCKED_SERVER) {
+      // fork: no local server to fall back to; offer to try again.
+      slog(`locked server unreachable (${errorDescription})`);
+      void dialog.showMessageBox({ type: "warning", message: `${app.name} is not reachable`, detail: `${errorDescription}. Check your internet connection.`, buttons: ["Try Again", "Quit"], defaultId: 0 })
+        .then(({ response }) => (response === 0 ? navigateMainWindow(remote.origin) : app.quit()));
+      return;
+    }
     slog(`remote server unreachable (${errorDescription}); back to Local`);
     void dialog.showMessageBox({
       type: "warning",
@@ -3699,7 +3724,7 @@ ipcMain.handle("workspaces:state", workspaceOnly(() => workspaceSummary(environm
 let workspaceMenuOpen = false;
 // `from` "howto": opened by the Show me how tip, so Add a Cloud… counts as reached from it.
 ipcMain.handle("workspaces:menu", workspaceOnly(async (_event, from) => {
-  if (workspaceMenuOpen) return;
+  if (workspaceMenuOpen || LOCKED_SERVER) return; // fork: one server, no chooser
   workspaceMenuOpen = true;
   try {
     await cloudOffersReady();
