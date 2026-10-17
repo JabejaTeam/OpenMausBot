@@ -1125,7 +1125,7 @@ const MessagesList = memo(function MessagesList({
             case "email":
               return m.email ? <EmailCard botId={botId} threadId={threadId} message={m} /> : null;
             case "controle":
-              return m.controle ? <ControleCard botId={botId} threadId={threadId} message={m} /> : null;
+              return m.controle ? <ControleCard botId={botId} threadId={threadId} message={m} replaced={m.id !== lookups.newestControleId} /> : null;
             case "options": {
               // a live permission ask gets the approval box; a structured
               // ask gets the question box; anything else keeps the list
