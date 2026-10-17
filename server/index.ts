@@ -14071,8 +14071,10 @@ const webhooks = new WebhookManager({
   post: (botId, threadId, text) => {
     const bot = store.bot(botId);
     if (!bot) return;
-    // Fork: a controle bot gets its card instead of the text (server/controle-card.ts).
-    if (!postControleCard({ config: CONTROLE, store, bot, threadId })) store.appendMessage(threadId, { role: "bot", kind: "text", text, webhookPost: true });
+    // Fork: a controle bot gets its card instead of the testlab's JSON payload
+    // (server/controle-card.ts); a plain text post (the testlab's short "N
+    // schermen te keuren" line with the Testlab page link) stays text.
+    if (!(text.trimStart().startsWith("{") && postControleCard({ config: CONTROLE, store, bot, threadId }))) store.appendMessage(threadId, { role: "bot", kind: "text", text, webhookPost: true });
     // News in its own thread like any reply: unread, so an activity row
     // reaches it while threads are hidden.
     store.patchTask(botId, threadId, { unread: true });
