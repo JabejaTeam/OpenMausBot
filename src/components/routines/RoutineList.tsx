@@ -1,4 +1,4 @@
-import { FileText, Loader2, Repeat2 } from "lucide-react";
+import { FileText, Loader2, Repeat2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { botLabelLine } from "@/lib/bot-label";
@@ -7,7 +7,7 @@ import { scheduleLabel } from "@/lib/schedule-label";
 import { latestRoutineRun, routineDateTime, routineNextLabel, routineRunLabel, routineRunTone, routineScheduleState } from "@/lib/routine-display";
 import type { Bot } from "@/state/store";
 
-export function RoutineList({ routines, runs, bots, loading, error, onOpen, onLogs }: {
+export function RoutineList({ routines, runs, bots, loading, error, onOpen, onLogs, onDelete }: {
   routines: Routine[];
   runs: RoutineRun[];
   bots?: Bot[];
@@ -15,6 +15,7 @@ export function RoutineList({ routines, runs, bots, loading, error, onOpen, onLo
   error?: boolean;
   onOpen: (routine: Routine) => void;
   onLogs: (routine: Routine) => void;
+  onDelete?: (routine: Routine) => void;
 }) {
   const sorted = [...routines].sort((a, b) => Number(b.enabled) - Number(a.enabled) || (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity) || a.name.localeCompare(b.name));
   return <div className="space-y-3" aria-label={t("routines.list")}>
@@ -38,6 +39,7 @@ export function RoutineList({ routines, runs, bots, loading, error, onOpen, onLo
             {latest ? <><span className={routineRunTone(latest)}>{t("routines.latestRun", { status: routineRunLabel(latest) })}</span><span className="block text-[10.5px] text-ink-secondary">{routineDateTime(latest.finishedAt ?? latest.startedAt ?? latest.scheduledFor)}</span></> : <span className="text-ink-secondary">{t("routines.neverRun")}</span>}
           </div>
           <button type="button" onClick={() => onLogs(routine)} aria-label={t("routines.logsFor", { name: routine.name })} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink"><FileText size={12} />{t("routines.logs")}</button>
+          {onDelete && <button type="button" onClick={() => onDelete(routine)} title={t("routines.delete")} aria-label={`${t("routines.delete")} ${routine.name}`} className="shrink-0 rounded-md p-1.5 text-ink-secondary hover:bg-danger/10 hover:text-danger"><Trash2 size={12} /></button>}
         </div>
         {latest && (latest.attention || latest.error || latest.output) && <p className={cn("mt-2 line-clamp-2 whitespace-pre-wrap text-[11.5px] leading-relaxed", latest.error ? "text-danger" : "text-ink-secondary")}>{latest.attention || latest.error || latest.output}</p>}
         {!!routine.failureStreak && <p className="mt-2 text-[11.5px] text-danger">{t("routines.failureStreak", { count: routine.failureStreak })}</p>}

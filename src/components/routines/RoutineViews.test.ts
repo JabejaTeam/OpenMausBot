@@ -140,6 +140,11 @@ describe("central routine logs", () => {
     expect(markup).toContain("Open Morning brief run: Blocked");
   });
 
+  it("offers a delete button per routine only when the page can delete", () => {
+    expect(list()).not.toContain('aria-label="Delete ');
+    expect(list({ onDelete: vi.fn() })).toContain(`aria-label="Delete ${routine.name}"`);
+  });
+
   it("provides distinct initial-loading, failure, and empty states", () => {
     expect(logs({ runs: [], loading: true })).toContain("Loading routines…");
     expect(logs({ runs: [], loading: true })).not.toContain("No runs recorded yet");
