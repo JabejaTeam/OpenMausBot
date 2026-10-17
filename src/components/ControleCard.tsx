@@ -17,16 +17,15 @@ import { AttachmentPreviewDialog } from "./AttachmentPreview";
 const BUTTON = "rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors active:scale-[0.98] disabled:opacity-50";
 const CHIP = "rounded-full bg-control px-2 py-0.5 text-[11px] text-ink-secondary";
 
-function Beeld({ wijziging, weergave }: { wijziging: ControleBeeld & { titel: string }; weergave: "voor" | "na" }) {
+// Only the current screenshot, framed where it changed: Wiebren reviews what
+// the screen is now, not a comparison with how it was (17-10-2026). The
+// testlab still compares internally to know which pages changed.
+function Beeld({ wijziging }: { wijziging: ControleBeeld & { titel: string } }) {
   const [open, setOpen] = useState(false);
-  const src = weergave === "voor" && wijziging.voorUrl ? wijziging.voorUrl : wijziging.naUrl;
-  const kader = src === wijziging.naUrl ? wijziging.kader : null;
-  // Groot bekijken in de app zelf (dezelfde viewer als bijlagen), met voor en
-  // na als twee beelden: pijltjes of ← → wisselen ertussen.
-  const beelden = [
-    ...(wijziging.voorUrl ? [{ src: wijziging.voorUrl, name: `${t("controle.card.before")} · ${wijziging.titel}`, openUrl: wijziging.voorUrl }] : []),
-    { src: wijziging.naUrl, name: `${t("controle.card.after")} · ${wijziging.titel}`, openUrl: wijziging.naUrl },
-  ];
+  const src = wijziging.naUrl;
+  const kader = wijziging.kader;
+  // Groot bekijken in de app zelf (dezelfde viewer als bijlagen).
+  const beelden = [{ src, name: wijziging.titel, openUrl: src }];
   return (
     <>
     <button
@@ -53,9 +52,9 @@ function Beeld({ wijziging, weergave }: { wijziging: ControleBeeld & { titel: st
     </button>
     {open && (
       <AttachmentPreviewDialog
-        image={beelden[beelden.length - 1]}
+        image={beelden[0]}
         images={beelden}
-        initialIndex={weergave === "voor" && wijziging.voorUrl ? 0 : beelden.length - 1}
+        initialIndex={0}
         onClose={() => setOpen(false)}
       />
     )}
@@ -84,7 +83,6 @@ function LevendeKaart({ botId, threadId }: { botId: string; threadId: string }) 
   const [laadFout, setLaadFout] = useState<string | null>(null);
   const [index, setIndex] = useState(0);
   const [scherm, setScherm] = useState(0);
-  const [weergave, setWeergave] = useState<"voor" | "na">("na");
   const [afkeuren, setAfkeuren] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [bezig, setBezig] = useState(false);
@@ -122,7 +120,6 @@ function LevendeKaart({ botId, threadId }: { botId: string; threadId: string }) 
     setAfkeuren(false);
     setFeedback("");
     setFout(null);
-    setWeergave("na");
     setScherm(0);
     if (!lijst) return;
     if (weg) {
@@ -158,10 +155,8 @@ function LevendeKaart({ botId, threadId }: { botId: string; threadId: string }) 
 
   const onKey = (event: React.KeyboardEvent) => {
     if ((event.target as HTMLElement).tagName === "TEXTAREA" || !beeld) return;
-    if (event.key === "ArrowLeft" && beeld.voorUrl) setWeergave("voor");
-    if (event.key === "ArrowRight") setWeergave("na");
-    if (event.key === "ArrowUp" && beelden.length > 1) blader(-1);
-    if (event.key === "ArrowDown" && beelden.length > 1) blader(1);
+    if ((event.key === "ArrowUp" || event.key === "ArrowLeft") && beelden.length > 1) blader(-1);
+    if ((event.key === "ArrowDown" || event.key === "ArrowRight") && beelden.length > 1) blader(1);
   };
 
   return (
@@ -286,24 +281,7 @@ function LevendeKaart({ botId, threadId }: { botId: string; threadId: string }) 
                   <span className="text-ink-tertiary">· {beeld.scherm}</span>
                 </div>
               )}
-              {beeld?.voorUrl && (
-                <div className="flex items-center justify-between">
-                  <div className="inline-flex overflow-hidden rounded-lg border border-hairline/60" role="group" aria-label={t("controle.card.beforeAfter")}>
-                    {(["voor", "na"] as const).map((w) => (
-                      <button
-                        key={w}
-                        type="button"
-                        onClick={() => setWeergave(w)}
-                        className={cn("px-3.5 py-1 text-[12.5px]", weergave === w ? "bg-ink text-card" : "text-ink-secondary hover:bg-control")}
-                      >
-                        {t(w === "voor" ? "controle.card.before" : "controle.card.after")}
-                      </button>
-                    ))}
-                  </div>
-                  <span className="text-[11.5px] text-ink-tertiary">{t("controle.card.keysHint")}</span>
-                </div>
-              )}
-              {beeld && <Beeld key={beeld.naUrl} wijziging={{ ...beeld, titel: huidig.titel }} weergave={weergave} />}
+              {beeld && <Beeld key={beeld.naUrl} wijziging={{ ...beeld, titel: huidig.titel }} />}
             </>
           )}
           {melding && <div className="text-[12px] text-ink-secondary">{melding}</div>}
