@@ -429,6 +429,7 @@ import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { addHeldSecretScrubber, redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { ROUTINE_RESTARTED, RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
+import { automationMcpPerson } from "./automation-person.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import { BROWSER_CONTROL_REFUSAL, BrowserRuntime, attachesToChrome, browserRuntimeEnv, formatBrowserTiming } from "./browser-runtime.ts";
@@ -11759,8 +11760,12 @@ async function startTurn(
       if (instance.adapter.capabilities.customMcp === true) {
         // Per-person values follow whoever this work is for (the same person
         // as the turn's [Person], so delegated work keeps the asker's values);
-        // an automation (routine, webhook) is for nobody and gets the shared values.
-        const custom = withMailGate(await withMcpSignIn(engineMcpServers(bot, opts?.automationSource ? undefined : turnPerson), mcpOAuth), bot.id, threadId, dispatchClaimId);
+        // an automation gets the shared values, except (Jabeja fork) a routine
+        // run for the owner, which gets the owner's own (see automation-person.ts).
+        const mcpPerson = opts?.automationSource
+          ? automationMcpPerson(opts.automationSource, threadStarters.get(threadId), ownerPersonKey())
+          : turnPerson;
+        const custom = withMailGate(await withMcpSignIn(engineMcpServers(bot, mcpPerson), mcpOAuth), bot.id, threadId, dispatchClaimId);
         if (Object.keys(custom).length) integrations.custom = custom;
       }
       // CLI engines work inside the bot's own workspace directory rather
