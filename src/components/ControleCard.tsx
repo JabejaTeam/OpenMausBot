@@ -193,6 +193,23 @@ function LevendeKaart({ botId, threadId }: { botId: string; threadId: string }) 
             </div>
           )}
 
+          {lijst?.dekking && (
+            <div className="flex flex-col gap-1 rounded-lg bg-control/60 px-3 py-2 text-[12px] leading-snug text-ink-secondary">
+              <div>
+                <span className="font-medium text-ink">{t("controle.card.coverage")}:</span> {lijst.dekking.samenvatting}
+              </div>
+              {lijst.dekking.minder.length > 0 && !lijst.dekking.aangekondigd && (
+                <div className="text-danger">
+                  {t("controle.card.coverageDrop", { n: String(lijst.dekking.minder.length) })}: {lijst.dekking.minder.slice(0, 3).join(" · ")}
+                </div>
+              )}
+              {lijst.dekking.aangekondigd && <div>{t("controle.card.coverageAnnounced", { reason: lijst.dekking.aangekondigd })}</div>}
+              <a href={lijst.dekking.link} target="_blank" rel="noreferrer" className="w-fit underline underline-offset-2">
+                {t("controle.card.coverageDetails")}
+              </a>
+            </div>
+          )}
+
           {lijst && !huidig && (
             <div className="flex items-center gap-2 text-[13.5px] text-ink">
               <span className="flex size-8 items-center justify-center rounded-lg bg-success/15 text-success">

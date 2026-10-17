@@ -69,5 +69,7 @@ export function beeldenVan(w: ControleWijziging): ControleBeeld[] {
 export interface ControleLijst {
   klant: string;
   link: string;
+  /** What the last run checked (testlab e2e/dekking.mjs), and any drop versus the run before. */
+  dekking?: { samenvatting: string; minder: string[]; aangekondigd: string | null; link: string } | null;
   wijzigingen: ControleWijziging[];
 }
