@@ -88,6 +88,13 @@ export function routineRunMarksUnread(routine: { notify?: boolean } | undefined,
   return status === "completed" && routine?.notify === true;
 }
 
+/** Fork: whether a finished run lands in its conversation as a plain bot
+ * message with the full report instead of a run card. Only a completed run of
+ * a routine with "as message" on; waiting and failed runs keep their card. */
+export function routineRunAsMessage(routine: { asMessage?: boolean } | undefined, status: RoutineRunStatus): boolean {
+  return status === "completed" && routine?.asMessage === true;
+}
+
 /** The logs view's status filter: every run, the composite problem set the
  * indicators count, or one exact status. */
 export type RoutineRunStatusFilter = "all" | "problems" | RoutineRunStatus;
@@ -110,6 +117,8 @@ export interface Routine {
   mail?: "draft" | "send";
   /** Fork: a completed run marks its conversation unread. Absent means quiet. */
   notify?: boolean;
+  /** Fork: a completed run's report lands as a plain message, not a card. */
+  asMessage?: boolean;
   /** Each run starts with the previous run's report. */
   continuity?: boolean;
   /** Also run once each time OpenMausBot starts. */
@@ -178,6 +187,8 @@ export interface RoutineInput {
   mail?: "send" | "draft";
   /** Fork: true marks a completed run unread; false/absent keeps it quiet. */
   notify?: boolean;
+  /** Fork: true posts a completed run's report as a plain message. */
+  asMessage?: boolean;
   /** Each run starts with the previous run's report. */
   continuity?: boolean;
   runOnStartup?: boolean;

@@ -12845,6 +12845,16 @@ function routineRunCard(run: RoutineRun): NonNullable<Message["routineRun"]> {
   return card;
 }
 
+/** Fork: a completed run's full report, the last reply in its own thread
+ * (falling back to the run's output), for a routine that reports as a message. */
+function routineRunReport(run: RoutineRun): string | undefined {
+  const last = run.threadId
+    ? store.messagesFor(run.threadId).filter((message) => message.role === "bot" && message.kind === "text" && message.text?.trim()).at(-1)
+    : undefined;
+  const text = last?.text?.trim() || run.output?.trim();
+  return text ? redactSecretsInText(text) : undefined;
+}
+
 function routineRunFallbackText(card: NonNullable<Message["routineRun"]>): string {
   const goalState = card.goalStatus === "needs-input"
     ? "needs your input"
@@ -12901,17 +12911,23 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
   }
   const sourceThreadId = source.threadId;
   const card = routineRunCard(run);
-  const text = routineRunFallbackText(card);
+  // Fork: a routine with "as message" on reports a completed run as a plain
+  // bot message carrying the full final reply (not the 2,000-character card
+  // summary); it keeps routineRun so replays find and patch the same message.
+  const asMessage = routines?.runAsMessage(run) === true;
+  const report = asMessage ? routineRunReport(run) : undefined;
+  const kind = report ? "text" : "routine.run";
+  const text = report ?? routineRunFallbackText(card);
   const existing = store.messagesFor(sourceThreadId).find(
-    (message) => message.kind === "routine.run" && message.routineRun?.runId === run.id,
+    (message) => message.routineRun?.runId === run.id,
   );
   const statusChanged = existing?.routineRun?.status !== run.status;
   if (existing) {
-    store.patchMessage(sourceThreadId, existing.id, { text, routineRun: card });
+    store.patchMessage(sourceThreadId, existing.id, { kind, text, routineRun: card });
   } else {
     const message: Omit<Message, "id" | "at"> = {
       role: "bot",
-      kind: "routine.run",
+      kind,
       text,
       routineRun: card,
     };

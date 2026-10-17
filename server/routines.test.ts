@@ -178,6 +178,35 @@ describe("a routine's notify setting (fork)", () => {
   });
 });
 
+describe("a routine's as-message setting (fork)", () => {
+  const start = Date.parse("2026-09-13T08:00:00Z");
+  const input = () => ({ name: "Inbox round", prompt: "Read the inbox", botId: "maus-1",
+    schedule: { type: "interval" as const, everyMinutes: 5, anchorAt: start } });
+
+  it("is off by default, survives a reload, and switches back off", () => {
+    const h = harness(start);
+    expect(h.manager.create(input()).asMessage).toBeUndefined();
+    const plain = h.manager.create({ ...input(), asMessage: true });
+    expect(plain.asMessage).toBe(true);
+    expect(h.manager.update(plain.id, { name: "Focus list" })?.asMessage).toBe(true);
+    expect(new RoutineManager(h.options).listRoutines().find((r) => r.id === plain.id)?.asMessage).toBe(true);
+    expect(h.manager.update(plain.id, { asMessage: false })?.asMessage).toBeUndefined();
+  });
+
+  it("turns only a completed run into a message; other states keep the card", () => {
+    const h = harness(start);
+    const card = h.manager.create(input());
+    const plain = h.manager.create({ ...input(), asMessage: true });
+    const asMessage = (routineId: string, status: RoutineRun["status"]) => h.manager.runAsMessage({ routineId, status });
+    expect(asMessage(card.id, "completed")).toBe(false);
+    expect(asMessage(plain.id, "completed")).toBe(true);
+    for (const status of ["queued", "running", "waiting", "failed", "missed", "cancelled"] as const) {
+      expect(asMessage(plain.id, status)).toBe(false);
+    }
+    expect(asMessage("gone", "completed")).toBe(false);
+  });
+});
+
 describe("bounded scheduled overlap and run health", () => {
   const start = Date.parse("2026-09-13T08:00:00Z");
   const input = () => ({ name: "Health check", prompt: "Check the fixture", botId: "maus-1",
