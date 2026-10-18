@@ -129,6 +129,32 @@ it("pushes what landed to the branch's upstream, and a refused push leaves the l
   }
 });
 
+it("in a repo with a testlab, lands only commits that name their card", async () => {
+  mkdirSync(join(repo, "e2e"));
+  writeFileSync(join(repo, "e2e", "project.ts"), "export {};\n");
+  git(repo, "add", "e2e");
+  git(repo, "commit", "-qm", "testlab");
+  const one = await ensureThreadWorktree(repo, BOT, "t1");
+  writeFileSync(join(one, "a.txt"), "two\n");
+  git(one, "commit", "-qam", "work");
+  const before = git(repo, "rev-parse", "HEAD");
+  const refused = land(one, "t1");
+  expect(refused.status).toBe(1);
+  expect(refused.out).toContain(`${git(one, "rev-parse", "--short", "HEAD")} work`);
+  expect(refused.out).toContain("Ask the Manager for a card");
+  expect(git(repo, "rev-parse", "HEAD")).toBe(before);
+
+  // A one-word reason is not a reason.
+  git(one, "commit", "-q", "--amend", "-m", "work\n\nGeen-kaart: docs");
+  expect(land(one, "t1").status).toBe(1);
+  git(one, "commit", "-q", "--amend", "-m", "work\n\nKaart: 0a1b2c3d-1111-4222-8333-444455556666");
+  expect(land(one, "t1")).toMatchObject({ status: 0, out: expect.stringContaining("Merged") });
+
+  writeFileSync(join(one, "a.txt"), "three\n");
+  git(one, "commit", "-qam", "test setup\n\nGeen-kaart: only the e2e setup changes");
+  expect(land(one, "t1")).toMatchObject({ status: 0, out: expect.stringContaining("Merged") });
+});
+
 it("hands out a land command that works in a copy made before the command existed", async () => {
   const one = await ensureThreadWorktree(repo, BOT, "t1");
   const script = threadWorktreeLandCommand(repo, "t1").match(/bash "([^"]+)"/)![1]!;

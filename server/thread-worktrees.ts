@@ -88,6 +88,25 @@ set -uo pipefail
 repo=$1; branch=$2
 main=$(git -C "$repo" rev-parse --abbrev-ref HEAD) || exit 1
 if [ -n "$(git status --porcelain)" ]; then echo "Uncommitted changes: commit first (the pre-commit hook runs the checks)."; exit 1; fi
+# A repo with a testlab ties every screen change to a roadmap card through a "Kaart: <uuid>" line.
+if [ -f e2e/project.ts ] || [ -f e2e/testlab.json ]; then
+  missing=""
+  for c in $(git rev-list --no-merges "$main..HEAD"); do
+    msg=$(git log -1 --format=%B "$c")
+    if ! printf '%s\\n' "$msg" | grep -Eqi '^Kaart:[[:space:]]*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[[:space:]]*$' &&
+       ! printf '%s\\n' "$msg" | grep -Eqi '^Geen-kaart:[[:space:]]*[^[:space:]]+([[:space:]]+[^[:space:]]+){2,}'; then
+      missing="$missing  $(git log -1 --format='%h %s' "$c")"$'\\n'
+    fi
+  done
+  if [ -n "$missing" ]; then
+    echo "Not landed: this repo has a testlab, and these commits lack a card line:"
+    printf '%s' "$missing"
+    echo "Every commit needs a line 'Kaart: <card uuid>' in its message, or 'Geen-kaart: <reason, a few words>'"
+    echo "for work that changes nothing on a screen (test setup, docs). Ask the Manager for a card if you have none."
+    echo "Last commit: git commit --amend. Several: git reset --soft $main and commit again with the line."
+    exit 1
+  fi
+fi
 for attempt in 1 2 3; do
   before=$(git rev-parse HEAD)
   if ! git rebase -q "$main"; then
