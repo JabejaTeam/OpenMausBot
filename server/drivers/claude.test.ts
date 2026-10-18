@@ -1125,6 +1125,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
             source: { type: "base64", media_type: "image/jpeg", data: jpeg.toString("base64") },
           },
           { type: "text", text: "describe both" },
+          { type: "text", text: `The attached images are also saved as a file (use this path when a tool needs the file):\n- ${pngPath}\n- ${jpegPath}` },
         ],
       },
     });
@@ -1148,6 +1149,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
         source: { type: "base64", media_type: "image/jpeg", data: "[image data: 12 base64 chars]" },
       },
       { type: "text", text: "describe both" },
+      { type: "text", text: `The attached images are also saved as a file (use this path when a tool needs the file):\n- ${pngPath}\n- ${jpegPath}` },
     ]);
   });
 
@@ -2135,6 +2137,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
         type: "image",
         source: { type: "base64", media_type: "image/gif", data: image.toString("base64") },
       },
+      { type: "text", text: `The attached image is also saved as a file (use this path when a tool needs the file):\n- ${imagePath}` },
     ]);
   });
 
@@ -2393,6 +2396,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(steer.message.content).toEqual([
       { type: "image", source: { type: "base64", media_type: "image/png", data: `[image data: ${png.toString("base64").length} base64 chars]` } },
       { type: "text", text: "look at this" },
+      { type: "text", text: `The attached image is also saved as a file (use this path when a tool needs the file):\n- ${pngPath}` },
     ]);
   });
 
@@ -2994,6 +2998,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
         source: { type: "base64", media_type: "image/webp", data: image.toString("base64") },
       },
       { type: "text", text: "go" },
+      { type: "text", text: `The attached image is also saved as a file (use this path when a tool needs the file):\n- ${imagePath}` },
     ]);
   }, 20_000);
 

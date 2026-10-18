@@ -371,6 +371,7 @@ posixOnly("mid-turn steering e2e", () => {
           source: { type: "base64", media_type: "image/png", data: "[image data: 16 base64 chars]" },
         },
         { type: "text", text: "look at this\n\n\n\nand this\n\n" },
+        { type: "text", text: `The attached images are also saved as a file (use this path when a tool needs the file):\n- ${firstImagePath}\n- ${secondImagePath}` },
       ]);
     } finally {
       await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: previousLimit } });
@@ -408,7 +409,9 @@ posixOnly("mid-turn steering e2e", () => {
     // one turn whose reply took the picture in with the words
     const replies = bot.messages.filter((m: any) => m.role === "bot" && m.kind === "text" && m.text.startsWith("reply to:"));
     expect(replies).toHaveLength(1);
-    expect(withoutTurnClock(replies[0].text)).toBe("reply to: first + steered: [image] and look at this");
+    expect(withoutTurnClock(replies[0].text)).toBe(
+      `reply to: first + steered: [image] and look at this The attached image is also saved as a file (use this path when a tool needs the file):\n- ${imagePath}`,
+    );
 
     const nativeRows = readFileSync(join(home, ".openmausbot", "native", `${created.threadId}.ndjson`), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
@@ -419,6 +422,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(steerRow.message.content).toEqual([
       { type: "image", source: { type: "base64", media_type: "image/png", data: "[image data: 16 base64 chars]" } },
       { type: "text", text: "and look at this\n\n" },
+      { type: "text", text: `The attached image is also saved as a file (use this path when a tool needs the file):\n- ${imagePath}` },
     ]);
   }, 40_000);
 
@@ -485,6 +489,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(followUp.message.content).toEqual([
       { type: "image", source: { type: "base64", media_type: "image/png", data: "[image data: 12 base64 chars]" } },
       expect.objectContaining({ type: "text" }),
+      { type: "text", text: `The attached image is also saved as a file (use this path when a tool needs the file):\n- ${imagePath}` },
     ]);
     const textBlock = followUp.message.content.find((block: any) => block.type === "text").text;
     expect(textBlock).toContain("look at the room screenshot");
@@ -947,6 +952,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(steerRow.message.content).toEqual([
       { type: "image", source: { type: "base64", media_type: "image/png", data: "[image data: 20 base64 chars]" } },
       { type: "text", text: "what about this one\n\n" },
+      { type: "text", text: expect.stringContaining("also saved as a file (use this path when a tool needs the file):\n- ") },
     ]);
   }, 40_000);
 

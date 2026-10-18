@@ -5199,12 +5199,13 @@ describe("harness HTTP API", () => {
         type: "image",
         source: { type: "base64", media_type: "image/png", data: png.toString("base64") },
       });
-      expect(dump.prompt.message.content.at(-1)).toMatchObject({
+      expect(dump.prompt.message.content.at(-2)).toMatchObject({
         type: "text",
         text: expect.stringContaining("Describe this image"),
       });
       expect(JSON.stringify(dump.prompt)).not.toContain("attached-image");
-      expect(JSON.stringify(dump.prompt)).not.toContain(imagePath);
+      // fork: the stored path rides along for tools that take a file (server/drivers/claude.ts)
+      expect(dump.prompt.message.content.at(-1)?.text).toContain(`also saved as a file (use this path when a tool needs the file):\n- ${imagePath}`);
 
       const current = (await api("GET", "/api/bots?messages=20")).body.groups.find(
         (candidate: { id: string }) => candidate.id === room.id,

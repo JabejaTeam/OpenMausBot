@@ -1209,8 +1209,17 @@ function claudeUserMessage(
       data: readFileSync(image.path).toString("base64"),
     },
   }));
+  // fork: the pixels ride natively, but a tool that takes a file (Odoo's
+  // odoo_create_attachment source_path) needs the stored path. Without it
+  // the model only knows the CLI's own /tmp copy, which no MCP allowlist covers.
   if (text) content.push({ type: "text", text });
+  content.push({ type: "text", text: savedImagesNote(images) });
   return { type: "user", message: { role: "user", content } };
+}
+
+function savedImagesNote(images: readonly ClaudeImage[]): string {
+  const lines = images.map((image) => `- ${image.path}`).join("\n");
+  return `The attached image${images.length > 1 ? "s are" : " is"} also saved as a file (use this path when a tool needs the file):\n${lines}`;
 }
 
 /** Native traces are routinely attached to bug reports. Preserve the image
