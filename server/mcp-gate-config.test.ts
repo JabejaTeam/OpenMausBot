@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { gateServer, mcpStdioServer } from "./mcp-gate-config.ts";
+import { gateServer, mcpStdioServer, spillHintEnabled } from "./mcp-gate-config.ts";
 
 const server = { command: "example-mcp", args: ["--stdio"], env: { TOKEN: "disposable-test-token" } };
 const input = { name: "notes", server, threadId: "disposable-thread", budget: 0 };
@@ -15,6 +15,13 @@ describe("MCP scope configuration", () => {
     expect(gated!.env.OMB_GATE_BUDGET).toBe("0");
     expect(JSON.parse(gated!.env.OMB_GATE_UPSTREAM)).toEqual(server);
     expect(gated!.args.join(" ")).not.toContain("disposable-test-token");
+  });
+
+  it("names the spill file only when the instance turns the hint on", () => {
+    expect(spillHintEnabled({})).toBe(false);
+    expect(spillHintEnabled({ OMB_MCP_SPILL_HINT: "1" })).toBe(true);
+    expect(gateServer({ ...input, budget: 8000, spillHint: false })!.env.OMB_GATE_SPILL_HINT).toBeUndefined();
+    expect(gateServer({ ...input, budget: 8000, spillHint: true })!.env.OMB_GATE_SPILL_HINT).toBe("1");
   });
 
   it("rejects malformed scopes and unmountable scoped servers instead of returning a bypass", () => {

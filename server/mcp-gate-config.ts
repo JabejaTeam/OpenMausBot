@@ -21,6 +21,14 @@ export function resultBudget(env: NodeJS.ProcessEnv = process.env): number {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : DEFAULT_RESULT_BUDGET;
 }
 
+/** Whether a trimmed result names the file with the whole result
+ * (`OMB_MCP_SPILL_HINT=1`). Off by default (see mcp-gate.ts SPILL_HINT); an
+ * instance turns it on when its bots must reach a payload that cannot be
+ * narrowed, such as a mail attachment fetched as MIME. */
+export function spillHintEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.OMB_MCP_SPILL_HINT === "1";
+}
+
 /** Where a thread's oversized results are kept so the bot can read them back.
  * Under the app's data directory, not the user's project folder: these are
  * the harness's spill, and it sweeps them after a day. */
@@ -154,6 +162,8 @@ export function gateServer(input: {
   directory?: boolean;
   /** where a remote proxy's network settings come from (default: this process) */
   sourceEnv?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+  /** tell the model where the untrimmed result is (default: spillHintEnabled()) */
+  spillHint?: boolean;
 }): { command: string; args: string[]; env: Record<string, string> } | null {
   const { name, server, budget } = input;
   const parsed = parseToolScope(input.toolScope);
@@ -179,6 +189,7 @@ export function gateServer(input: {
     OMB_GATE_UPSTREAM: JSON.stringify({ command: spec.command, args: spec.args ?? [], env: spec.env ?? {} }),
     OMB_GATE_SPILL_DIR: spillDir(input.threadId),
     OMB_GATE_BUDGET: String(budget),
+    ...((input.spillHint ?? spillHintEnabled()) ? { OMB_GATE_SPILL_HINT: "1" } : {}),
     ...(scoped ? { OMB_GATE_TOOL_SCOPE: JSON.stringify(parsed.scope) } : {}),
     ...(directory ? { OMB_GATE_DIRECTORY: "1" } : {}),
   };
