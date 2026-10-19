@@ -19,7 +19,7 @@ import { promptHalves, volatileContextNote, withContextNote } from "./prompt-spl
 import { createChatToolApproval } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
 import { appendNative } from "./native.ts";
-import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
+import { classifyError, computeBackoff, computeOutageBackoff, interruptibleDelay, OUTAGE_MAX_ATTEMPTS, OUTAGE_REASONS, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
 
@@ -123,6 +123,9 @@ interface RuntimeOptions<Config> {
   includeUsageInCompleted?: boolean;
   noBodyError?: string;
   retryScale?: number;
+  /** Fork: a provider outage (429/overloaded/5xx) before any output waits on
+   * retry.ts's long outage schedule (~29 min) instead of the 12 s one. */
+  outageRetry?: boolean;
   /** Explicit text-only mode for endpoints/models that cannot accept tools. */
   tools?: boolean;
   /** Opt-in structured images and harness-authorized computer/browser MCP. */
@@ -756,10 +759,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 continue;
               }
               // Once a call has been handled, never replay it through a turn retry.
+              const outage = options.outageRetry === true && OUTAGE_REASONS.has(verdict.reason);
+              const maxAttempts = outage ? OUTAGE_MAX_ATTEMPTS : RETRY_MAX_ATTEMPTS;
               if (options.retryScale === undefined || abort.signal.aborted || streamed || seenCalls.size ||
-                  error instanceof ChatProtocolError || !verdict.transient || attempt >= RETRY_MAX_ATTEMPTS - 1) throw error;
-              const delayMs = computeBackoff(attempt++);
-              emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt, delayMs, reason: verdict.reason });
+                  error instanceof ChatProtocolError || !verdict.transient || attempt >= maxAttempts - 1) throw error;
+              const delayMs = outage ? computeOutageBackoff(attempt++) : computeBackoff(attempt++);
+              emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt, delayMs, reason: verdict.reason, ...(outage ? { maxAttempts } : {}) });
               await interruptibleDelay(delayMs * options.retryScale, abort.signal).promise;
               abort.signal.throwIfAborted();
             }

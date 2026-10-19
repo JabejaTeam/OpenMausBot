@@ -452,6 +452,104 @@ describe("OpenAICompatDriver", () => {
     await inst.dispose();
   });
 
+  it("fork: retries an upstream 429 on the long outage schedule, then answers", async () => {
+    process.env.FAKE_OPENAI_COMPAT_RETRY_SCALE = "0.0001";
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        // more failures than the short schedule's 3 tries allows
+        if (++calls <= 4) return new Response('{"error":{"message":"Provider returned error","code":429}}', { status: 429 });
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-outage-retry",
+      displayName: "Outage retry",
+      enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://openrouter.ai/api/v1", apiKeyEnv: "TEST_KEY", provider: "relace", retryOutages: true }),
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+    try {
+      await inst.adapter.sendTurn({ threadId: "thread-outage", text: "prompt", model: "deepseek/deepseek-v4.1-flash-1017" });
+      await recorder.until((e) => e.type === "turn.completed");
+      const retries = recorder.events.filter((e) => e.type === "turn.retrying");
+      expect(retries).toHaveLength(4);
+      expect(retries[0]).toMatchObject({ reason: "rate_limited", maxAttempts: 10 });
+      expect(retries[0].delayMs).toBeGreaterThanOrEqual(11_250);
+      expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+    } finally {
+      delete process.env.FAKE_OPENAI_COMPAT_RETRY_SCALE;
+      recorder.stop();
+      await inst.dispose();
+    }
+  });
+
+  it("fork: without retryOutages an upstream 429 fails the turn at once", async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        calls++;
+        return new Response('{"error":{"message":"Provider returned error","code":429}}', { status: 429 });
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-outage-off",
+      displayName: "Outage off",
+      enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://openrouter.ai/api/v1", apiKeyEnv: "TEST_KEY" }),
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+    try {
+      await inst.adapter.sendTurn({ threadId: "thread-outage-off", text: "prompt", model: "x/y" });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(calls).toBe(1);
+      expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: false });
+    } finally {
+      recorder.stop();
+      await inst.dispose();
+    }
+  });
+
+  it("fork: never retries an auth failure from the upstream", async () => {
+    process.env.FAKE_OPENAI_COMPAT_RETRY_SCALE = "0.0001";
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        calls++;
+        return new Response('{"error":{"message":"No auth credentials found","code":401}}', { status: 401 });
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-outage-auth",
+      displayName: "Outage auth",
+      enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://openrouter.ai/api/v1", apiKeyEnv: "TEST_KEY", retryOutages: true }),
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+    try {
+      await inst.adapter.sendTurn({ threadId: "thread-outage-auth", text: "prompt", model: "x/y" });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(calls).toBe(1);
+      expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+    } finally {
+      delete process.env.FAKE_OPENAI_COMPAT_RETRY_SCALE;
+      recorder.stop();
+      await inst.dispose();
+    }
+  });
+
   it("U24 retest: requests stream_options.include_usage on a streamed turn, like minimax.ts does", async () => {
     let sentBody: any = null;
     vi.stubGlobal(

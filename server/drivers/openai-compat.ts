@@ -53,6 +53,10 @@ export interface OpenAICompatConfig {
   model?: string;
   provider?: string;
   managedModels?: string[];
+  /** Fork: retry a 429/5xx on retry.ts's long outage schedule (~29 min)
+   * instead of failing the turn. For a pinned OpenRouter provider, which
+   * has no fallback. */
+  retryOutages?: boolean;
 }
 
 function isOpenRouterUrl(url: string): boolean {
@@ -67,6 +71,7 @@ function isOpenRouterUrl(url: string): boolean {
 function decodeConfig(raw: unknown): OpenAICompatConfig {
   const config = (raw ?? {}) as Record<string, unknown>;
   if (config.tools !== undefined && typeof config.tools !== "boolean") throw new Error("tools must be a boolean");
+  if (config.retryOutages !== undefined && typeof config.retryOutages !== "boolean") throw new Error("retryOutages must be a boolean");
   if (config.managedModels !== undefined && (!Array.isArray(config.managedModels) || !config.managedModels.length || config.managedModels.some(model => typeof model !== "string" || !model.trim()))) throw new Error("Invalid managed models.");
   const ownKey = typeof config.apiKeyEnv === "string" && OWN_KEY_ENVS.has(config.apiKeyEnv);
   if (config.catalog !== undefined && config.catalog !== "openai") throw new Error("catalog must be \"openai\"");
@@ -75,6 +80,7 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
   return {
     ...(config.tools !== undefined ? { tools: config.tools as boolean } : {}),
     ...(config.managedModels ? { managedModels: config.managedModels as string[] } : {}),
+    ...(config.retryOutages ? { retryOutages: true } : {}),
     url: (typeof config.url === "string" && config.url ? config.url : envUrl || "https://openrouter.ai/api/v1")
       .replace(/\/+$/, ""),
     apiKeyEnv: typeof config.apiKeyEnv === "string" && config.apiKeyEnv
@@ -204,6 +210,10 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           : {}),
       }),
       httpErrorLabel: "upstream",
+      // Fork: opt-in per instance (config.retryOutages).
+      ...(config.retryOutages
+        ? { retryScale: Number(process.env.FAKE_OPENAI_COMPAT_RETRY_SCALE ?? "1"), outageRetry: true }
+        : {}),
       missingKeyError: missingKey,
       unavailableReason: missingKey,
       timeoutMs: idleTimeoutMs(),
