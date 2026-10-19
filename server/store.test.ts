@@ -279,6 +279,29 @@ describe("Store", () => {
     expect(store.deleteSection("")).toBe("No such team");
   });
 
+  it("deletes a team without a Chief while several personal Chiefs have no team (fork)", () => {
+    // 2026-10-19: Jarvis, Ratchet, Moochi and Clank have no team, so every
+    // team delete failed with "General already has a Chief of Staff".
+    const store = new Store(selection);
+    for (const person of ["wiebren@jabeja.be", "lenny@jabeja.be"]) {
+      const personal = store.createBot();
+      store.patchBot(personal.id, { visibility: { people: [person], private: true } });
+      store.setChiefOfStaff(personal.id);
+    }
+    const shared = store.createBot();
+    store.setChiefOfStaff(shared.id);
+    const member = store.createBot({ section: "Flash" });
+    expect(store.deleteSection("Flash")).toBeUndefined();
+    expect(store.bot(member.id)?.section).toBeUndefined();
+    // a team's own Chief still cannot land beside the shared General Chief
+    const chief = store.createBot({ section: "Studio" });
+    store.setChiefOfStaff(chief.id);
+    expect(store.deleteSection("Studio")).toMatch(/Chief/);
+    store.setChiefOfStaff(null, "");
+    expect(store.deleteSection("Studio")).toBeUndefined();
+    expect(store.bot(chief.id)).toMatchObject({ chiefOfStaff: true, section: undefined });
+  });
+
   it("keeps a private personal Chief beside the shared one, also after a reload (fork)", () => {
     // 2026-10-08: making Lenny's Ratchet a Chief unseated Wiebren's Jarvis,
     // because both have no team and so shared the one Chief slot.
@@ -1442,6 +1465,22 @@ describe("Store", () => {
     store.setChiefOfStaff(null, "");
     expect(store.updateTeamMembers("Delivery", [incoming.id], [chief.id]).ok).toBe(true);
     expect(store.bot(chief.id)).toMatchObject({ section: undefined, chiefOfStaff: true });
+  });
+
+  it("moves members while several personal Chiefs have no team (fork)", () => {
+    const store = new Store(selection);
+    for (const person of ["wiebren@jabeja.be", "lenny@jabeja.be"]) {
+      const personal = store.createBot();
+      store.patchBot(personal.id, { visibility: { people: [person], private: true } });
+      store.setChiefOfStaff(personal.id);
+    }
+    const generalChief = store.createBot();
+    store.setChiefOfStaff(generalChief.id);
+    const outgoing = store.createBot({ section: "Delivery" });
+    const incoming = store.createBot();
+    expect(store.updateTeamMembers("Delivery", [incoming.id], [outgoing.id]).ok).toBe(true);
+    expect(store.bot(outgoing.id)?.section).toBeUndefined();
+    expect(store.bot(incoming.id)?.section).toBe("Delivery");
   });
 
   it("keeps membership unchanged if the shared write fails", () => {

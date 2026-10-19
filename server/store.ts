@@ -559,6 +559,13 @@ export const chiefSlot = (bot: Pick<BotRecord, "section" | "visibility">): strin
   const people = visibility?.private ? visibility.people ?? [] : [];
   return !sectionKey(bot.section) && people.length === 1 ? `person:${people[0].toLowerCase()}` : sectionKey(bot.section);
 };
+/** Fork: true when one of the moved bots is a Chief that, in `next`, shares
+ * its Chief slot with another Chief. Only the Chiefs a change moves count, so
+ * personal Chiefs that already have no team never block an unrelated team
+ * change (2026-10-19: four teamless Chiefs blocked every team delete). */
+const movedChiefCollides = (next: BotRecord[], movedIds: Set<string>): boolean =>
+  next.some((bot) => movedIds.has(bot.id) && bot.chiefOfStaff &&
+    next.some((other) => other.id !== bot.id && other.chiefOfStaff && chiefSlot(other) === chiefSlot(bot)));
 
 /** Resolve @mentions in a message against a bot roster: `@` must start a
  * word, the name must end on a word boundary (so "@New Bottle" never matches
@@ -1261,13 +1268,13 @@ export class Store {
     if (members.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
       return "Stop this team's active work before deleting the team";
     }
-    if (this.bots.filter(bot => bot.chiefOfStaff && (!sectionKey(bot.section) || sectionKey(bot.section) === name)).length > 1) {
-      return "General already has a Chief of Staff. Move or change this team's Chief before deleting the team";
-    }
     const nextBots = this.bots.map(bot => ({ ...bot,
       ...(sectionKey(bot.section) === name ? { section: undefined } : {}),
       ...(bot.managedSections ? { managedSections: bot.managedSections.filter(section => sectionKey(section) !== name) } : {}),
     }));
+    if (movedChiefCollides(nextBots, new Set(members.map(bot => bot.id)))) {
+      return "General already has a Chief of Staff. Move or change this team's Chief before deleting the team";
+    }
     const nextGroups = this.groups.map(group => sectionKey(group.section) === name ? { ...group, section: undefined } : group);
     try {
       this.saveBots(nextBots);
@@ -2308,11 +2315,7 @@ export class Store {
     }
     const next = this.bots.map(bot => ids.has(bot.id)
       ? { ...bot, section: adds.has(bot.id) ? key : undefined } : bot);
-    for (const destination of [key, ""]) {
-      if (next.filter(bot => bot.chiefOfStaff && sectionKey(bot.section) === destination).length > 1) {
-        return { ok: false, reason: "chief-conflict" };
-      }
-    }
+    if (movedChiefCollides(next, ids)) return { ok: false, reason: "chief-conflict" };
     if (ids.size) {
       this.saveBots(next);
       for (let i = 0; i < next.length; i++) if (ids.has(next[i].id)) Object.assign(this.bots[i], next[i]);
