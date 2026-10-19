@@ -188,6 +188,21 @@ async function readBounded(response: Response, maxBytes = MAX_REMOTE_MCP_BYTES):
   }
 }
 
+/** Fork: waits between handshake tries after a transient failure. */
+const HANDSHAKE_RETRY_MS = [250, 1_000, 3_000];
+
+function transientFailure(error: unknown): boolean {
+  return error instanceof McpHttpError && error.kind === "status" && (error.status === 502 || error.status === 503 || error.status === 504);
+}
+
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, ms);
+    const onAbort = () => { clearTimeout(timer); reject(new McpHttpError("network", "aborted")); };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 function drain(response: Response): void {
   void response.body?.cancel().catch(() => {});
 }
@@ -199,6 +214,9 @@ export class RemoteMcpClient {
   private readonly onNotification: ((message: JsonRpcMessage) => void) | undefined;
   private sessionId: string | null = null;
   private protocolVersion: string | null = null;
+  /** Fork: the handshake's name, to open a session again after a 404. */
+  private clientName: string | undefined;
+  private renewing: Promise<unknown> | null = null;
   private nextId = 1;
   private closed = false;
   /** Legacy SSE: one long GET stream carries every response. */
@@ -213,8 +231,26 @@ export class RemoteMcpClient {
     this.onNotification = options.onNotification;
   }
 
-  /** The MCP handshake: initialize, then the initialized notification. */
+  /** The MCP handshake: initialize, then the initialized notification.
+   * Fork: a gateway hiccup (502/503/504) gets a few
+   * more tries — nothing has run yet, and failing here leaves a bot without
+   * the server's tools for its whole turn. */
   async initialize(clientName: string, signal: AbortSignal): Promise<unknown> {
+    this.clientName = clientName;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.handshake(clientName, signal);
+      } catch (error) {
+        const wait = HANDSHAKE_RETRY_MS[attempt];
+        if (signal.aborted || wait === undefined || !transientFailure(error)) throw error;
+        await delay(wait, signal);
+      }
+    }
+  }
+
+  private async handshake(clientName: string, signal: AbortSignal): Promise<unknown> {
+    this.sessionId = null;
+    this.protocolVersion = null;
     const result = await this.request("initialize", {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {},
@@ -234,8 +270,25 @@ export class RemoteMcpClient {
       void this.notify("notifications/cancelled", { requestId: id, reason: "Request cancelled" }, AbortSignal.timeout(2_000)).catch(() => {});
     };
     signal.addEventListener("abort", onAbort, { once: true });
-    const reply = this.target.type === "sse" ? this.sseRequest(id, frame, signal) : this.streamableRequest(id, frame, signal);
+    const reply = this.target.type === "sse" ? this.sseRequest(id, frame, signal) : this.sessionRequest(id, frame, method, signal);
     return reply.finally(() => signal.removeEventListener("abort", onAbort));
+  }
+
+  /** Fork: a 404 on a session means the server dropped it (evicted, or
+   * restarted) and never ran the request: open a new session — once for all
+   * requests that met the same 404 — and send the request again. */
+  private async sessionRequest(id: number, frame: unknown, method: string, signal: AbortSignal): Promise<unknown> {
+    const used = this.sessionId;
+    try {
+      return await this.streamableRequest(id, frame, signal);
+    } catch (error) {
+      if (!(error instanceof McpHttpError) || error.status !== 404 || !used || method === "initialize" || this.clientName === undefined) throw error;
+      if (this.sessionId === used && !this.renewing) {
+        this.renewing = this.initialize(this.clientName, signal).finally(() => { this.renewing = null; });
+      }
+      if (this.renewing) await this.renewing;
+      return this.streamableRequest(id, frame, signal);
+    }
   }
 
   async notify(method: string, params: unknown, signal: AbortSignal): Promise<void> {
