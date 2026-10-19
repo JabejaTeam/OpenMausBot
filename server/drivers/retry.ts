@@ -135,6 +135,22 @@ export function computeBackoff(attempt: number, random: () => number = Math.rand
   return Math.round(base - jitter + random() * jitter * 2);
 }
 
+// Fork: a provider outage ("Selected model is at capacity", 429s) lasts
+// minutes, sometimes most of an hour (2026-10-14, 2026-10-19) — far past the
+// 12 s above. A turn the provider accepted and then failed that way before
+// any output or tool is relaunched on this longer schedule instead: about
+// 29 minutes in all, and a Stop still cancels the wait.
+export const OUTAGE_MAX_ATTEMPTS = 10;
+export const OUTAGE_BACKOFF_MS = [15_000, 30_000, 60_000, 120_000, 300_000] as const;
+export const OUTAGE_REASONS: ReadonlySet<string> = new Set<TransientReason>(["rate_limited", "overloaded", "server_error"]);
+
+/** computeBackoff's jitter over OUTAGE_BACKOFF_MS; the cap holds at 5 min. */
+export function computeOutageBackoff(attempt: number, random: () => number = Math.random): number {
+  const base = OUTAGE_BACKOFF_MS[Math.min(Math.max(attempt, 0), OUTAGE_BACKOFF_MS.length - 1)];
+  const jitter = base * 0.25;
+  return Math.round(base - jitter + random() * jitter * 2);
+}
+
 /** A cancellable backoff sleep. An interrupt during the wait resolves at
  * once with "cancelled" — the caller settles the turn as interrupted
  * instead of relaunching, so no zombie process outlives the user's stop. */

@@ -28,6 +28,7 @@ import {
   codexUpdateCommand,
   codexUserError,
 } from "./codex.ts";
+import { OUTAGE_MAX_ATTEMPTS } from "./retry.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
@@ -367,6 +368,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     delete process.env.FAKE_CODEX_ASK_HOLD;
     delete process.env.FAKE_CODEX_TRANSIENTS;
     delete process.env.FAKE_CODEX_PARTIAL_FAILS;
+    delete process.env.FAKE_CODEX_ACCEPTED_FAILS;
     delete process.env.FAKE_CODEX_STATE;
     delete process.env.FAKE_CODEX_RETRY_SCALE;
     delete process.env.FAKE_CODEX_LAUNCH_CRASHES;
@@ -3076,6 +3078,40 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-codex-continue"),
     ).resolves.toMatchObject({ ok: true });
     await Promise.allSettled([first, second]);
+  }, 20_000);
+
+  it("retries an accepted turn that Codex fails as at capacity before any output (fork)", async () => {
+    process.env.FAKE_CODEX_TRANSIENTS = "4";
+    process.env.FAKE_CODEX_ACCEPTED_FAILS = "1";
+    process.env.FAKE_CODEX_STATE = join(scratch, "codex-launches-capacity");
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.0001";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-codex-capacity", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.ok === true);
+
+    const retries = recorder.events.filter((e) => e.type === "turn.retrying");
+    expect(retries.map((e) => e.attempt)).toEqual([1, 2, 3, 4]);
+    expect(retries.every((e) => e.reason === "overloaded" && e.maxAttempts === OUTAGE_MAX_ATTEMPTS)).toBe(true);
+    // the person never sees the capacity error of an attempt that was retried
+    expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(false);
+    expect(recorder.events.filter((e) => e.type === "turn.started")).toHaveLength(1);
+    const replies = recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "assistant_text");
+    expect(replies).toHaveLength(1);
+  }, 20_000);
+
+  it("gives up on a capacity outage after the outage cap and shows the error once (fork)", async () => {
+    process.env.FAKE_CODEX_TRANSIENTS = "99";
+    process.env.FAKE_CODEX_ACCEPTED_FAILS = "1";
+    process.env.FAKE_CODEX_STATE = join(scratch, "codex-launches-capacity-cap");
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.0001";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-codex-capacity-cap", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.ok === false);
+
+    expect(recorder.events.filter((e) => e.type === "turn.retrying")).toHaveLength(OUTAGE_MAX_ATTEMPTS - 1);
+    const errors = recorder.events.filter((e) => e.type === "runtime.error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ message: expect.stringContaining("at capacity") });
   }, 20_000);
 
   it("an interrupt during the retry backoff settles the turn at once, not after the wait", async () => {

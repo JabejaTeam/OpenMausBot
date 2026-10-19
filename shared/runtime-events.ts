@@ -57,6 +57,8 @@ export type RuntimeEvent = RuntimeEventBase &
         delayMs: number;
         /** Why this failure was judged retry-worthy (classifyError's reason). */
         reason: string;
+        /** Fork: the cap this retry counts against, when not RETRY_MAX_ATTEMPTS. */
+        maxAttempts?: number;
       }
     | {
         type: "turn.completed";

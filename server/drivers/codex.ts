@@ -43,7 +43,7 @@ import { decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, S
 import { codexLocalProviderArgs } from "./local-inject.ts";
 import { codexBackgroundModel, runCodexOneShot } from "./codex-background-text.ts";
 import { augmentedPath, splitCliString } from "../env-path.ts";
-import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
+import { classifyError, computeBackoff, computeOutageBackoff, interruptibleDelay, OUTAGE_MAX_ATTEMPTS, OUTAGE_REASONS, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { appendNative } from "./native.ts";
 import { permissionCommand, permissionLaunchCwd } from "./permission-command.ts";
 import { commandSummary, toolDetailPreview } from "../tool-summary.ts";
@@ -1065,6 +1065,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         authRecovery: false,
         lastText: "",
         sawStreamDelta: false,
+        // Fork: the turn started a tool, reasoning or any other item of its
+        // own, so a relaunch could repeat work
+        sawWork: false,
+        // Fork: an outage error held back until turn/completed decides
+        // between a relaunch and showing it
+        heldError: null as { message?: unknown; codexErrorInfo?: unknown } | null,
         // codex reports token usage as a running total for this app-server
         // process. The harness wants this turn's figure: the total minus
         // whatever the process already carried before turn/start (a resumed
@@ -1432,6 +1438,41 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         state.lastErrorSetup ||= setup;
         emit({ ...base(threadId, turnId), type: "runtime.error", message, ...(setup ? { setup: true } : {}) });
       };
+      // Fork: an accepted turn the provider failed with an outage (at
+      // capacity, 429, 5xx) before any output or work of its own is
+      // relaunched on the long outage schedule (retry.ts) instead of
+      // settling. Nothing ran, so the replay repeats only the input.
+      const outageFailure = (error: { message?: unknown; codexErrorInfo?: unknown }) =>
+        !state.settled && !abandoned && !stopRequested && !state.sawStreamDelta && !state.sawWork &&
+        attempt < OUTAGE_MAX_ATTEMPTS - 1 &&
+        (error.codexErrorInfo === "serverOverloaded" || OUTAGE_REASONS.has(classifyError({ text: String(error.message ?? "") }).reason));
+      const retryOutage = (error: { message?: unknown; codexErrorInfo?: unknown }): boolean => {
+        if (!outageFailure(error)) return false;
+        const delayMs = computeOutageBackoff(attempt);
+        attempt++;
+        emit({
+          ...base(threadId, turnId),
+          type: "turn.retrying",
+          attempt,
+          delayMs,
+          reason: error.codexErrorInfo === "serverOverloaded" ? "overloaded" : classifyError({ text: String(error.message ?? "") }).reason,
+          maxAttempts: OUTAGE_MAX_ATTEMPTS,
+        });
+        abandoned = true;
+        void (async () => {
+          if (!await terminate()) {
+            void settle(false, "shutdown_timeout");
+            return;
+          }
+          await interruptibleDelay(Math.max(1, Math.round(delayMs * retryScale)), stopSignal.signal).promise;
+          if (!stopRequested) {
+            void launchAttempt(attempt).catch(() => {});
+          } else {
+            await settle(false, "interrupted");
+          }
+        })().catch(() => {});
+        return true;
+      };
       const handleNotification = (msg: any) => {
         const p = msg.params ?? {};
         // An app-server also emits notifications for native helper threads.
@@ -1506,6 +1547,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           case "item/started": {
             const item = p.item ?? {};
+            if (item.type !== "userMessage") state.sawWork = true;
             // call_tool on a searched server reads as the tool it runs.
             const runs = item.type === "mcpToolCall" && item.tool === CALL_TOOL && typeof item.server === "string" && directoryMounts.has(item.server)
               ? directoryCallTarget(CALL_TOOL, item.arguments) : undefined;
@@ -1623,10 +1665,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           case "turn/completed": {
             if (reviewWarning && !timedOutReview) reviewNotice("warning");
             const t = p.turn ?? {};
+            const failure = t.status === "failed" ? (typeof t.error?.message === "string" ? t.error : state.heldError) : null;
+            if (failure && retryOutage(failure)) break;
             if (t.status === "completed") {
               if (chatgptTurn) loginAccepted();
             } else if (typeof t.error?.message === "string") {
               turnError(t.error);
+            } else if (state.heldError) {
+              turnError(state.heldError);
             } else if (t.status === "failed" && !state.lastError && state.retryError) {
               // Codex gave up retrying without a final word: its last one
               turnError({ message: state.retryError });
@@ -1646,6 +1692,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             // the final error, or turn/completed, says how it ended.
             if (p.willRetry === true) {
               state.retryError = String(error.message);
+              break;
+            }
+            if (outageFailure(error)) {
+              state.heldError = error;
               break;
             }
             turnError(error);

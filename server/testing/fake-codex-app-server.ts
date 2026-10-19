@@ -20,6 +20,8 @@
 //   FAKE_CODEX_LAUNCH_SILENT   die at turn/start (before ack) with exit 1 and no stderr
 //                               at all, for the first N launches (launch count in
 //                               FAKE_CODEX_STATE)
+//   FAKE_CODEX_ACCEPTED_FAILS  with FAKE_CODEX_TRANSIENTS: ack turn/start, then fail
+//                              it with "model at capacity" (serverOverloaded)
 //   FAKE_CODEX_ACK_CRASH       gate file path: hold the post-ack crash until the
 //                              test confirms the driver parsed the ack
 //   FAKE_CODEX_EXIT_MID_TURN   gate file path: hold the ack/delta stdout until the
@@ -768,6 +770,15 @@ process.stdin.on("data", (chunk) => {
           const quota = Number(process.env.FAKE_CODEX_TRANSIENTS) || 0;
           writeFileSync(process.env.FAKE_CODEX_STATE, String(launched + 1));
           if (launched < quota) {
+            // Fork: the 2026-10-19 incident — Codex accepts the turn, then
+            // says the model is at capacity before any output or tool.
+            if (process.env.FAKE_CODEX_ACCEPTED_FAILS) {
+              const error = { message: "Selected model is at capacity. Please try a different model.", codexErrorInfo: "serverOverloaded" };
+              out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+              notify("error", { error, willRetry: false });
+              notify("turn/completed", { turn: { status: "failed", error } });
+              break;
+            }
             if (process.env.FAKE_CODEX_PARTIAL_FAILS) {
               out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
               notify("item/agentMessage/delta", { itemId: "m1", delta: "half an answer" });
