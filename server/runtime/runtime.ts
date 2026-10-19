@@ -346,9 +346,11 @@ export class Runtime {
       if (!kids.every(c => isTerminal(c) && c.reportedAt !== undefined)) {
         // Fork: an independent child that finished while a sibling still
         // runs resumes the requester now, so it can act on that result right
-        // away (outside rooms; each such child wakes it once).
+        // away (outside rooms; each such child wakes it once, and never one
+        // an earlier resume already handed it).
         const back = kids.filter(c => isTerminal(c) && c.reportedAt !== undefined);
-        if (n.assignee.destination.kind === "room_thread" || !back.some(c => c.independent && !n.interimFrom?.includes(c.id))) continue;
+        const fresh = (c: Assignment) => c.independent && !n.interimFrom?.includes(c.id) && !n.handedResults?.includes(c.id);
+        if (n.assignee.destination.kind === "room_thread" || !back.some(fresh)) continue;
         n.interimFrom = back.map(c => c.id);
         n.status = "resume";
         this.store.update(n, { kind: "resume_due", at: now, detail: "resume (interim)" });

@@ -6091,8 +6091,9 @@ const coordinator: Coordinator = createCoordinator({
         assignee: store.bot(node.botId)?.name ?? "Teammate",
         person,
         ...(thread !== undefined ? { thread } : {}),
-        // Fork: a code agent's question goes to whoever asked, never the person.
-        ...(parent && kindAsksRequester(store.bot(node.botId)?.kind) ? { asksRequester: true } : {}),
+        // Fork: a code agent's question goes to whoever asked, never the
+        // person; so does any teammate's question to its Manager.
+        ...(parent && (kindAsksRequester(store.bot(node.botId)?.kind) || store.bot(parent.botId)?.kind === "pm") ? { asksRequester: true } : {}),
       };
     },
     // A teammate ended its turn on a question for the person: one chip where
@@ -20341,8 +20342,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             const { node, duplicate } = coordinator.enqueue(address, generation, internalCapability.roomHandoffId, target, forkNote + call.message, {
               mode, reply, thread: call.thread, approvalGranted, rework: call.rework, requestBatchKey,
               // Fork: a code agent's assignments run in their own threads (one
-              // per card), so each result may resume the sender on its own.
-              ...(!destination && kindStartsFreshPerAssignment(recipient.kind) ? { independent: true } : {}),
+              // per card), so each result may resume the sender on its own; a
+              // Manager hears every teammate's result as soon as it is back.
+              ...(!destination && (kindStartsFreshPerAssignment(recipient.kind) || internalSender.kind === "pm") ? { independent: true } : {}),
               ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}),
             });
             // A repeat lands on the request already made, possibly in a

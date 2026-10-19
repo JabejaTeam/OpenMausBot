@@ -93,6 +93,40 @@ describe("fork: interim resume", () => {
     expect(checkInvariants(w.store, w.live())).toEqual([]);
   });
 
+  it("does not resume again for results an earlier resume already handed when new work is handed out", async () => {
+    const w = world();
+    const root = begin(w.runtime);
+    const first = w.runtime.enqueue(toBot("code-a", root.id, true));
+    if (!first.ok) throw new Error("enqueue refused");
+    w.runtime.end(root.id, { ok: true, text: "Handed out" });
+    w.tick();
+    await flush();
+    // code-a is back: the PM resumes and, in that turn, hands out two more
+    w.holdIds.add(root.id);
+    w.tick();
+    await flush();
+    const designer = w.runtime.enqueue(toBot("designer", root.id, true));
+    const tester = w.runtime.enqueue(toBot("tester", root.id, true));
+    if (!designer.ok || !tester.ok) throw new Error("enqueue refused");
+    w.holdIds.add(designer.assignment.id);
+    w.holdIds.add(tester.assignment.id);
+    await w.release(root.id);
+    w.tick();
+    await flush();
+    w.tick();
+    await flush();
+    // nothing new is back: no empty resume that would swallow the wait
+    expect(w.runs.filter(r => r.a.id === root.id && r.input.resumed)).toHaveLength(1);
+    await w.release(designer.assignment.id);
+    w.tick();
+    await flush();
+    w.tick();
+    const resumes = w.runs.filter(r => r.a.id === root.id && r.input.resumed);
+    expect(resumes).toHaveLength(2);
+    expect(resumes[1]!.input.stillRunning).toBe(1);
+    expect(resumes[1]!.input.alreadyHanded).toEqual([first.assignment.id]);
+  });
+
   it("keeps upstream's rule for siblings that are not independent: one resume when all are back", async () => {
     const w = world();
     const root = begin(w.runtime);
