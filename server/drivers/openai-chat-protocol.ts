@@ -22,14 +22,24 @@ export function object(value: unknown): Record<string, unknown> | undefined {
 export class ChatReasoningDetails {
   readonly blocks: Record<string, unknown>[] = [];
   private chars = 0;
+  private dropped = false;
 
   add(value: unknown): void {
     if (value === undefined || value === null) return;
     if (!Array.isArray(value) || value.some((block) => !object(block))) {
       throw new ChatProtocolError("provider returned invalid reasoning details");
     }
+    if (this.dropped) return;
     this.chars += JSON.stringify(value).length;
-    if (this.chars > 256_000) throw new ChatProtocolError("provider reasoning details exceeded the size limit");
+    // Fork: past the bound the blocks are dropped instead of failing the
+    // turn (DeepSeek via OpenRouter, 2026-10-19). Replay is all-or-nothing,
+    // so the completion then goes back without reasoning_details; the plain
+    // reasoning text is kept apart and still shown.
+    if (this.chars > 256_000) {
+      this.dropped = true;
+      this.blocks.length = 0;
+      return;
+    }
     this.blocks.push(...value);
   }
 }

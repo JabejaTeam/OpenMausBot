@@ -195,6 +195,17 @@ function transientFailure(error: unknown): boolean {
   return error instanceof McpHttpError && error.kind === "status" && (error.status === 502 || error.status === 503 || error.status === 504);
 }
 
+/** Fork: waits before resending a request the server rate-limited; about
+ * 100 s in all, past a one-minute window (mcp.jabeja.be: 240 per minute). */
+const RATE_LIMIT_RETRY_MS = [2_000, 10_000, 30_000, 60_000];
+
+/** A 429, or a JSON-RPC "rate limit" answer (mcp.jabeja.be: -32029): the
+ * server refused before running anything, so the same request may go again. */
+function rateLimited(error: unknown): boolean {
+  if (error instanceof McpRpcError) return error.code === -32029 || /\brate.?limit/i.test(error.detail);
+  return error instanceof McpHttpError && error.status === 429;
+}
+
 function delay(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, ms);
@@ -270,8 +281,22 @@ export class RemoteMcpClient {
       void this.notify("notifications/cancelled", { requestId: id, reason: "Request cancelled" }, AbortSignal.timeout(2_000)).catch(() => {});
     };
     signal.addEventListener("abort", onAbort, { once: true });
-    const reply = this.target.type === "sse" ? this.sseRequest(id, frame, signal) : this.sessionRequest(id, frame, method, signal);
+    const reply = this.target.type === "sse" ? this.sseRequest(id, frame, signal) : this.rateLimitedRequest(id, frame, method, signal);
     return reply.finally(() => signal.removeEventListener("abort", onAbort));
+  }
+
+  /** Fork: a rate-limited request is sent again after a wait
+   * (RATE_LIMIT_RETRY_MS); the server ran nothing, so nothing repeats. */
+  private async rateLimitedRequest(id: number, frame: unknown, method: string, signal: AbortSignal): Promise<unknown> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.sessionRequest(id, frame, method, signal);
+      } catch (error) {
+        const wait = RATE_LIMIT_RETRY_MS[attempt];
+        if (signal.aborted || wait === undefined || !rateLimited(error)) throw error;
+        await delay(wait, signal);
+      }
+    }
   }
 
   /** Fork: a 404 on a session means the server dropped it (evicted, or

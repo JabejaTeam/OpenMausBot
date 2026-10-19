@@ -13,7 +13,7 @@ import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQu
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
-import { ChatToolSessionError, mountChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
+import { ChatToolScopeRefusal, ChatToolSessionError, mountChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval } from "./chat-tool-approval.ts";
@@ -664,8 +664,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       let ok = false;
       let stopReason: string | null = null;
       let failure: string | undefined;
-      let toolFailed = false;
       const denials: string[] = [];
+      let scopeRefused = false;
       const seenCalls = new Set<string>();
       let nudged = false;
       try {
@@ -790,10 +790,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               messages.push({ role: "assistant", content: completion.text }, { role: "user", content: NUDGE_ANNOUNCED_ACTION });
               continue;
             }
-            if (toolFailed) {
-              // A failed or denied tool op ends the turn: the final answer is
-              // not an execution receipt, and a person's "no" must never be
-              // answered with a prompt to run the same thing again.
+            // Fork: only a person's "no" (a denial, or their tool selection)
+            // ends the turn as failed, so it is never answered with a prompt
+            // to run the same thing again. A tool that failed went back to
+            // the model as a failed result, as on every other engine; failing
+            // the turn over it reported finished work as failed to the
+            // requester (A&D Flash, 2026-10-19).
+            if (denials.length || scopeRefused) {
               stopReason = "tool_error";
               throw new ChatProtocolError("One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.");
             }
@@ -825,7 +828,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               if (!object(args)) throw new ChatProtocolError("tool arguments must be a JSON object");
               const inputPreview = preview(args);
               if (call.function.name === ASK_USER_TOOL) {
-                if (!questionAllowed || !allowsTool(scope, { kind: "native", name: ASK_USER_TOOL })) throw new Error("Tool selection excludes this tool");
+                if (!questionAllowed || !allowsTool(scope, { kind: "native", name: ASK_USER_TOOL })) throw new ChatToolScopeRefusal();
                 // A question is the person's card, not a permission, so it is
                 // handled before the gate below: under Full access that gate
                 // would auto-run an unanswered ask, and under Ask it would
@@ -894,6 +897,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               }
             } catch (error) {
               if (error instanceof ChatToolSessionError) fatal = error;
+              if (error instanceof ChatToolScopeRefusal) scopeRefused = true;
               result = { ok: false, text: abort.signal.aborted
                 ? "Tool interrupted; an operation already dispatched may have taken effect. Verify its state before retrying."
                 : safeText(asError(error).message).slice(0, 2_000) };
@@ -902,7 +906,6 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             const text = safeText(result.text);
             const output = preview({ ok: result.ok, result: text });
             emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "tool", itemId: call.id, ok: result.ok, output });
-            if (!result.ok) toolFailed = true;
             messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify({ ok: result.ok, result: text }) });
             screenshotParts.push(...chatToolImages(call.id, result.images));
             abort.signal.throwIfAborted();

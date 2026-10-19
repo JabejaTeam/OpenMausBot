@@ -236,14 +236,15 @@ describe("Chat MCP session", () => {
     expect(alive(f.read().pid)).toBe(false);
   });
 
-  it("rejects untrusted transport error text without leaking it", async () => {
-    const f = fixture(`if (message.method === "tools/call") { send({jsonrpc:"2.0",id:message.id,error:{code:-1,message:"secret-fixture-key"}}); continue; }`);
+  it("fork: a JSON-RPC error is a failed step that keeps the session, without leaking the server's words", async () => {
+    const f = fixture(`if (message.method === "tools/call" && message.params.arguments.value === "fail") { send({jsonrpc:"2.0",id:message.id,error:{code:-1,message:"secret-fixture-key"}}); continue; }`);
     const session = await f.mount();
-    const result = await session.execute("audit_write", { value: "test" }, f.controller.signal).catch((error: Error) => error);
-    expect(result).toBeInstanceOf(ChatToolSessionError);
-    expect(String(result)).toContain("MCP request failed");
-    expect(String(result)).not.toContain("secret-fixture-key");
-    expect(alive(f.read().pid)).toBe(false);
+    const result = await session.execute("audit_write", { value: "fail" }, f.controller.signal);
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain("MCP request failed (code -1)");
+    expect(result.text).not.toContain("secret-fixture-key");
+    expect(alive(f.read().pid)).toBe(true);
+    await expect(session.execute("audit_write", { value: "valid" }, f.controller.signal)).resolves.toMatchObject({ ok: true });
   });
 
   it("rejects malformed tool content instead of accepting an empty successful result", async () => {

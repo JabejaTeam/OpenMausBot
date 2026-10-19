@@ -96,7 +96,8 @@ it("keeps the selected API model for direct, group and scheduled Boat turns and 
         await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "release" });
       }
       const settled = await control(["wait", ...destination, "--timeout", "20"]);
-      expect(settled.status).toBe(scenario === "held" ? "failed" : "settled");
+      // Fork: the unperformed call goes back to the model, which continues.
+      expect(settled.status).toBe("settled");
       expect(requests.slice(before)).toHaveLength(2);
       expect(requests.slice(before).every(request => request.model === "chosen-vision-model")).toBe(true);
       const followup = requests[before + 1].messages;

@@ -29,6 +29,23 @@ export interface ChatToolCallView { title: string; input: Record<string, unknown
 /** The transport cannot safely continue this turn. A dispatched operation may
  * already have taken effect, so callers must not retry it through a new round. */
 export class ChatToolSessionError extends Error {}
+
+/** Fork: the person's tool selection refused this call. Like a denied
+ * permission it ends the turn as failed; other tool failures do not. */
+export class ChatToolScopeRefusal extends Error {
+  constructor() { super("Tool selection excludes this tool"); }
+}
+
+/** Fork: the server answered a request with a JSON-RPC error. The session
+ * still works, so a tools/call that meets one is a failed step the model
+ * can work around, not the end of the turn. Only the code is relayed: the
+ * server's own words stay out, as before. */
+class McpToolRefusal extends Error {
+  constructor(error: unknown) {
+    const code = object(error) && typeof error.code === "number" ? ` (code ${error.code})` : "";
+    super(`MCP request failed${code}; inspect the configured integration. If this call changes something, check its state before trying again.`);
+  }
+}
 export interface ChatToolSession {
   definitions: ChatToolDefinition[];
   validate(name: string, args: unknown): void;
@@ -157,7 +174,7 @@ class ChatMcpClient {
       const entry = this.pending.get(message.id);
       if (!entry) continue;
       this.pending.delete(message.id);
-      if ("error" in message) entry.reject(new Error("MCP request failed; inspect the configured integration"));
+      if ("error" in message) entry.reject(new McpToolRefusal(message.error));
       else if (!("result" in message)) entry.reject(new Error("MCP response has no result"));
       else entry.resolve(message.result);
     }
@@ -189,7 +206,8 @@ class ChatMcpClient {
         catch { finish(new Error("MCP request could not be sent")); }
       });
     } catch (error) {
-      await this.close();
+      // Fork: a server's JSON-RPC error leaves the session working.
+      if (!(error instanceof McpToolRefusal)) await this.close();
       throw error;
     }
   }
@@ -354,10 +372,10 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     // answers a mistake with guidance: a wrong name or a malformed search
     // ran nothing, and must not end the turn as a failed tool call.
     const directory = tool.searched && isDirectoryTool(tool.name);
-    if (!directory && excluded(tool.name)) throw new Error("Tool selection excludes this tool");
+    if (!directory && excluded(tool.name)) throw new ChatToolScopeRefusal();
     omitBlankDefaults(tool.builtInBrowser, tool.name, args);
     if (!object(args) || (!directory && !tool.schema(args))) throw new Error("Tool arguments do not match the advertised input schema; use its required fields and types");
-    if (tool.searched && excluded(target(tool, args))) throw new Error("Tool selection excludes this tool");
+    if (tool.searched && excluded(target(tool, args))) throw new ChatToolScopeRefusal();
   };
   const view = (name: string, args: Record<string, unknown>): ChatToolCallView => {
     const tool = registered.get(name);
@@ -391,6 +409,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         return { text: boundedText(parts.join("\n") || (images.length ? "Screenshot captured." : "(empty result)")), ok: result.isError !== true && unsupported === 0,
           ...(images.length ? { images } : {}) };
       } catch (error) {
+        if (error instanceof McpToolRefusal && !signal.aborted && !callSignal.aborted) return { text: error.message, ok: false };
         await close();
         throw new ChatToolSessionError(error instanceof Error ? error.message : "MCP transport failed; execution outcome may be uncertain");
       }

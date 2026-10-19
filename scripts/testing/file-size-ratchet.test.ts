@@ -65,6 +65,7 @@ const FORK_LINES: Record<string, number> = {
   "server/drivers/agents-call.ts": 1287,
   "server/drivers/agents-catalog.ts": 1009,
   "server/drivers/codex.ts": 2281,
+  "server/drivers/openai-chat.ts": 1041,
   "server/index.ts": 23147,
   "server/routine-requests.ts": 1768,
   "server/routines.ts": 2177,

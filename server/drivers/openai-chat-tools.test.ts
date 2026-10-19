@@ -995,7 +995,8 @@ describe("structured tool execution boundaries", () => {
     const f = await fixture((_body, response, round) => round === 1
       ? sse(response, [chunk({ tool_calls: [toolCall(name, args)] }, "tool_calls")]) : answer(response));
     await f.start();
-    expect(await f.completed()).toMatchObject({ ok: false });
+    // Fork: a failed call is the model's to handle; only a "no" fails the turn.
+    expect(await f.completed()).toMatchObject({ ok: true });
     expect(f.effects()).toEqual([]);
     expect(f.recorder.events.some((event) => event.type === "request.opened")).toBe(false);
     expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "tool", ok: false }));
@@ -1023,7 +1024,9 @@ describe("structured tool execution boundaries", () => {
       ? sse(response, [chunk({ tool_calls: [toolCall("audit_fail")] }, "tool_calls")]) : answer(response));
     await f.start();
     await f.decide();
-    expect(await f.completed()).toMatchObject({ ok: false });
+    // Fork: the failure goes back to the model; its answer ends the turn.
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "tool", ok: false }));
     expect(f.effects()).toEqual([]);
     expect(f.requests[1].messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "call_write", content: expect.stringContaining("Synthetic tool failed") });
   });

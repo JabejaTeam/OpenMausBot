@@ -268,11 +268,10 @@ describe("createOpenAIChatRuntime tool approvals", () => {
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
   }, 20_000);
 
-  it("ends the turn on a failed tool call, never asks the model to run it again, and does not continue it by itself", async () => {
-    // A failed or denied tool op ends the turn with tool_error, even when the
-    // model then writes a confident final answer. No corrective round asks it
-    // to re-run the operation (it may be one a person refused), and a
-    // tool_error is not continued in a new unattended thread.
+  it("fork: a failed tool call goes back to the model, its answer stands, and nothing asks it to run the call again", async () => {
+    // Fork: only a denial or the tool selection ends the turn with
+    // tool_error. A tool that failed is the model's to handle, as on every
+    // other engine; no corrective round asks it to re-run the operation.
     const dir = mkdtempSync(join(tmpdir(), "omb-chat-toolerr-")); mcpDir.push(dir);
     const script = join(dir, "fake-fail-mcp.mjs");
     writeFileSync(script, `#!/usr/bin/env node
@@ -319,10 +318,10 @@ describe("createOpenAIChatRuntime tool approvals", () => {
       expect(bodies).toHaveLength(2);
       expect(bodies.flatMap((body) => body.messages).some((message: any) => message.role === "user" && /re-run the failed/i.test(String(message.content)))).toBe(false);
       const completed = events.find((event) => event.type === "turn.completed") as any;
-      expect(completed.ok).toBe(false);
-      expect(completed.stopReason).toBe("tool_error");
-      expect(events.some((event) => event.type === "runtime.error" && /One or more tool operations failed/.test((event as any).message ?? ""))).toBe(true);
-      expect(events.some((event) => event.type === "cap.exhausted")).toBe(false);
+      expect(completed.ok).toBe(true);
+      expect(completed.stopReason).not.toBe("tool_error");
+      expect(events.some((event) => event.type === "item.completed" && (event as any).itemType === "tool" && (event as any).ok === false)).toBe(true);
+      expect(events.some((event) => event.type === "runtime.error")).toBe(false);
     } finally {
       await instance.dispose();
     }
