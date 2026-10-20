@@ -13,3 +13,6 @@ jabeja	beast	omb	8799	omb-data/home/omb-server	omb-data/home/.openmausbot
 # 100.86.49.68:8811 (tailnet only). node1 only lets in the beast's container
 # omb, so it is reached through that; commands in the VM run as root.
 ripal	beast>omb>root@159.69.74.253>hermes-vm	omb-ripal	8799	/opt/omb-klanten/ripal/home/omb-server	/opt/omb-klanten/ripal/home/.openmausbot
+# pe = Private Equity for Miguel (Ripal), own container next to omb-ripal,
+# port published on 100.86.49.68:8812; isolated from omb-ripal's data.
+pe	beast>omb>root@159.69.74.253>hermes-vm	omb-pe	8799	/opt/omb-klanten/pe/home/omb-server	/opt/omb-klanten/pe/home/.openmausbot
