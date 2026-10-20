@@ -11762,9 +11762,9 @@ async function startTurn(
         // Per-person values follow whoever this work is for (the same person
         // as the turn's [Person], so delegated work keeps the asker's values);
         // an automation gets the shared values, except (Jabeja fork) a routine
-        // run for the owner, which gets the owner's own (see automation-person.ts).
+        // run, which gets its maker's own (see automation-person.ts).
         const mcpPerson = opts?.automationSource
-          ? automationMcpPerson(opts.automationSource, threadStarters.get(threadId), ownerPersonKey())
+          ? automationMcpPerson(opts.automationSource, threadStarters.get(threadId))
           : turnPerson;
         const custom = withMailGate(await withMcpSignIn(engineMcpServers(bot, mcpPerson), mcpOAuth), bot.id, threadId, dispatchClaimId);
         if (Object.keys(custom).length) integrations.custom = custom;
