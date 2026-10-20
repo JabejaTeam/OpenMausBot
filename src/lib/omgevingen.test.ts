@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { actieveOmgeving, omgevingPath, onActieveOmgeving, openOmgevingen, setActieveOmgeving, setOmgevingenForTest, startOmgevingen } from "./omgevingen";
+import { actieveOmgeving, omgevingPath, omgevingVan, onActieveOmgeving, openOmgevingen, registerOwners, setActieveOmgeving, setOmgevingenForTest, startOmgevingen } from "./omgevingen";
 
 const BOTH = [{ naam: "jabeja", titel: "Jabeja" }, { naam: "ripal", titel: "Ripal" }];
 
@@ -31,6 +31,16 @@ describe("which instance a request is for", () => {
     expect(omgevingPath("/api/config")).toBe("/o/jabeja/api/config");
     expect(omgevingPath("/pair")).toBe("/pair");
   });
+});
+
+it("an id two instances claim routes by neither: the active instance decides", () => {
+  setOmgevingenForTest({ open: BOTH, actief: "jabeja" });
+  registerOwners("ripal", ["b1", "b2"]);
+  registerOwners("jabeja", ["b1"]);
+  registerOwners("ripal", ["b1"]);
+  expect(omgevingVan("b1")).toBeNull();
+  expect(omgevingPath("/api/bots/b1/read")).toBe("/o/jabeja/api/bots/b1/read");
+  expect(omgevingPath("/api/bots/b2/read")).toBe("/o/ripal/api/bots/b2/read");
 });
 
 describe("opening the instances behind the door", () => {

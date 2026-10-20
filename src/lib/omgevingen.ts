@@ -13,7 +13,7 @@
 // current one, nothing here changes a single request.
 import { useSyncExternalStore } from "react";
 
-import { aanmeldenOveral, fetchOmgevingen } from "./voordeur-omgevingen";
+import { aanmeldenOveral, fetchOmgevingen, wisselOmgeving } from "./voordeur-omgevingen";
 
 export interface OpenOmgeving {
   naam: string;
@@ -26,7 +26,11 @@ const ID_PATH = /^\/api\/(?:bots|groups|threads|tasks|rooms|attachments)\/([\w-]
 let open: readonly OpenOmgeving[] = [];
 let actief: string | null = null;
 const owners = new Map<string, string>();
+// Claimed by two instances: never used to route (one instance must not be able to
+// pull another's requests to itself by announcing its ids); the active one decides.
+const disputed = new Set<string>();
 const listeners = new Set<() => void>();
+let installed = false;
 
 function changed(): void {
   for (const listener of listeners) listener();
@@ -81,12 +85,24 @@ export function setActieveOmgeving(naam: string): void {
   } catch {
     // private windows may refuse storage; the choice holds for this page
   }
+  // The door's own choice follows, so what the app cannot name (a picture in a
+  // message) and the next page load go to this instance first.
+  if (installed) void wisselOmgeving(naam).catch(() => undefined);
   changed();
 }
 
-/** A store says which bots, rooms and conversations are its instance's. */
+/** A store says which bots, rooms and conversations are its instance's. The
+ * first instance to name an id owns it; a second one makes it nobody's. */
 export function registerOwners(naam: string, ids: Iterable<string>): void {
-  for (const id of ids) owners.set(id, naam);
+  for (const id of ids) {
+    if (disputed.has(id)) continue;
+    const owner = owners.get(id);
+    if (owner === undefined) owners.set(id, naam);
+    else if (owner !== naam) {
+      owners.delete(id);
+      disputed.add(id);
+    }
+  }
 }
 
 /** The instance a bot, room or conversation belongs to; null with one instance. */
@@ -122,8 +138,6 @@ export function omgevingPath(path: string, naam?: string | null, body?: unknown)
   return target ? `/o/${target}${path}` : path;
 }
 
-let installed = false;
-
 /** Every fetch of an /api/ path in this window goes through omgevingPath:
  * one rule for api(), the direct fetches, a session check and a read mark. */
 function installFetch(): void {
@@ -158,6 +172,7 @@ export function setOmgevingenForTest(next: { open?: OpenOmgeving[]; actief?: str
   open = next.open ?? [];
   actief = next.actief ?? null;
   owners.clear();
+  disputed.clear();
   for (const [id, naam] of Object.entries(next.owners ?? {})) owners.set(id, naam);
   changed();
 }
