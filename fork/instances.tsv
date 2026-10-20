@@ -16,3 +16,6 @@ ripal	beast>omb>root@159.69.74.253>hermes-vm	omb-ripal	8799	/opt/omb-klanten/rip
 # pe = Private Equity for Miguel (Ripal), own container next to omb-ripal,
 # port published on 100.86.49.68:8812; isolated from omb-ripal's data.
 pe	beast>omb>root@159.69.74.253>hermes-vm	omb-pe	8799	/opt/omb-klanten/pe/home/omb-server	/opt/omb-klanten/pe/home/.openmausbot
+# adtrucks = A&D Trucks' own people (fase 0: empty, no bots), own container
+# next to omb-ripal/omb-pe, port published on 100.86.49.68:8813.
+adtrucks	beast>omb>root@159.69.74.253>hermes-vm	omb-adtrucks	8799	/opt/omb-klanten/adtrucks/home/omb-server	/opt/omb-klanten/adtrucks/home/.openmausbot
