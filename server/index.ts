@@ -364,9 +364,9 @@ import {
 } from "./memory-journal.ts";
 import {
   readSections,
-  sectionContextKey,
   writeSectionContext,
 } from "./section-context.ts";
+import { memberInTeam, proposalTeam } from "./fork-team-memory-members.ts";
 import {
   applyStagedSkillWrite,
   applySkillWriteWithReceipt,
@@ -1547,9 +1547,11 @@ function cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: strin
       ? "A local service can only decline this request. Approve or answer it in OpenMausBot while signed in."
       : null;
   }
-  if (!auth.scopes.includes("admin") && store.messagesFor(threadId).some(message =>
-    message.card?.requestId === requestId && message.card.teamMemoryRequest)) {
-    return "Only a workspace admin can review shared team memory.";
+  const teamMemoryCard = auth.scopes.includes("admin") ? undefined : store.messagesFor(threadId).find(message =>
+    message.card?.requestId === requestId && message.card.teamMemoryRequest)?.card?.teamMemoryRequest;
+  // Fork: a member of the team the fact is for reviews it too (fork-team-memory-members.ts).
+  if (teamMemoryCard && !memberInTeam(viewerFor(auth), teamMemoryCard.section, store.bots)) {
+    return "Only a workspace admin or a member of this team can review its team memory.";
   }
   // A Cloud home is one person's: a device paired with chat-only access (a
   // guest) may read along but never answer, or its words would reach the
@@ -19825,15 +19827,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const owner = connectorThread(from.id, body.fromThreadId);
         if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
         // Fork: restricted conversations propose too. Every proposal waits for
-        // an admin's card answer (cardAnswerRefusal), so that admin decides
-        // whether the fact may reach the section's wider audiences.
+        // a card answer by an admin or a member of the team it goes to
+        // (cardAnswerRefusal), who decides whether the fact may reach the
+        // team's wider audiences. A personal agent proposes into its
+        // person's team (proposalTeam).
         if (!(TEAM_MEMORY_KINDS as readonly string[]).includes(body.kind)) {
           return json(res, 400, { error: `kind must be one of ${TEAM_MEMORY_KINDS.join(", ")}` });
         }
         let proposed: ReturnType<TeamMemory["propose"]>;
         try {
           proposed = teamMemory.propose(
-            from.section,
+            proposalTeam(from, store.bots),
             { kind: body.kind as TeamMemoryKind, name: body.name, detail: body.detail, aliases: body.aliases },
             { botId: from.id, botName: from.name, threadId: body.fromThreadId, at: Date.now() },
           );
@@ -19841,7 +19845,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
         }
         const summary = `${proposed.entry.kind[0].toUpperCase()}${proposed.entry.kind.slice(1)}: ${proposed.entry.name}${proposed.entry.aliases.length ? ` (also ${proposed.entry.aliases.join(", ")})` : ""} — ${proposed.entry.detail}`;
-        const section = sectionContextKey(from.section);
+        const section = proposalTeam(from, store.bots);
         const card = store.appendMessage(body.fromThreadId, {
           role: "bot",
           kind: "options",
