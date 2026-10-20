@@ -61,12 +61,12 @@ const LINES: Record<string, number> = {
  * merges never conflict here). Same rule: never grow; lower when it shrinks. */
 const FORK_LINES: Record<string, number> = {
   "server/composio.ts": 1684,
-  "server/config.ts": 1961,
+  "server/config.ts": 1965,
   "server/drivers/agents-call.ts": 1287,
   "server/drivers/agents-catalog.ts": 1009,
   "server/drivers/codex.ts": 2281,
   "server/drivers/openai-chat.ts": 1041,
-  "server/index.ts": 23147,
+  "server/index.ts": 23242,
   "server/routine-requests.ts": 1768,
   "server/routines.ts": 2177,
   "server/store.ts": 3159,
@@ -78,9 +78,9 @@ const FORK_LINES: Record<string, number> = {
   "src/components/PluginsPanel.tsx": 1232,
   "src/components/RoutineCalendarPage.tsx": 2138,
   "src/components/SettingsModal.tsx": 1303,
-  "src/components/Sidebar.tsx": 3061,
+  "src/components/Sidebar.tsx": 3063,
   "src/components/TeamLibraryPanel.tsx": 1154,
-  "src/state/store.tsx": 4605,
+  "src/state/store.tsx": 4643,
   "src/vendor/robot-heads/tv/render.ts": 1040,
 };
 

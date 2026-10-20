@@ -1245,6 +1245,8 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
 export const WORKSPACE_CREDENTIAL_ENV = [
   // Fork: the controle card's shared secret with jabeja-admin (server/controle-card.ts).
   "OMB_CONTROLE_SECRET",
+  // Fork: mints sessions for the voordeur (server/fork-voordeur-signin.ts); never a bot's.
+  "OMB_VOORDEUR_SECRET",
   "XAI_API_KEY",
   "MISTRAL_API_KEY",
   "CEREBRAS_API_KEY",
