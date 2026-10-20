@@ -30,9 +30,17 @@ export function apnsConfigFromEnv(env: NodeJS.ProcessEnv = process.env): ApnsCon
   }
 }
 
+/** Which instance behind the voordeur this server is (env OMB_OMGEVING), so a
+ * phone holding several opens a tap in the right one. Absent: the only one. */
+function omgeving(): Record<string, string> {
+  const naam = process.env.OMB_OMGEVING?.trim();
+  return naam ? { omgeving: naam } : {};
+}
+
 /** What a phone shows: the bot's notification, and where tapping it goes. */
 export function apnsPayload(notification: Notification): Record<string, unknown> {
   return {
+    ...omgeving(),
     aps: {
       alert: { title: notification.title, body: notification.body },
       sound: "default",
@@ -47,7 +55,7 @@ export function apnsPayload(notification: Notification): Record<string, unknown>
 /** A silent push: the phone takes this conversation's notifications off its
  * lock screen (read at a desk meanwhile, server/push-gate.ts). */
 export function apnsClearPayload(threadId: string): Record<string, unknown> {
-  return { aps: { "content-available": 1 }, clearThreadId: threadId };
+  return { aps: { "content-available": 1 }, clearThreadId: threadId, ...omgeving() };
 }
 
 export type PushType = "alert" | "background";

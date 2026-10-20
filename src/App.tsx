@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { Loader2, Menu } from "lucide-react";
-import { CLOUD_LINK_SETTINGS, openBot, StoreProvider, useStore } from "@/state/store";
+import { CLOUD_LINK_SETTINGS, openBot, useStore, type AppState } from "@/state/store";
+import { OmgevingStores, useAllStores } from "@/state/omgeving-stores";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useWelcomeViewer, WelcomeGate } from "@/components/onboarding/WelcomeGate";
 import { cloudSignInDue, spotlightsQuiet, type WelcomeViewer } from "@/lib/onboarding";
@@ -51,9 +52,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { capabilities } = useDesktopCapabilities();
   const simpleUi = useSimpleUi();
   const captionChrome = useCaptionChrome();
-  const unreadCount =
-    state.bots.filter((bot) => !bot.hidden && botShowsUnread(bot)).length +
-    state.groups.filter((group) => group.unread).length;
+  // Fork: with several instances open (state/omgeving-stores.tsx), all of them count.
+  const allStores = useAllStores();
+  const unreadIn = (shown: AppState) =>
+    shown.bots.filter((bot) => !bot.hidden && botShowsUnread(bot)).length + shown.groups.filter((group) => group.unread).length;
+  const unreadCount = allStores.length ? allStores.reduce((sum, store) => sum + unreadIn(store.state), 0) : unreadIn(state);
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const twoSidePanelsFit = useMediaQuery(TWO_SIDE_PANELS_FIT, true);
   const sidebarAndPanelFit = useMediaQuery(SIDEBAR_AND_PANEL_FIT, true);
@@ -465,7 +468,7 @@ function Application() {
   const viewer = useWelcomeViewer();
   return (
     <DesktopCapabilitiesProvider>
-      <StoreProvider>
+      <OmgevingStores>
         <ThreadRefsProvider>
           <Shell viewer={viewer} />
         </ThreadRefsProvider>
@@ -473,7 +476,7 @@ function Application() {
         <GuidedTour />
         <LiveCallHost />
         <FirstConversationTour quiet={spotlightsQuiet(viewer)} />
-      </StoreProvider>
+      </OmgevingStores>
     </DesktopCapabilitiesProvider>
   );
 }

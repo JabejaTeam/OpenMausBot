@@ -5,6 +5,8 @@
 // team opens there instead of always on its Manager.
 import { useSyncExternalStore } from "react";
 
+import { omgevingVan } from "./omgevingen";
+
 export interface Visit {
   threadId: string;
   at: number;
@@ -15,7 +17,8 @@ type Send = (path: string, init?: RequestInit) => Promise<unknown>;
 const PATH = "/api/people/me/navigation";
 const listeners = new Set<() => void>();
 let visits: Readonly<Record<string, Visit>> = {};
-let send: Send | null = null;
+// Fork: one per instance behind the voordeur ("" with one), a visit goes to its bot's.
+const senders = new Map<string, Send>();
 
 function changed(next: Record<string, Visit>) {
   visits = next;
@@ -24,8 +27,8 @@ function changed(next: Record<string, Visit>) {
 
 /** Start: read this person's visits from the server (the store calls this
  * once with its authenticated `api`). */
-export function connectNavigationMemory(request: Send): void {
-  send = request;
+export function connectNavigationMemory(request: Send, omgeving = ""): void {
+  senders.set(omgeving, request);
   void request(PATH)
     .then((answer) => {
       const loaded = (answer as { visits?: Record<string, Visit> } | null)?.visits;
@@ -39,6 +42,7 @@ export function connectNavigationMemory(request: Send): void {
  * the server already recorded it (switching or starting a conversation). */
 export function noteVisit(botId: string, threadId: string, { remote = true } = {}): void {
   changed({ ...visits, [botId]: { threadId, at: Date.now() } });
+  const send = senders.get(omgevingVan(botId) ?? "") ?? senders.values().next().value;
   if (remote && send) void send(PATH, { method: "PUT", body: JSON.stringify({ botId, threadId }) }).catch(() => {});
 }
 

@@ -721,6 +721,7 @@
   "settings.omgeving.signIn": "Sign in",
   "settings.omgeving.switching": "Switching…",
   "settings.omgeving.error": "Couldn't switch environment. Try again.",
+  "omgeving.tabs": "Environments",
   "settings.section.connections": "API keys",
   "settings.section.decisionModel": "Decision model",
   "settings.section.engines": "Model providers",

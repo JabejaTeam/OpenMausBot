@@ -10,6 +10,7 @@ import { applyFont, readFont } from "./lib/fonts";
 import { settleAdvancedModeDefault } from "./lib/interface-mode";
 import { setAdvancedAllowed } from "./lib/advanced-access";
 import { BrowserSignInPage } from "./pair/BrowserSignInPage";
+import { onActieveOmgeving, startOmgevingen } from "./lib/omgevingen";
 import { PairPage } from "./pair/PairPage";
 import "./styles.css";
 
@@ -37,8 +38,12 @@ async function chooseRoot(): Promise<React.ReactNode> {
     }
     return <PairPage initialCode={takePairingCodeFromLocation()} initialEmail={takeInvitedEmailFromLocation()} />;
   }
+  // Fork: every instance this person is signed in to behind the voordeur, in one window.
+  await startOmgevingen();
   const session = await readSessionState();
   setAdvancedAllowed(isOwnerOrAdmin(session));
+  // An admin on one instance is not one on the next (the sign-in lists differ).
+  onActieveOmgeving(() => void readSessionState().then((now) => setAdvancedAllowed(isOwnerOrAdmin(now)), () => undefined));
   if (session.kind === "unauthenticated") return <PairPage initialCode={null} reason={session.error} />;
   // A service-trust server answers this machine's requests without a session
   // but refuses to let it manage anything: sign in first, as a remote browser would.

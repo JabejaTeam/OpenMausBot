@@ -11,7 +11,8 @@ const PATH = "/api/push/desk";
 export const DESK_BEAT_MS = 30_000;
 const EVENTS = ["keydown", "pointerdown", "pointermove", "wheel", "focus"] as const;
 
-let connected = false;
+// Fork: every instance this window shows (lib/omgevingen.ts) hears it.
+const senders = new Set<Send>();
 
 /** Whether a sign of activity now should be sent: this window has focus and
  * the last one went out long enough ago. */
@@ -21,14 +22,16 @@ export function deskBeatDue(lastSentAt: number, now: number, focused: boolean): 
 
 /** Start once per page with the store's authenticated `api`. */
 export function connectDeskPresence(request: Send): void {
-  if (connected || typeof window === "undefined") return;
-  connected = true;
+  if (typeof window === "undefined") return;
+  const first = senders.size === 0;
+  senders.add(request);
+  if (!first) return;
   let lastSentAt = -Infinity;
   const onActivity = () => {
     const now = Date.now();
     if (!deskBeatDue(lastSentAt, now, document.hasFocus())) return;
     lastSentAt = now;
-    void request(PATH, { method: "POST" }).catch(() => {});
+    for (const send of senders) void send(PATH, { method: "POST" }).catch(() => {});
   };
   for (const event of EVENTS) window.addEventListener(event, onActivity, { passive: true });
   onActivity();

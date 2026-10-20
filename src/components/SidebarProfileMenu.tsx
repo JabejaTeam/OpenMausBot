@@ -46,6 +46,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { FEEDBACK_URL, HELP_CENTER_URL, openExternalLink } from "@/lib/app-links";
 import { canSwitchOmgeving, useOmgevingen } from "@/lib/voordeur-omgevingen";
+import { useActieveOmgeving } from "@/lib/omgevingen";
 import {
   cloudPhoneDestination,
   connectPhoneEntry,
@@ -377,7 +378,8 @@ export function SidebarProfileMenu({ iconOnly = false }: { iconOnly?: boolean } 
   const profile = person ?? state.config?.profile;
   // Fork: someone in 2+ environments behind the front door sees which one this is
   const omgevingen = useOmgevingen();
-  const omgeving = canSwitchOmgeving(omgevingen) ? omgevingen.find((o) => o.actief)?.titel : undefined;
+  const shown = useActieveOmgeving();
+  const omgeving = canSwitchOmgeving(omgevingen) ? omgevingen.find((o) => (shown ? o.naam === shown : o.actief))?.titel : undefined;
   const name = profileLabel(profile);
   const connectTo = (destination: PhoneDestination) => selectPhoneDestination(destination, { bridge: cloudPhone.bridge, dispatch });
   const remote = window.ogb?.remoteClient?.active === true;

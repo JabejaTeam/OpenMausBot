@@ -4,17 +4,22 @@
 // load; null while the answer is on its way.
 import { useEffect, useState } from "react";
 
+import { actieveOmgeving, useActieveOmgeving } from "./omgevingen";
 import { isOwnerOrAdmin, readSessionState } from "./session";
 
-let pending: Promise<boolean> | null = null;
+// Fork: one answer per instance behind the voordeur (lib/omgevingen.ts).
+const pending = new Map<string, Promise<boolean>>();
 
 function ownerOrAdmin(): Promise<boolean> {
-  pending ??= readSessionState().then(isOwnerOrAdmin, () => false);
-  return pending;
+  const key = actieveOmgeving() ?? "";
+  let answer = pending.get(key);
+  if (!answer) pending.set(key, (answer = readSessionState().then(isOwnerOrAdmin, () => false)));
+  return answer;
 }
 
 export function useOwnerOrAdmin(): boolean | null {
   const [allowed, setAllowed] = useState<boolean | null>(null);
+  const omgeving = useActieveOmgeving();
   useEffect(() => {
     let alive = true;
     void ownerOrAdmin().then((value) => {
@@ -23,6 +28,6 @@ export function useOwnerOrAdmin(): boolean | null {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [omgeving]);
   return allowed;
 }

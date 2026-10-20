@@ -66,6 +66,20 @@ through `server/index.ts` (23k lines). Names, not line numbers: grep them.
   answered by the voordeur, not this server; without a voordeur the SPA page comes back and the item
   stays hidden). Shown only with 2+ environments; the profile row then shows the current one.
   Electron needs nothing: a saved server is an origin and the switch is a same-origin reload.
+- All environments in one window (SSOT `src/lib/omgevingen.ts`): `startOmgevingen` (main.tsx, before
+  the first render) asks the voordeur which ones this person is signed in to (and signs them in on
+  the rest, `POST /__voordeur/overal`). Which server a request goes to is decided only in
+  `omgevingPath`: an explicit name, else the owner of the bot/room/thread id in the path, query or
+  JSON body (`registerOwners`, fed by each store), else the active environment; the voordeur routes
+  `/o/<naam>/api/...`. A fetch shim applies it to every `/api/` fetch; EventSource, img and ws use
+  `omgevingPath` themselves (live-events `path`, Avatar). One store per environment
+  (`src/state/omgeving-stores.tsx`: `StoreProvider omgeving onValue`, headless, all live); the app
+  renders once on the active one (`ProvideStore`); the Simple sidebar lists each under its name from
+  its own store (`OmgevingStore`, activates on click), Advanced shows `OmgevingTabs`. Per environment:
+  last conversation, owner/admin answer, cloud-guest session; people, visits, desk beats span all.
+  Without a voordeur, or with one environment that is the door's own, nothing changes.
+- Server side: `server/fork-voordeur-signin.ts` (`POST /api/auth/voordeur-session`, signed with
+  env `OMB_VOORDEUR_SECRET`, only exists with it); `OMB_OMGEVING` puts the name in APNs payloads.
 
 ## Tests, build, deploy (all on THE BEAST)
 - `fork/beast.sh` (sourced, SSOT): host, one workspace per worktree `~/omb-fork/wt/<worktree>`

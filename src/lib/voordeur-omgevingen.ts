@@ -6,7 +6,7 @@
 // Settings item stays hidden — no failed request, nothing in the console.
 import { useEffect, useState } from "react";
 
-export type Omgeving = { naam: string; titel: string; actief: boolean; ingelogd: boolean };
+export type Omgeving = { naam: string; titel: string; actief: boolean; ingelogd: boolean; basis?: string };
 
 const isOmgeving = (value: unknown): value is Omgeving => {
   const o = value as Partial<Omgeving> | null;
@@ -17,6 +17,20 @@ const isOmgeving = (value: unknown): value is Omgeving => {
 export async function fetchOmgevingen(fetchImpl: typeof fetch = fetch): Promise<Omgeving[]> {
   try {
     const res = await fetchImpl("/__voordeur/omgevingen", { credentials: "same-origin", headers: { accept: "application/json" } });
+    if (!res.ok || !/json/i.test(res.headers.get("content-type") ?? "")) return [];
+    const body = (await res.json()) as { omgevingen?: unknown };
+    return Array.isArray(body?.omgevingen) ? body.omgevingen.filter(isOmgeving) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Signed in on one environment: be signed in on every other one this
+ * person's email is listed in too (the door asks each for a session).
+ * Answers the list as it is afterwards; [] when there is no door. */
+export async function aanmeldenOveral(fetchImpl: typeof fetch = fetch): Promise<Omgeving[]> {
+  try {
+    const res = await fetchImpl("/__voordeur/overal", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", accept: "application/json" }, body: "{}" });
     if (!res.ok || !/json/i.test(res.headers.get("content-type") ?? "")) return [];
     const body = (await res.json()) as { omgevingen?: unknown };
     return Array.isArray(body?.omgevingen) ? body.omgevingen.filter(isOmgeving) : [];

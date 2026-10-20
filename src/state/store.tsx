@@ -7,6 +7,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -56,10 +57,11 @@ import { t } from "@/lib/i18n";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 import { useChatErrorClear } from "./chat-error";
 import type { OnboardingStatus } from "@/lib/onboarding";
-import { openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
+import { LIVE_EVENTS_PATH, openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
 import { noteThreadChosen } from "@/lib/thread-channel";
 import { connectNavigationMemory, noteVisit } from "@/lib/navigation-memory";
 import { connectDeskPresence } from "@/lib/desk-presence";
+import { actieveOmgeving, omgevingPath, registerOwners, setActieveOmgeving } from "@/lib/omgevingen";
 
 const MAX_ROUTINE_RUNS = 2_000;
 const ACTIVE_ROUTINE_RUN_STATUSES = new Set<RoutineRun["status"]>(["queued", "running", "waiting"]);
@@ -2956,6 +2958,12 @@ export async function api<T = any>(path: string, init?: RequestInit & { timeoutM
   return body;
 }
 
+/** Fork: `api` for one instance behind the voordeur (lib/omgevingen.ts);
+ * without a name, `api` itself. */
+export function apiIn(omgeving: string | undefined): typeof api {
+  return omgeving ? ((path, init) => api(omgevingPath(path, omgeving), init)) as typeof api : api;
+}
+
 type TrustedApprovalBridge = {
   setMode(
     botId: string,
@@ -3175,7 +3183,18 @@ function restoreBotSettingsSection(state: AppState): AppState {
   return section ? { ...state, botSettingsSection: section, botSettingsSectionStored: true } : state;
 }
 
-export function StoreProvider({ children }: { children: ReactNode }) {
+export function StoreProvider({ children, omgeving, onValue }: {
+  children?: ReactNode;
+  /** Fork: the instance behind the voordeur this store is for (lib/omgevingen.ts). */
+  omgeving?: string;
+  /** Fork: hand the store up instead of rendering children (state/omgeving-stores.tsx). */
+  onValue?: (value: ReturnType<typeof useStore>) => void;
+}) {
+  // Fork: every request this store makes goes to its own instance. Shadows
+  // the module's `api` so upstream's calls below stay as they are.
+  const api = useMemo(() => apiIn(omgeving), [omgeving]);
+  /** Fork: whether this store's bot is the one on screen (always, with one instance). */
+  const onScreen = () => !omgeving || actieveOmgeving() === omgeving;
   const taskWrites = useRef(new Map<string, { botId: string; updatesDefault: boolean; promise: Promise<BotAnnouncement>; execution: Promise<unknown>; patch: TaskUpdatePatch }>()).current;
   const withTaskWrites = (bot: BotAnnouncement): BotAnnouncement => ({
     ...bot,
@@ -3194,8 +3213,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Every selection path lands on state.selectedId, so one effect is the
   // whole remember; an empty selection must never overwrite it.
   useEffect(() => {
-    if (state.selectedId) rememberConversation(state.selectedId);
-  }, [state.selectedId]);
+    if (state.selectedId) rememberConversation(state.selectedId, omgeving);
+  }, [state.selectedId, omgeving]);
+  // Fork: requests naming one of these go to this store's instance.
+  useEffect(() => {
+    if (omgeving) registerOwners(omgeving, [...state.bots.flatMap((bot) => [bot.id, ...(bot.tasks ?? []).map((task) => task.threadId)]), ...state.groups.map((group) => group.id)]);
+  }, [omgeving, state.bots, state.groups]);
   // Rail clicks, deep links and remembered openings all carry the accordion
   // flag, so only a section actually viewed is written; a bare open that
   // stays collapsed never is.
@@ -4245,7 +4268,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (alive && answer) flushSync(() => rawDispatch({ type: "liveCallLookup", call: answer.call, since, seq }));
         })
         .catch(() => {});
-      connectNavigationMemory(api);
+      connectNavigationMemory(api, omgeving);
       connectDeskPresence(api);
       const chat = () =>
         api(`/api/bots?messages=${MESSAGE_PAGE_SIZE}`).then(({ bots, groups, sections, computerControl, botQueuedMessages }) => {
@@ -4257,7 +4280,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             sections: sections ?? [],
             computerControl: computerControl ?? {},
             botQueuedMessages,
-            resumeId: readLastConversation() ?? undefined,
+            resumeId: readLastConversation(omgeving) ?? undefined,
           });
         });
       const peripherals = peripheralParts.map((part) => ({
@@ -4372,7 +4395,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const selected = stateRef.current.bots.find((candidate) => candidate.id === bot.id);
           const shown = selected?.switchingTo ?? selected?.threadId;
           const selectedTask = bot.tasks?.find((task) => task.threadId === shown);
-          if (bot.id === stateRef.current.selectedId && stateRef.current.activeView === "chat" &&
+          if (onScreen() && bot.id === stateRef.current.selectedId && stateRef.current.activeView === "chat" &&
               (selectedTask?.unread || (!bot.tasks && bot.unread))) {
             if (selectedTask) selectedTask.unread = false;
             // Hidden routine runs must not put the dot back on the next frame.
@@ -4389,7 +4412,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "group": {
           const group = frame.group as Partial<Group> & { id: string };
           // reading the selected room clears its badge immediately
-          if (group.unread && group.id === stateRef.current.selectedId) {
+          if (onScreen() && group.unread && group.id === stateRef.current.selectedId) {
             group.unread = false;
             fetch(`/api/groups/${group.id}/read`, { method: "POST" }).catch(() => {});
           }
@@ -4407,9 +4430,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // shows threads when it is clicked.
           showNotification(
             frame.notification,
-            (target) => openNotificationTarget(dispatch, target, stateRef.current, showThreadsRef.current),
+            (target) => {
+              if (omgeving) setActieveOmgeving(omgeving);
+              openNotificationTarget(dispatch, target, stateRef.current, showThreadsRef.current);
+            },
             stateRef.current.bots.find((bot) => bot.id === frame.notification.botId)?.avatarUrl,
-            visibleNotificationThread(stateRef.current),
+            onScreen() ? visibleNotificationThread(stateRef.current) : null,
           );
           break;
         case "group.deleted":
@@ -4491,11 +4517,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     };
     const stopLive = openLiveEvents({
+      path: omgevingPath(LIVE_EVENTS_PATH, omgeving),
       onOpen: () => rawDispatch({ type: "connected", value: true }),
       onError: () => rawDispatch({ type: "connected", value: false }),
       onSnapshotRequired: () => {
         clearTimeout(hydrationFallback);
-        publishMissedFrames();
+        if (onScreen()) publishMissedFrames();
         // Frames buffered before this non-resumable stream belong to an
         // abandoned generation. Keep the new generation behind hydrate().
         pendingFrames.splice(0);
@@ -4504,7 +4531,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       onFrame: (frame) => {
         // Open panels read what the store does not keep (live screens, raw
         // runtime events) from this same stream.
-        publishLiveFrame(frame as ServerFrame);
+        // Fork: only the instance on screen feeds them (state/omgeving-stores.tsx).
+        if (onScreen()) publishLiveFrame(frame as ServerFrame);
         if (hydrated) handleFrame(frame as ServerFrame);
         else pendingFrames.push(frame as ServerFrame);
       },
@@ -4577,6 +4605,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () => ({ state, dispatch, flushBotPatches, refreshInstances, refreshModels }),
     [state, dispatch, flushBotPatches, refreshInstances, refreshModels],
   );
+  useLayoutEffect(() => onValue?.(value), [onValue, value]);
+  if (onValue) return null;
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
@@ -4589,6 +4619,11 @@ export function useStore() {
 /** Fork: the store where there is one (a bot avatar renders inside and outside it). */
 export function useOptionalStore() {
   return useContext(StoreContext);
+}
+
+/** Fork: show a store kept elsewhere (one per instance, state/omgeving-stores.tsx). */
+export function ProvideStore({ value, children }: { value: ReturnType<typeof useStore>; children: ReactNode }) {
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
 /** Scoped state for an unsaved editor. The parent workspace remains intact. */

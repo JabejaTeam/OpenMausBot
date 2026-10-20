@@ -1,5 +1,6 @@
 import { track } from "@/lib/analytics";
 import { OrganizationIdentity } from "./OrganizationIdentity";
+import { OmgevingTabs } from "./OmgevingTabs";
 import { approvalCardOutcome } from "./ApprovalCard";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { createPortal } from "react-dom";
@@ -2588,6 +2589,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
 
       {density === "icons" && <DesktopWorkspaceSwitcher compact cloudHome={state.config?.cloudHome === true} owner={cloudOwner} howTo={state.cloudHowTo} onMenuClosed={endHowTo} />}
       <OrganizationIdentity compact={density === "icons"} />
+      {density !== "icons" && <OmgevingTabs />}
       {/* Search */}
       <div className={cn("pt-1 pb-3", density === "icons" ? "hidden" : "px-3")}>
         <div className="flex items-center gap-2 rounded-md border border-hairline/40 bg-inset/40 px-2.5 py-1.5 focus-within:border-focus">

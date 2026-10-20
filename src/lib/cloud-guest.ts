@@ -4,11 +4,15 @@
 // "New conversation" button everywhere else, instead of a send that fails.
 import { useEffect, useState } from "react";
 
+import { actieveOmgeving, useActieveOmgeving } from "./omgevingen";
 import { readSessionState, type SessionState } from "./session";
 
-let session: Promise<SessionState | null> | null = null;
+// Fork: one session per instance behind the voordeur (lib/omgevingen.ts).
+const sessions = new Map<string, Promise<SessionState | null>>();
 const read = (fresh = false) => {
-  if (fresh || !session) session = readSessionState().catch(() => null);
+  const key = actieveOmgeving() ?? "";
+  let session = sessions.get(key);
+  if (fresh || !session) sessions.set(key, (session = readSessionState().catch(() => null)));
   return session;
 };
 
@@ -25,6 +29,7 @@ export function canWriteIn(state: SessionState | null, threadId: string, listed?
 
 export function useCanWriteIn(threadId: string, listed?: boolean): boolean | null {
   const [allowed, setAllowed] = useState<boolean | null>(null);
+  const omgeving = useActieveOmgeving();
   useEffect(() => {
     let alive = true;
     setAllowed(null);
@@ -37,17 +42,18 @@ export function useCanWriteIn(threadId: string, listed?: boolean): boolean | nul
     return () => {
       alive = false;
     };
-  }, [threadId, listed]);
+  }, [threadId, listed, omgeving]);
   return allowed;
 }
 
 /** Fork: whether conversations are private on this server (null while asked). */
 export function usePrivateThreads(): boolean | null {
   const [value, setValue] = useState<boolean | null>(null);
+  const omgeving = useActieveOmgeving();
   useEffect(() => {
     let alive = true;
     void read().then((state) => { if (alive) setValue(state?.kind === "session" && state.privateThreads === true); });
     return () => { alive = false; };
-  }, []);
+  }, [omgeving]);
   return value;
 }

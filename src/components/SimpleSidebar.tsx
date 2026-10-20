@@ -23,6 +23,8 @@ import { lastActivityForMe, unreadForMe } from "@/lib/thread-channel";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { WorkingDots } from "./WorkingIndicator";
 import { profileInitials } from "./SidebarProfileMenu";
+import { openOmgevingen, samen } from "@/lib/omgevingen";
+import { OmgevingStore } from "@/state/omgeving-stores";
 
 
 function Row({
@@ -194,10 +196,10 @@ function RoomAvatar({ members }: { members: Bot[] }) {
   );
 }
 
-export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) {
+/** The bots and rooms of one store, Messages-style (the whole list with one
+ * instance; one instance's part of it with several, see SimpleSidebar). */
+function SimpleSidebarList({ withHero }: { withHero: boolean }) {
   const { state, dispatch } = useStore();
-  usePeople();
-  const { capabilities } = useDesktopCapabilities();
   const hiddenForMe = hiddenBotsForMe();
   const bots = state.bots.filter((bot) => shownForMe(bot, hiddenForMe, ""));
   const layout = simpleSidebarLayout(bots, state.groups, state.sections ?? []);
@@ -211,6 +213,56 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
   const teamUnread = (group: SimpleGroup<Bot, Group>) => group.bots.some(unreadForMe) || group.rooms.some((room) => room.unread);
   const chatView = state.activeView === "chat";
   const select = (id: string) => dispatch({ type: "select", id });
+  return (
+    <>
+      {hero && (withHero ? <HeroBot bot={hero} /> : <BotRow bot={hero} />)}
+      {rows.map((row) => row.kind === "team" ? (
+        <div key={row.key}>
+          {/* the team's name; it opens on the member you were on last, else its Manager */}
+          <BotRow bot={row.lead} title={row.group.section} teamUnread={openTeam !== row.group.id && teamUnread(row.group)}
+            teamWorking={anyMemberWorking(row.group, state.pendingQueued)}
+            onSelect={() => select((lastVisited(row.group.bots, visits) ?? row.lead).id)} />
+          {openTeam === row.group.id && (
+            <div data-simple-team-members className="mb-1 ml-9 flex flex-col gap-0.5 pl-2">
+              {row.group.bots.map((bot) => <MemberRow key={bot.id} bot={bot} />)}
+              {row.group.rooms.map((room) => (
+                <button
+                  key={room.id}
+                  type="button"
+                  onClick={() => select(room.id)}
+                  aria-current={chatView && state.selectedId === room.id ? "page" : undefined}
+                  className={cn("flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-[14px] transition-colors",
+                    chatView && state.selectedId === room.id ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/50 hover:text-ink")}
+                >
+                  <RoomMark members={state.bots.filter((bot) => room.memberIds.includes(bot.id))} />
+                  <span className="min-w-0 flex-1 truncate">{room.name}</span>
+                  {room.unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : row.kind === "bot" ? (
+        <BotRow key={row.key} bot={row.bot} />
+      ) : (
+        <Row
+          key={row.key}
+          selected={chatView && state.selectedId === row.room.id}
+          unread={row.room.unread}
+          avatar={<RoomAvatar members={state.bots.filter((bot) => row.room.memberIds.includes(bot.id))} />}
+          name={row.room.name}
+          sub={groupPreview(row.room, state.bots, state.instances)}
+          onClick={() => select(row.room.id)}
+        />
+      ))}
+    </>
+  );
+}
+
+export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) {
+  const { state, dispatch } = useStore();
+  usePeople();
+  const { capabilities } = useDesktopCapabilities();
   const threadColumn = useThreadColumn();
   const macInset = capabilities.windowChrome === "mac-inset";
   const draggable = macInset || capabilities.windowChrome === "win-caption";
@@ -251,46 +303,13 @@ export function SimpleSidebar({ open }: { open: boolean; onClose: () => void }) 
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {hero && <HeroBot bot={hero} />}
-        {rows.map((row) => row.kind === "team" ? (
-          <div key={row.key}>
-            {/* the team's name; it opens on the member you were on last, else its Manager */}
-            <BotRow bot={row.lead} title={row.group.section} teamUnread={openTeam !== row.group.id && teamUnread(row.group)}
-              teamWorking={anyMemberWorking(row.group, state.pendingQueued)}
-              onSelect={() => select((lastVisited(row.group.bots, visits) ?? row.lead).id)} />
-            {openTeam === row.group.id && (
-              <div data-simple-team-members className="mb-1 ml-9 flex flex-col gap-0.5 pl-2">
-                {row.group.bots.map((bot) => <MemberRow key={bot.id} bot={bot} />)}
-                {row.group.rooms.map((room) => (
-                  <button
-                    key={room.id}
-                    type="button"
-                    onClick={() => select(room.id)}
-                    aria-current={chatView && state.selectedId === room.id ? "page" : undefined}
-                    className={cn("flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left text-[14px] transition-colors",
-                      chatView && state.selectedId === room.id ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/50 hover:text-ink")}
-                  >
-                    <RoomMark members={state.bots.filter((bot) => room.memberIds.includes(bot.id))} />
-                    <span className="min-w-0 flex-1 truncate">{room.name}</span>
-                    {room.unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : row.kind === "bot" ? (
-          <BotRow key={row.key} bot={row.bot} />
-        ) : (
-          <Row
-            key={row.key}
-            selected={chatView && state.selectedId === row.room.id}
-            unread={row.room.unread}
-            avatar={<RoomAvatar members={state.bots.filter((bot) => row.room.memberIds.includes(bot.id))} />}
-            name={row.room.name}
-            sub={groupPreview(row.room, state.bots, state.instances)}
-            onClick={() => select(row.room.id)}
-          />
-        ))}
+        {/* Fork: several instances behind the voordeur: each under its name, from its own store */}
+        {samen() ? openOmgevingen().map((omgeving, index) => (
+          <section key={omgeving.naam} data-omgeving={omgeving.naam} aria-label={omgeving.titel}>
+            <h2 className="px-2.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">{omgeving.titel}</h2>
+            <OmgevingStore naam={omgeving.naam}><SimpleSidebarList withHero={index === 0} /></OmgevingStore>
+          </section>
+        )) : <SimpleSidebarList withHero />}
       </div>
 
       <div className="flex items-center gap-2.5 px-4 pb-4 pt-2">

@@ -5,6 +5,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 
 import { api, type Message } from "@/state/store";
+import { omgevingPath, omgevingVan, openOmgevingen } from "./omgevingen";
 import { peerLine } from "./peer-message";
 
 let me: string | undefined;
@@ -17,13 +18,17 @@ const listeners = new Set<() => void>();
 function loadPeople(): void {
   if (requested) return;
   requested = true;
-  void Promise.allSettled([
-    api<{ id?: string; hiddenBots?: string[] }>("/api/people/me"),
-    api<{ names?: Record<string, string> }>("/api/people/names"),
-  ]).then(([mine, all]) => {
-    if (mine.status === "fulfilled" && typeof mine.value?.id === "string") me = mine.value.id;
-    if (mine.status === "fulfilled" && Array.isArray(mine.value?.hiddenBots)) hiddenBots = new Set(mine.value.hiddenBots);
-    if (all.status === "fulfilled" && all.value?.names && typeof all.value.names === "object") names = all.value.names;
+  // Fork: every instance this window shows (lib/omgevingen.ts); a person's key is the same on each.
+  const where = openOmgevingen().length ? openOmgevingen().map((o) => o.naam) : [undefined];
+  void Promise.all(where.map((naam) => Promise.allSettled([
+    api<{ id?: string; hiddenBots?: string[] }>(omgevingPath("/api/people/me", naam)),
+    api<{ names?: Record<string, string> }>(omgevingPath("/api/people/names", naam)),
+  ]))).then((answers) => {
+    for (const [mine, all] of answers) {
+      if (mine.status === "fulfilled" && typeof mine.value?.id === "string") me ??= mine.value.id;
+      if (mine.status === "fulfilled" && Array.isArray(mine.value?.hiddenBots)) hiddenBots = new Set([...hiddenBots, ...mine.value.hiddenBots]);
+      if (all.status === "fulfilled" && all.value?.names && typeof all.value.names === "object") names = { ...names, ...all.value.names };
+    }
     changed();
   });
 }
@@ -82,8 +87,8 @@ export async function setBotHiddenForMe(botId: string, hidden: boolean): Promise
   hiddenBots = next;
   changed();
   try {
-    const saved = await api<{ hiddenBots?: string[] }>("/api/people/me", { method: "PUT", body: JSON.stringify({ hiddenBots: [...next] }) });
-    if (Array.isArray(saved?.hiddenBots)) hiddenBots = new Set(saved.hiddenBots);
+    const saved = await api<{ hiddenBots?: string[] }>(omgevingPath("/api/people/me", omgevingVan(botId)), { method: "PUT", body: JSON.stringify({ hiddenBots: [...next] }) });
+    if (Array.isArray(saved?.hiddenBots)) hiddenBots = new Set([...next, ...saved.hiddenBots]);
   } catch (error) {
     hiddenBots = before;
     throw error;

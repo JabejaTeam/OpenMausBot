@@ -47,6 +47,8 @@ export interface LiveEventsPlatform {
 }
 
 export interface LiveEventsHandlers {
+  /** Fork: the stream's path when not /api/events (one instance behind the voordeur, lib/omgevingen.ts). */
+  path?: string;
   onFrame: (frame: LiveFrame) => void;
   /** Rebuild the consumer's complete snapshot after the server says its
    * replay gap cannot be filled. The transport commits the new cursor only
@@ -60,11 +62,12 @@ export interface LiveEventsHandlers {
   retryMaxMs?: number;
 }
 
-export function liveEventsUrl(options?: { since?: string | null }): string {
+export function liveEventsUrl(options?: { since?: string | null; path?: string }): string {
   const params = new URLSearchParams();
   if (options?.since) params.set("since", options.since);
   const query = params.toString();
-  return query ? `${LIVE_EVENTS_PATH}?${query}` : LIVE_EVENTS_PATH;
+  const path = options?.path ?? LIVE_EVENTS_PATH;
+  return query ? `${path}?${query}` : path;
 }
 
 /**
@@ -263,7 +266,7 @@ export function openLiveEvents(
     let current: LiveEventSourceLike;
     try {
       current = platform.createEventSource(
-        liveEventsUrl({ since: cursor }),
+        liveEventsUrl({ since: cursor, path: handlers.path }),
       );
     } catch {
       handlers.onError?.();

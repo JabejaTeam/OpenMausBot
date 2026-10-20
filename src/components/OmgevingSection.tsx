@@ -1,17 +1,22 @@
 // Jabeja fork: Settings → Account → Environment. Shown only to someone on the
 // sign-in list of two or more environments behind the shared front door
-// (lib/voordeur-omgevingen.ts); switching reloads into the chosen one.
+// (lib/voordeur-omgevingen.ts). One this window already shows (lib/omgevingen.ts)
+// opens at once; any other reloads into it.
 import { useState } from "react";
 import { Check } from "lucide-react";
 import { t } from "@/lib/i18n";
+import { openOmgevingen, setActieveOmgeving, useActieveOmgeving } from "@/lib/omgevingen";
 import { wisselOmgeving, type Omgeving } from "@/lib/voordeur-omgevingen";
 import { Card } from "./SettingsPrimitives";
 
 export function OmgevingSection({ omgevingen, go = (to) => window.location.assign(to) }: { omgevingen: Omgeving[]; go?: (to: string) => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const shown = useActieveOmgeving();
+  const current = (o: Omgeving) => (shown ? o.naam === shown : o.actief);
 
   const choose = async (naam: string) => {
+    if (openOmgevingen().some((o) => o.naam === naam)) return setActieveOmgeving(naam);
     setBusy(naam);
     setFailed(false);
     try {
@@ -30,10 +35,10 @@ export function OmgevingSection({ omgevingen, go = (to) => window.location.assig
             <div className="min-w-0 flex-1">
               <div className="truncate text-[14px] font-medium text-ink">{o.titel}</div>
               <div className="text-[12.5px] text-ink-secondary">
-                {o.actief ? t("settings.omgeving.current") : o.ingelogd ? t("settings.omgeving.signedIn") : t("settings.omgeving.notSignedIn")}
+                {current(o) ? t("settings.omgeving.current") : o.ingelogd ? t("settings.omgeving.signedIn") : t("settings.omgeving.notSignedIn")}
               </div>
             </div>
-            {o.actief ? (
+            {current(o) ? (
               <Check size={18} aria-label={t("settings.omgeving.current")} className="shrink-0 text-accent" />
             ) : (
               <button type="button" className="ui-button" disabled={busy !== null} onClick={() => void choose(o.naam)}>

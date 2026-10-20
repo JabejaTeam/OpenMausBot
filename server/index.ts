@@ -525,6 +525,7 @@ import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./
 import { applyPendingWorkspaceRestore, readLastWorkspaceRestore, type WorkspaceRestoreResult } from "./workspace-backup.ts";
 import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } from "./custom-domain.ts";
 import { allowedScopes, createEmailSignIn, parseAllowList } from "./account-signin.ts";
+import { createVoordeurSignIn, VOORDEUR_SESSION_PATH } from "./fork-voordeur-signin.ts";
 import { createSesCodeClient, sesKeyFromEnv } from "./fork-signin-mail.ts";
 import { ProviderAuthSessions } from "./provider-auth-sessions.ts";
 import {
@@ -755,6 +756,8 @@ const lendingMemory = CLOUD_HOME ? createLendingMemory({
 }) : null;
 // On a Cloud home memory is never read through a link (server/workspace.ts).
 if (CLOUD_HOME) readMemoryOnlyFromRegularFiles();
+// Jabeja fork: sessions minted for the voordeur (server/fork-voordeur-signin.ts).
+const voordeurSignIn = process.env.OMB_VOORDEUR_SECRET && process.env.OMB_VOORDEUR_SECRET.length >= 32 ? createVoordeurSignIn({ secret: process.env.OMB_VOORDEUR_SECRET }) : null;
 const cloudPairing = CLOUD_HOME ? createCloudPairing({ secret: CLOUD_HOME.bootstrapSecret, sessions }) : null;
 if (CLOUD_HOME) {
   // The signing secret is held in memory from here on, and a platform
@@ -18688,6 +18691,25 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const secure = requestOrigin(req)?.startsWith("https://") === true;
       res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, issued.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(issued.session) }));
       return json(res, 200, { session: issued.session, environment });
+    }
+    // Jabeja fork: the voordeur's signed request for a session of someone
+    // signed in on another instance behind it (server/fork-voordeur-signin.ts).
+    if (voordeurSignIn && method === "POST" && path === VOORDEUR_SESSION_PATH) {
+      res.setHeader("cache-control", "no-store");
+      const source = requestSource(req);
+      const header = (name: string) => { const value = req.headers[name]; return typeof value === "string" ? value : undefined; };
+      const checked = voordeurSignIn.check({ timestamp: header("x-omb-voordeur-timestamp"), nonce: header("x-omb-voordeur-nonce"), signature: header("x-omb-voordeur-signature"), body: await readSignedBody(req) });
+      if (!("email" in checked)) {
+        sessions.noteFailure(source);
+        console.warn(`voordeur sign-in refused from ${source}: ${checked.error}`);
+        return json(res, checked.status, { error: checked.error });
+      }
+      const scopes = allowedScopes(checked.email, signInAllowList());
+      if (!scopes) return json(res, 403, { error: "not on this server's sign-in list" });
+      const issued = sessions.issue({ label: checked.label || "voordeur", scopes, userId: `local:${checked.email}`, email: checked.email });
+      const secure = requestOrigin(req)?.startsWith("https://") === true;
+      res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, issued.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(issued.session) }));
+      return json(res, 200, { session: issued.session });
     }
     // The Admin's signed request for one pairing window on a Cloud home
     // machine. Public like /api/auth/pair, JSON only, and bad signatures

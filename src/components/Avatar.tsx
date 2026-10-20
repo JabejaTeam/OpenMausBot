@@ -4,6 +4,7 @@
 // face/state for a moment, and the eyes follow the pointer. The previous
 // hand-built Maus body + face engine (maus-engine/face/driver) is gone;
 // CursorAvatar owns morphing, blinking, drift, body motion and effects.
+import { omgevingPath, omgevingVan } from "@/lib/omgevingen";
 import {
   forwardRef,
   memo,
@@ -323,7 +324,7 @@ export function BotAvatar({ bot, size = 44, label, readable: _readable = false, 
       style={{ width: size, height: size, borderRadius: radius }}
     >
       <img
-        src={profile.avatarUrl}
+        src={profile.avatarUrl && omgevingPath(profile.avatarUrl, omgevingVan(bot.id))}
         alt={label ?? (shownName ? `${shownName} avatar` : "Bot avatar")}
         width={size}
         height={size}
