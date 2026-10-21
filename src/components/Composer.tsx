@@ -844,8 +844,10 @@ export function Composer({
   const startDictation = (engine: DictationEngine | null = dictationEngine) => {
     if (dictating) return;
     if (engine === "soniox") {
-      // The desktop app refuses a paired server's page the microphone (only
-      // its own page and My Cloud get it); say so instead of failing silently.
+      // An old desktop app (no pageMic) refuses a paired server's page the
+      // microphone outright; say so instead of failing silently. A newer one
+      // asks the person on the microphone request itself, so start and let it
+      // ask — refusing on "not allowed yet" would mean it never asks.
       const refused = capabilities.dictation.reasonCode === "remote-server";
       const id = ++pendingSonioxStart.current;
       void (window.ogb?.permStatus?.() ?? Promise.resolve(undefined))
@@ -853,7 +855,7 @@ export function Composer({
         .then((status) => {
           // let go (or stopped) before the app answered: no start
           if (id !== pendingSonioxStart.current) return;
-          if (status?.pageMic === "refused" || (status?.pageMic === undefined && refused)) {
+          if (status?.pageMic === undefined && refused) {
             setSpeechError(t("composer.dictation.appRefused"));
             return;
           }
