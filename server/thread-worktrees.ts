@@ -89,7 +89,9 @@ repo=$1; branch=$2
 main=$(git -C "$repo" rev-parse --abbrev-ref HEAD) || exit 1
 if [ -n "$(git status --porcelain)" ]; then echo "Uncommitted changes: commit first (the pre-commit hook runs the checks)."; exit 1; fi
 # A repo with a testlab ties every screen change to a roadmap card through a "Kaart: <uuid>" line.
+proef=0
 if [ -f e2e/project.ts ] || [ -f e2e/testlab.json ]; then
+  proef=1
   missing=""
   for c in $(git rev-list --no-merges "$main..HEAD"); do
     msg=$(git log -1 --format=%B "$c")
@@ -141,8 +143,29 @@ for attempt in 1 2 3; do
     if [ -x "$tc" ]; then "$tc" .; else npm run -s typecheck; fi
     if [ $? -ne 0 ]; then echo "The typecheck fails on top of the work merged meanwhile: fix it, commit, land again."; exit 1; fi
   fi
+  # A repo with a testlab lands only what its proof run approves (the testlab's verdict: no new
+  # failures, demo lines in order). When the test agent already wrote the card's spec on a
+  # spec/<card> branch, the run tests this commit together with it and that combined commit lands,
+  # so the card can go to Klaar at once. Testlab unreachable: land; main is tested after landing.
+  if [ "$proef" = 1 ]; then
+    proefcmd=\${OMB_PROEF_CMD:-"ssh -o BatchMode=yes -o ConnectTimeout=10 beast ~/testlab/proef.sh"}
+    out=$($proefcmd --repo "$(basename "$repo")" "$(git rev-parse HEAD)" 2>&1); rc=$?
+    printf '%s\n' "$out" | grep -v '^LANDMET '
+    if [ $rc -eq 255 ]; then
+      echo "Testlab not reachable: landing without a proof run (main is tested after landing)."
+    elif [ $rc -ne 0 ]; then
+      echo "Not landed: the proof run is not green (see above). Fix it, commit, land again."; exit 1
+    else
+      landmet=$(printf '%s\n' "$out" | awk '$1=="LANDMET"{s=$2} END{print s}')
+      specs=$(printf '%s\n' "$out" | awk '$1=="LANDMET"{$1="";$2="";s=$0} END{print s}')
+      if [ -n "$landmet" ] && git merge -q --ff-only "$landmet" 2>/dev/null; then
+        echo "Landing together with the test agent's spec:$specs"
+      fi
+    fi
+  fi
   if git -C "$repo" merge -q --ff-only "$branch" 2>/dev/null; then
     echo "Merged $(git rev-parse --short HEAD) into $main."
+    for b in \${specs:-}; do git -C "$repo" branch -D "$b" >/dev/null 2>&1 || true; done
     # Publish right away, so the remote is never behind what landed. A refused push does not undo the landing.
     if up=$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>/dev/null); then
       if out=$(git -C "$repo" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 push -q "\${up%%/*}" "$main" 2>&1); then
