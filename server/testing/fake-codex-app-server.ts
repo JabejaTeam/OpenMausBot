@@ -21,7 +21,9 @@
 //                               at all, for the first N launches (launch count in
 //                               FAKE_CODEX_STATE)
 //   FAKE_CODEX_ACCEPTED_FAILS  with FAKE_CODEX_TRANSIENTS: ack turn/start, then fail
-//                              it with "model at capacity" (serverOverloaded)
+//                              it with "model at capacity" (serverOverloaded);
+//                              "text" first finishes reasoning + a commentary message,
+//                              "tool" first starts a shell command
 //   FAKE_CODEX_ACK_CRASH       gate file path: hold the post-ack crash until the
 //                              test confirms the driver parsed the ack
 //   FAKE_CODEX_EXIT_MID_TURN   gate file path: hold the ack/delta stdout until the
@@ -775,6 +777,15 @@ process.stdin.on("data", (chunk) => {
             if (process.env.FAKE_CODEX_ACCEPTED_FAILS) {
               const error = { message: "Selected model is at capacity. Please try a different model.", codexErrorInfo: "serverOverloaded" };
               out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+              if (process.env.FAKE_CODEX_ACCEPTED_FAILS === "text") {
+                notify("item/started", { item: { type: "reasoning", id: "rs1" } });
+                notify("item/completed", { item: { type: "reasoning", id: "rs1", summary: [], content: [] } });
+                notify("item/started", { item: { type: "agentMessage", id: "c1", text: "" } });
+                notify("item/agentMessage/delta", { itemId: "c1", delta: "Even kijken." });
+                notify("item/completed", { item: { type: "agentMessage", id: "c1", text: "Even kijken.", phase: "commentary" } });
+              } else if (process.env.FAKE_CODEX_ACCEPTED_FAILS === "tool") {
+                notify("item/started", { item: { type: "commandExecution", id: "cmd1", command: "ls", cwd: "/" } });
+              }
               notify("error", { error, willRetry: false });
               notify("turn/completed", { turn: { status: "failed", error } });
               break;

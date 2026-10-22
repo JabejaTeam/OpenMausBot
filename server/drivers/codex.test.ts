@@ -3099,6 +3099,33 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(replies).toHaveLength(1);
   }, 20_000);
 
+  it("retries a capacity failure after only reasoning and a commentary message (fork)", async () => {
+    process.env.FAKE_CODEX_TRANSIENTS = "1";
+    process.env.FAKE_CODEX_ACCEPTED_FAILS = "text";
+    process.env.FAKE_CODEX_STATE = join(scratch, "codex-launches-capacity-text");
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.0001";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-codex-capacity-text", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(recorder.events.filter((e) => e.type === "turn.retrying")).toHaveLength(1);
+    expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(false);
+    expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+  }, 20_000);
+
+  it("does not retry a capacity failure once a tool started (fork)", async () => {
+    process.env.FAKE_CODEX_TRANSIENTS = "1";
+    process.env.FAKE_CODEX_ACCEPTED_FAILS = "tool";
+    process.env.FAKE_CODEX_STATE = join(scratch, "codex-launches-capacity-tool");
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.0001";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-codex-capacity-tool", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+    expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: false });
+  }, 20_000);
+
   it("gives up on a capacity outage after the outage cap and shows the error once (fork)", async () => {
     process.env.FAKE_CODEX_TRANSIENTS = "99";
     process.env.FAKE_CODEX_ACCEPTED_FAILS = "1";

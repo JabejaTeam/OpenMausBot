@@ -1065,8 +1065,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         authRecovery: false,
         lastText: "",
         sawStreamDelta: false,
-        // Fork: the turn started a tool, reasoning or any other item of its
-        // own, so a relaunch could repeat work
+        // Fork: the turn started a tool or any other item that acts, so a
+        // relaunch could repeat work. Reasoning and finished messages do not
+        // count: the relaunch resumes the thread that already holds them.
         sawWork: false,
         // Fork: an outage error held back until turn/completed decides
         // between a relaunch and showing it
@@ -1439,7 +1440,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         emit({ ...base(threadId, turnId), type: "runtime.error", message, ...(setup ? { setup: true } : {}) });
       };
       // Fork: an accepted turn the provider failed with an outage (at
-      // capacity, 429, 5xx) before any output or work of its own is
+      // capacity, 429, 5xx) before any tool work or half-streamed text is
       // relaunched on the long outage schedule (retry.ts) instead of
       // settling. Nothing ran, so the replay repeats only the input.
       const outageFailure = (error: { message?: unknown; codexErrorInfo?: unknown }) =>
@@ -1547,7 +1548,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           case "item/started": {
             const item = p.item ?? {};
-            if (item.type !== "userMessage") state.sawWork = true;
+            if (!["userMessage", "reasoning", "agentMessage"].includes(item.type)) state.sawWork = true;
             // call_tool on a searched server reads as the tool it runs.
             const runs = item.type === "mcpToolCall" && item.tool === CALL_TOOL && typeof item.server === "string" && directoryMounts.has(item.server)
               ? directoryCallTarget(CALL_TOOL, item.arguments) : undefined;
