@@ -1308,6 +1308,19 @@ function cloudGuestSendRefusal(auth: RequestAuth, threadId: string): string | nu
     ? null : "On this Cloud you can only write in conversations you started. Start a new conversation with this bot.";
 }
 
+/** Fork: why a session may not write in a conversation, or null. Admins
+ * read along in everyone's (thread-access role "team"), but a line there
+ * lands in that person's transcript and runs on the writer's own logins, so
+ * the writer starts a conversation of their own instead (the web app does
+ * that for them, src/components/Composer.tsx). */
+function teamThreadWriteRefusal(auth: RequestAuth, threadId: string): string | null {
+  if (!privateThreads() || auth.kind !== "session") return null;
+  const viewer = viewerFor(auth);
+  if (viewer.kind === "all") return null;
+  return threadRole(viewer.person, threadId, threadAccessRecords, viewer.kind === "admin") === "team"
+    ? "This is someone else's conversation: you can read along, but write in a conversation of your own." : null;
+}
+
 /** On a Cloud home: the one key every line, card answer, conversation and
  * routine of the owner's own devices carries, whichever device and however
  * often it was paired again, so re-pairing never demotes what the owner
@@ -18096,7 +18109,7 @@ ROUTES.push(createBotMessageRoutes({
   store, registry, handoffs, approvalBus, phoneSecretSubmissions, directTurnDispatchClaims, groupSpeakers,
   routines: () => routines,
   desktopManaged: DESKTOP_MANAGED, cloudHome: Boolean(CLOUD_HOME), DirectSendRefused,
-  acceptDirectSend, directSendRefusal, startTurn, usageTriggerFor, messageSender, cloudGuestSendRefusal, cloudThreadRefusal,
+  acceptDirectSend, directSendRefusal, startTurn, usageTriggerFor, messageSender, cloudGuestSendRefusal, cloudThreadRefusal, teamThreadWriteRefusal,
   cloudOwnerSession, cardAnswerRefusal, commandRememberRefusal, requestBehavior, requestedTaskBot, botForThread, threadBusy,
   botAtThreadCapacity, parksBehindCoordination, activeGroupTurnForBot, runningTurnInstance, engineSteersImages, resolveReplyTarget,
   turnSelection, policyModelRefusal, clearUnattended, drainQueuedSends, answeringCardAs, resolveAndSendTrust, resolveAndSendTeamSetup,

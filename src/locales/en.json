@@ -4316,6 +4316,7 @@
   "sidebar.bot.hideForMe": "Hide for me",
   "sidebar.bot.showForMe": "Show for me",
   "sidebar.bot.hideForMeHint": "Only your own list changes. The bot keeps working, teammates still see it, and searching finds it. Show it again from the Team map.",
+  "chat.private.readingAlong": "This is {name}'s conversation. You are reading along: what you type starts a conversation of your own.",
   "chat.private.noneYet": "You have no conversation of your own with this bot yet. Pick one under Team or start a new one.",
   "chat.share.title": "Share this conversation",
   "chat.share.hint": "Who else may read and write here",

@@ -71,7 +71,7 @@ import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { normalizeState, stateForBot } from "@/lib/mascot";
 import { peerLine, peerRequest, type PeerLine } from "@/lib/peer-message";
-import { otherSenderName, usePeople } from "@/lib/people";
+import { otherSenderName, personName, usePeople } from "@/lib/people";
 import { PersonLabel } from "./PersonLabel";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { lastNonReceipt } from "@/lib/receipts";
@@ -1858,6 +1858,13 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       {canWrite === false ? (
         <NewConversationInstead onNew={() => dispatch({ type: "newTask", botId: bot.id })} message={listed ? undefined : t("chat.private.noneYet")} />
       ) : (
+      <>
+      {/* Fork: an admin reads along here; the Composer sends into a new conversation of their own. */}
+      {openTask?.access === "team" && (
+        <p className="pointer-events-auto mx-5 mb-1 text-[12px] text-ink-secondary" data-testid="reading-along">
+          {t("chat.private.readingAlong", { name: (openTask.person && personName(openTask.person)) || t("chat.share.someone") })}
+        </p>
+      )}
       <Composer
         key={bot.threadId}
         bot={profile}
@@ -1865,10 +1872,11 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         onClearReply={clearReply}
         onConsumeReply={consumeReply}
         onRestoreReply={restoreReply}
-        onEditLast={lastUserMessage && !lastUserMessageHasAttachments && !bot.busy && !lastUserMessage.id.startsWith("optimistic-")
+        onEditLast={openTask?.access !== "team" && lastUserMessage && !lastUserMessageHasAttachments && !bot.busy && !lastUserMessage.id.startsWith("optimistic-")
           ? () => setEditingId(lastUserMessage.id)
           : undefined}
       />
+      </>
       )}
       {canWrite !== false && (
       <CitationSelectionToolbar

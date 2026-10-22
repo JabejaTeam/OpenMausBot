@@ -4316,6 +4316,7 @@
   "sidebar.bot.hideForMe": "Voor mij verbergen",
   "sidebar.bot.showForMe": "Voor mij tonen",
   "sidebar.bot.hideForMeHint": "Enkel je eigen lijst verandert. De bot blijft werken, teamgenoten zien hem nog en zoeken vindt hem. Toon hem opnieuw via de teamkaart.",
+  "chat.private.readingAlong": "Dit is het gesprek van {name}. Je leest mee: wat je typt, start een eigen gesprek.",
   "chat.private.noneYet": "Je hebt nog geen eigen gesprek met deze bot. Kies er een onder Team of begin een nieuw.",
   "chat.share.title": "Dit gesprek delen",
   "chat.share.hint": "Wie hier ook mag lezen en schrijven",

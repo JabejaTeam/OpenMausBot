@@ -1393,7 +1393,11 @@ export type Action =
       /** Local UI recovery hook for voice flows. Never sent to the server. */
       onError?: (message: string) => void;
     }
-  | { type: "newTask"; botId: string; projectId?: string; cwd?: string; onCreated?: () => void; onError?: (message: string) => void }
+  | {
+      type: "newTask"; botId: string; projectId?: string; cwd?: string; onCreated?: () => void; onError?: (message: string) => void;
+      /** Fork: a line typed in someone else's conversation, sent into this new one once it exists. */
+      thenSend?: { text: string; sendId: string; onError?: () => void };
+    }
   /** `whole`: the whole thread, not its newest page (a search hit can be older). */
   | { type: "switchTask"; botId: string; threadId: string; whole?: true }
   | { type: "switchTaskFailed"; botId: string; threadId: string }
@@ -4037,13 +4041,20 @@ export function StoreProvider({ children, omgeving, onValue }: {
             : `/api/bots/${action.botId}/tasks/${action.threadId}${action.whole ? "" : `?messages=${MESSAGE_PAGE_SIZE}`}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId, cwd: action.cwd } : {}) }))
             .then((r) => {
               if (action.type === "newTask") action.onCreated?.();
-              if (!r?.bot || navigation.get(action.botId) !== revision) return;
-              const selectsAfterCreation = action.type === "newTask" && action.cwd !== undefined;
-              if (selectsAfterCreation && selectionRevision !== selectedAtStart) return;
-              // fork: the server remembered it (person-navigation); mirror it here
-              noteVisit(action.botId, r.bot.threadId, { remote: false });
-              dispatch({ type: "taskSwitched", bot: r.bot });
-              if (selectsAfterCreation) rawDispatch({ type: "select", id: action.botId });
+              const switched = () => {
+                if (!r?.bot || navigation.get(action.botId) !== revision) return;
+                const selectsAfterCreation = action.type === "newTask" && action.cwd !== undefined;
+                if (selectsAfterCreation && selectionRevision !== selectedAtStart) return;
+                // fork: the server remembered it (person-navigation); mirror it here
+                noteVisit(action.botId, r.bot.threadId, { remote: false });
+                dispatch({ type: "taskSwitched", bot: r.bot });
+                if (selectsAfterCreation) rawDispatch({ type: "select", id: action.botId });
+              };
+              switched();
+              // fork: the line goes in even when the person moved on meanwhile
+              if (action.type === "newTask" && action.thenSend && r?.bot) {
+                wrapped({ type: "send", botId: action.botId, threadId: r.bot.threadId, ...action.thenSend });
+              }
             })
             .catch((error) => {
               // The latest switch, failed, leaves the thread it was on on screen.

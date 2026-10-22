@@ -83,6 +83,8 @@ export interface BotMessageRouteDeps {
   usageTriggerFor(auth: RequestAuth): UsageTrigger;
   messageSender(auth: RequestAuth): ResolvedSender | undefined;
   cloudGuestSendRefusal(auth: RequestAuth, threadId: string): string | null;
+  /** Fork: an admin reads along in someone else's conversation, never writes in it. */
+  teamThreadWriteRefusal(auth: RequestAuth, threadId: string): string | null;
   cloudThreadRefusal(auth: RequestAuth, threadId: string): string | null;
   cloudOwnerSession(auth: RequestAuth): boolean;
   cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null;
@@ -144,7 +146,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
   const {
     store, registry, handoffs, approvalBus, phoneSecretSubmissions, directTurnDispatchClaims, groupSpeakers,
     desktopManaged: DESKTOP_MANAGED, cloudHome: CLOUD_HOME, DirectSendRefused,
-    acceptDirectSend, directSendRefusal, startTurn, usageTriggerFor, messageSender, cloudGuestSendRefusal, cloudThreadRefusal,
+    acceptDirectSend, directSendRefusal, startTurn, usageTriggerFor, messageSender, cloudGuestSendRefusal, cloudThreadRefusal, teamThreadWriteRefusal,
     cloudOwnerSession, cardAnswerRefusal, commandRememberRefusal, requestBehavior, requestedTaskBot, botForThread, threadBusy,
     botAtThreadCapacity, parksBehindCoordination, activeGroupTurnForBot, runningTurnInstance, engineSteersImages, resolveReplyTarget,
     turnSelection, policyModelRefusal, clearUnattended, drainQueuedSends, answeringCardAs, resolveAndSendTrust, resolveAndSendTeamSetup,
@@ -187,7 +189,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       // receipt after a task switch, while a genuinely new send still has to
       // target the task that is active now.
       const threadId = body.threadId ?? bot.threadId;
-      const notYours = cloudGuestSendRefusal(auth, threadId);
+      const notYours = cloudGuestSendRefusal(auth, threadId) ?? teamThreadWriteRefusal(auth, threadId);
       if (notYours) return json(res, 403, { error: notYours });
       // Who this message is from, for the ledger. It is captured here and
       // travels with the message: into the turn it starts, or into the queue
@@ -394,7 +396,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const body = await readBody(req);
       requirePinnedClientThread(m[1], body?.threadId);
       const bot = requestedTaskBot(m[1], body.threadId);
-      const notYours = cloudThreadRefusal(auth, bot.threadId);
+      const notYours = cloudThreadRefusal(auth, bot.threadId) ?? teamThreadWriteRefusal(auth, bot.threadId);
       if (notYours) return json(res, 403, { error: notYours });
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });

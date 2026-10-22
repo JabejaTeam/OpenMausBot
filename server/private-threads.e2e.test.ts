@@ -136,6 +136,19 @@ posixOnly("private conversations on a shared workspace", () => {
     expect(JSON.stringify((await api("GET", "/api/search?q=ADA-PRIVATE-7", undefined, BOSS)).body)).toContain(ids.adaThread);
   });
 
+  it("lets an admin read along in someone's conversation, never write in it", async () => {
+    const sent = await api("POST", `/api/bots/${ids.bot}/messages`, { text: "BOSS-WRITES-IN", threadId: ids.adaThread }, BOSS);
+    expect(sent.status, JSON.stringify(sent.body)).toBe(403);
+    const { status, body } = await api("GET", `/api/threads/${ids.adaThread}/messages`, undefined, BOSS);
+    expect(status).toBe(200);
+    expect(JSON.stringify(body)).not.toContain("BOSS-WRITES-IN");
+    const adaLine = body.messages.find((m: any) => m.role === "user");
+    const edit = await api("POST", `/api/bots/${ids.bot}/messages/${adaLine.id}/edit`, { text: "rewritten", threadId: ids.adaThread }, BOSS);
+    expect(edit.status).toBe(403);
+    // in a conversation of their own the admin writes as ever
+    expect((await api("POST", `/api/bots/${ids.bot}/messages`, { text: "BOSS-OWN", threadId: ids.bossThread }, BOSS)).status).toBe(202);
+  });
+
   it("has no team-wide switch: private is the only setting", async () => {
     const refused = await api("PUT", `/api/threads/${ids.adaThread}/shares`, { private: false }, ADA);
     expect(refused.status).toBe(400);

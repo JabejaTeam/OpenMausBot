@@ -703,6 +703,19 @@ export function Composer({
         onError: () => restoreDraft(sentDraft),
       });
       track("message_sent", { room: true, mode: effectiveChannelMode, queued: busy });
+    } else if (bot && composerTask?.access === "team") {
+      // Fork: someone else's conversation, which an admin only reads along
+      // in (server teamThreadWriteRefusal): the line opens one of their own.
+      dispatch({
+        type: "newTask",
+        botId: bot.id,
+        thenSend: { text: body, sendId: sentDraft.sendId, onError: () => restoreDraft(sentDraft) },
+        onError: (message) => {
+          restoreDraft(sentDraft);
+          dispatch({ type: "error", message });
+        },
+      });
+      track("message_sent", { driver: bot.modelSelection?.instanceId, queued: false });
     } else if (bot) {
       dispatch({
         type: "send",
