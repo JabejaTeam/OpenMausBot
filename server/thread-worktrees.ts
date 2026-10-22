@@ -148,6 +148,7 @@ for attempt in 1 2 3; do
   # spec/<card> branch, the run tests this commit together with it and that combined commit lands,
   # so the card can go to Klaar at once. Testlab unreachable: land; main is tested after landing.
   if [ "$proef" = 1 ]; then
+    specs=""
     proefcmd=\${OMB_PROEF_CMD:-"ssh -o BatchMode=yes -o ConnectTimeout=10 beast ~/testlab/proef.sh"}
     out=$($proefcmd --repo "$(basename "$repo")" "$(git rev-parse HEAD)" 2>&1); rc=$?
     printf '%s\n' "$out" | grep -v '^LANDMET '
@@ -156,16 +157,21 @@ for attempt in 1 2 3; do
     elif [ $rc -ne 0 ]; then
       echo "Not landed: the proof run is not green (see above). Fix it, commit, land again."; exit 1
     else
-      landmet=$(printf '%s\n' "$out" | awk '$1=="LANDMET"{s=$2} END{print s}')
-      specs=$(printf '%s\n' "$out" | awk '$1=="LANDMET"{$1="";$2="";s=$0} END{print s}')
-      if [ -n "$landmet" ] && git merge -q --ff-only "$landmet" 2>/dev/null; then
-        echo "Landing together with the test agent's spec:$specs"
+      # Only the verdict's own last line counts (test output above it could contain anything), and
+      # only a commit that is a merge on top of exactly the tested HEAD.
+      last=$(printf '%s\n' "$out" | tail -n 1)
+      if printf '%s\n' "$last" | grep -Eq '^LANDMET [0-9a-f]{40}( spec/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})+$'; then
+        landmet=$(printf '%s\n' "$last" | cut -d' ' -f2)
+        if [ "$(git rev-parse -q --verify "$landmet^1" 2>/dev/null)" = "$(git rev-parse HEAD)" ] && git merge -q --ff-only "$landmet" 2>/dev/null; then
+          specs=$(printf '%s\n' "$last" | cut -d' ' -f3-)
+          echo "Landing together with the test agent's spec: $specs"
+        fi
       fi
     fi
   fi
   if git -C "$repo" merge -q --ff-only "$branch" 2>/dev/null; then
     echo "Merged $(git rev-parse --short HEAD) into $main."
-    for b in \${specs:-}; do git -C "$repo" branch -D "$b" >/dev/null 2>&1 || true; done
+    set -f; for b in \${specs:-}; do case "$b" in spec/*) git -C "$repo" branch -D -- "$b" >/dev/null 2>&1 || true ;; esac; done; set +f
     # Publish right away, so the remote is never behind what landed. A refused push does not undo the landing.
     if up=$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>/dev/null); then
       if out=$(git -C "$repo" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 push -q "\${up%%/*}" "$main" 2>&1); then

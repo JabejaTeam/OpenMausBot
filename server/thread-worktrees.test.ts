@@ -212,6 +212,7 @@ sha=$3
 if [ -f "${repo}.rood" ]; then echo "Proefrun: NIEUWE fouten"; exit 1; fi
 tree=$(git -C "${repo}" merge-tree --write-tree "$sha" spec/${id} | head -1)
 c=$(git -C "${repo}" commit-tree "$tree" -p "$sha" -p spec/${id} -m proef)
+echo "LANDMET 0000000000000000000000000000000000000000 spec/${id}"
 echo "Proefrun groen: mag landen."
 echo "LANDMET $c spec/${id}"
 `, { mode: 0o755 });
