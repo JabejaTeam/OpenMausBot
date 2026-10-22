@@ -107,6 +107,28 @@ if [ -f e2e/project.ts ] || [ -f e2e/testlab.json ]; then
     exit 1
   fi
 fi
+# Demo first: in a repo with e2e/demo.ts (screens built from an approved demo) every commit that
+# touches screens says where it stands: "Volgens-demo: <demo commit>" or "UI-afwijking: <screen> —
+# <what> — <why>". Screens = .tsx/.css under app/ or components/, not app/api/ (as the testlab's
+# isUiPad in demo.mjs). The testlab checks the same line after landing; here it never gets there.
+if [ -f e2e/demo.ts ] && grep -Eq "naam: *['\\"]" e2e/demo.ts; then
+  missing=""
+  for c in $(git rev-list --no-merges "$main..HEAD"); do
+    if git diff-tree --no-commit-id --name-only -r "$c" | grep -Ev '^app/api/' | grep -Eq '^(app|components)/.*\\.(tsx|css)$'; then
+      msg=$(git log -1 --format=%B "$c")
+      if ! printf '%s\n' "$msg" | grep -Eqi '^(Volgens-demo:[[:space:]]*[0-9a-f]{7,40}|UI-afwijking:[[:space:]]*[^[:space:]])'; then
+        missing="$missing  $(git log -1 --format='%h %s' "$c")"$'\n'
+      fi
+    fi
+  done
+  if [ -n "$missing" ]; then
+    echo "Not landed: these commits change screens without saying how they relate to the approved demo:"
+    printf '%s' "$missing"
+    echo "Add 'Volgens-demo: <demo commit>' (built as the demo shows) or 'UI-afwijking: <screen> — <what> — <why>'"
+    echo "(screen = the name in e2e/demo.ts). Last commit: git commit --amend. Or an empty commit with the line: git commit --allow-empty."
+    exit 1
+  fi
+fi
 for attempt in 1 2 3; do
   before=$(git rev-parse HEAD)
   if ! git rebase -q "$main"; then
