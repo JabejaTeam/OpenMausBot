@@ -91,6 +91,14 @@ export function kindAsksRequester(kind?: BotKind): boolean {
   return kind === "code";
 }
 
+/** Whether a teammate's question goes back to its requester instead of the
+ * person: always from a code agent, and from anyone asked by a Manager or a
+ * Chief (Jarvis), which answers it or asks the person itself. */
+export function asksItsRequester(kind: BotKind | undefined, requester: { kind?: BotKind; chiefOfStaff?: boolean } | null | undefined): boolean {
+  if (!requester) return false;
+  return kindAsksRequester(kind) || requester.kind === "pm" || requester.chiefOfStaff === true;
+}
+
 /** The workspace rules for one bot, as system-prompt blocks. They come from
  * the admin, so they win over conflicting working rules the bot got anywhere
  * else: its own standing instructions, whoever created it, its memory, or a

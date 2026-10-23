@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ComposedTurn, CoordinatorHost, HandoffView, HostTurnResult, RoomAddress } from "./coordinator.ts";
-import { kindAsksRequester } from "./kind-instructions.ts";
+import { asksItsRequester, kindAsksRequester } from "./kind-instructions.ts";
 import { RuntimeCoordinator } from "./runtime-coordinator.ts";
 import { composeEnvelope } from "./runtime/envelope.ts";
 import type { Assignment, EnvelopeNames } from "./runtime/types.ts";
@@ -53,6 +53,14 @@ describe("fork: code agents ask their requester, never the person", () => {
   it("only code agents ask their requester", () => {
     expect(kindAsksRequester("code")).toBe(true);
     for (const kind of ["pm", "test", "work", undefined] as const) expect(kindAsksRequester(kind as never)).toBe(false);
+  });
+
+  it("a Manager or a Chief (Jarvis) is asked by every teammate; others only by a code agent", () => {
+    expect(asksItsRequester("pm", { kind: "pm" })).toBe(true);
+    expect(asksItsRequester("pm", { chiefOfStaff: true })).toBe(true);
+    expect(asksItsRequester("code", {})).toBe(true);
+    expect(asksItsRequester(undefined, {})).toBe(false);
+    expect(asksItsRequester("pm", undefined)).toBe(false);
   });
 
   it("the envelope sends the question to the requester and drops the NEEDS INPUT route", () => {

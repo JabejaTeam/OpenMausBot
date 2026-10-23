@@ -298,7 +298,7 @@ import type { McpServerSpec, ProviderInstance } from "./contracts.ts";
 import { readyToRun, selectDefaultModelSelection, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts";
 import { workTopicOf } from "./work-topic.ts";
 import { ensureThreadWorktree, removeThreadWorktree, threadWorktreePath, threadWorktreeSystemPrompt } from "./thread-worktrees.ts";
-import { kindAsksRequester, kindInstructionsSystemPrompt, kindStartsFreshPerAssignment, kindTakesSharedContext, teamContextPrompt } from "./kind-instructions.ts";
+import { asksItsRequester, kindInstructionsSystemPrompt, kindStartsFreshPerAssignment, kindTakesSharedContext, teamContextPrompt } from "./kind-instructions.ts";
 import { notePerson, personTurnPreamble, readPersonProfile, updatePersonProfile } from "./person-profiles.ts";
 import { isBotKind } from "../shared/wire.ts";
 import { personKeyFor, personKeyForEmail } from "./person-key.ts";
@@ -6105,8 +6105,8 @@ const coordinator: Coordinator = createCoordinator({
         person,
         ...(thread !== undefined ? { thread } : {}),
         // Fork: a code agent's question goes to whoever asked, never the
-        // person; so does any teammate's question to its Manager.
-        ...(parent && (kindAsksRequester(store.bot(node.botId)?.kind) || store.bot(parent.botId)?.kind === "pm") ? { asksRequester: true } : {}),
+        // person; so does any teammate's question to its Manager or Chief.
+        ...(asksItsRequester(store.bot(node.botId)?.kind, parent && store.bot(parent.botId)) ? { asksRequester: true } : {}),
       };
     },
     // A teammate ended its turn on a question for the person: one chip where
