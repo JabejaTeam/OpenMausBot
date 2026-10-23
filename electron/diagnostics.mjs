@@ -12,8 +12,7 @@ import fs from "node:fs";
 // Duplicated because the desktop shell cannot import TypeScript; a test
 // asserts the two lists never drift apart.
 export const CREDENTIAL_ENV_NAMES = [
-  // Fork: server/config.ts keeps these two first (controle card, voordeur sign-in).
-  "OMB_CONTROLE_SECRET",
+  // Fork: server/config.ts keeps this one first (voordeur sign-in).
   "OMB_VOORDEUR_SECRET",
   "XAI_API_KEY",
   "MISTRAL_API_KEY",

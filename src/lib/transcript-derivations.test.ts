@@ -73,14 +73,6 @@ describe("transcriptLookups", () => {
     expect(transcriptLookups([digest], [digest]).retryableId).toBeUndefined();
   });
 
-  it("marks only the newest controle card as live (fork)", () => {
-    const oud = msg("c1", { kind: "controle" } as Partial<Message>);
-    const nieuw = msg("c2", { kind: "controle" } as Partial<Message>);
-    const rij = [oud, msg("t1", {}), nieuw, msg("t2", {})];
-    expect(transcriptLookups(rij, rij).newestControleId).toBe("c2");
-    expect(transcriptLookups([], []).newestControleId).toBeUndefined();
-  });
-
   it("keeps Retry on the last conversational row when a live call's record follows it", () => {
     // hanging up appends the call's record after whatever the chat ended on:
     // a failed turn must still be the row Retry belongs to

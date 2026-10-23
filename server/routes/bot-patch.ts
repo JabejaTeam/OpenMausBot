@@ -371,7 +371,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         return json(res, 400, { error: "chiefOfStaff must be true or false" });
       }
       if (body.kind !== undefined) {
-        if (body.kind !== null && !isBotKind(body.kind)) return json(res, 400, { error: 'kind must be "code", "pm", "test" or null' });
+        if (body.kind !== null && !isBotKind(body.kind)) return json(res, 400, { error: 'kind must be "code", "pm" or null' });
         patch.kind = body.kind ?? undefined;
       }
       if (body.threadWorktrees !== undefined) {

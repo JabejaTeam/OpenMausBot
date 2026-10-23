@@ -60,7 +60,7 @@ export function writeKindInstructions(scope: KindInstructionScope, text: string,
   return scopes[scope] ?? null;
 }
 
-const KIND_LABEL: Record<BotKind, string> = { code: "code agents", pm: "client project managers", test: "test agents (they write and maintain the testlab tests for what the code agents build)" };
+const KIND_LABEL: Record<BotKind, string> = { code: "code agents", pm: "client project managers" };
 
 /** Code agents work from the assignment their project manager gives them.
  * The team's shared knowledge (section context: kennisbank, Werkwijze-synthese),
@@ -82,13 +82,13 @@ export function teamContextPrompt(bot: { section?: string | null; kind?: BotKind
  * still in view; the engine's own auto-compaction keeps that thread in bounds.
  * A follow-up while one runs still steers that one (steerCorrection). */
 export function kindStartsFreshPerAssignment(kind?: BotKind): boolean {
-  return kind === "code" || kind === "test";
+  return kind === "code";
 }
 
-/** Code and test agents never ask the person: a question ends their reply to
+/** Code agents never ask the person: a question ends their reply to
  * the requester (the Manager), which answers it or asks the person itself. */
 export function kindAsksRequester(kind?: BotKind): boolean {
-  return kind === "code" || kind === "test";
+  return kind === "code";
 }
 
 /** The workspace rules for one bot, as system-prompt blocks. They come from

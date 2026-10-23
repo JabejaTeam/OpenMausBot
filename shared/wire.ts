@@ -265,7 +265,7 @@ export const CONNECTOR_TOOL_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
  * projected tasks are WireTask[] and avatarUrl is always present
  * (null when the bot has none). */
 /** Kinds of bot that share workspace rules (server/kind-instructions.ts). */
-export const BOT_KINDS = ["code", "pm", "test"] as const;
+export const BOT_KINDS = ["code", "pm"] as const;
 export type BotKind = (typeof BOT_KINDS)[number];
 export function isBotKind(value: unknown): value is BotKind {
   return typeof value === "string" && (BOT_KINDS as readonly string[]).includes(value);
@@ -446,7 +446,7 @@ export interface WireMessage {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "email" | "signin" | "controle" | "routine.run" | "goal.run" | "digest" | "compaction" | "call";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "email" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call";
   text?: string;
   digest?: TurnDigest;
   compaction?: {
@@ -472,8 +472,6 @@ export interface WireMessage {
   secret?: SecretRequestCardData;
   /** signin rows: the bot asked the person to sign in to a site themselves. */
   signIn?: SignInRequestCardData;
-  /** Fork: controle rows, screenshots of the testlab to review (server/controle-card.ts). */
-  controle?: import("./controle-card.ts").ControleCardData;
   /** One idempotently updated status card for a routine run. */
   routineRun?: RoutineRunCardData;
   /** Terminal receipt for a bounded multi-bot channel goal. */

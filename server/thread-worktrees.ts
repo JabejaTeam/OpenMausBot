@@ -88,49 +88,6 @@ set -uo pipefail
 repo=$1; branch=$2
 main=$(git -C "$repo" rev-parse --abbrev-ref HEAD) || exit 1
 if [ -n "$(git status --porcelain)" ]; then echo "Uncommitted changes: commit first (the pre-commit hook runs the checks)."; exit 1; fi
-# A repo with a testlab ties every screen change to a roadmap card through a "Kaart: <uuid>" line.
-proef=0
-if [ -f e2e/project.ts ] || [ -f e2e/testlab.json ]; then
-  proef=1
-  missing=""
-  for c in $(git rev-list --no-merges "$main..HEAD"); do
-    msg=$(git log -1 --format=%B "$c")
-    if ! printf '%s\\n' "$msg" | grep -Eqi '^Kaart:[[:space:]]*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[[:space:]]*$' &&
-       ! printf '%s\\n' "$msg" | grep -Eqi '^Geen-kaart:[[:space:]]*[^[:space:]]+([[:space:]]+[^[:space:]]+){2,}'; then
-      missing="$missing  $(git log -1 --format='%h %s' "$c")"$'\\n'
-    fi
-  done
-  if [ -n "$missing" ]; then
-    echo "Not landed: this repo has a testlab, and these commits lack a card line:"
-    printf '%s' "$missing"
-    echo "Every commit needs a line 'Kaart: <card uuid>' in its message, or 'Geen-kaart: <reason, a few words>'"
-    echo "for work that changes nothing on a screen (test setup, docs). Ask the Manager for a card if you have none."
-    echo "Last commit: git commit --amend. Several: git reset --soft $main and commit again with the line."
-    exit 1
-  fi
-fi
-# Demo first: in a repo with e2e/demo.ts (screens built from an approved demo) every commit that
-# touches screens says where it stands: "Volgens-demo: <demo commit>" or "UI-afwijking: <screen> —
-# <what> — <why>". Screens = .tsx/.css under app/ or components/, not app/api/ (as the testlab's
-# isUiPad in demo.mjs). The testlab checks the same line after landing; here it never gets there.
-if [ -f e2e/demo.ts ] && grep -Eq "naam: *['\\"]" e2e/demo.ts; then
-  missing=""
-  for c in $(git rev-list --no-merges "$main..HEAD"); do
-    if git diff-tree --no-commit-id --name-only -r "$c" | grep -Ev '^app/api/' | grep -Eq '^(app|components)/.*\\.(tsx|css)$'; then
-      msg=$(git log -1 --format=%B "$c")
-      if ! printf '%s\n' "$msg" | grep -Eqi '^(Volgens-demo:[[:space:]]*[0-9a-f]{7,40}|UI-afwijking:[[:space:]]*[^[:space:]])'; then
-        missing="$missing  $(git log -1 --format='%h %s' "$c")"$'\n'
-      fi
-    fi
-  done
-  if [ -n "$missing" ]; then
-    echo "Not landed: these commits change screens without saying how they relate to the approved demo:"
-    printf '%s' "$missing"
-    echo "Add 'Volgens-demo: <demo commit>' (built as the demo shows) or 'UI-afwijking: <screen> — <what> — <why>'"
-    echo "(screen = the name in e2e/demo.ts). Last commit: git commit --amend. Or an empty commit with the line: git commit --allow-empty."
-    exit 1
-  fi
-fi
 for attempt in 1 2 3; do
   before=$(git rev-parse HEAD)
   if ! git rebase -q "$main"; then
@@ -143,35 +100,8 @@ for attempt in 1 2 3; do
     if [ -x "$tc" ]; then "$tc" .; else npm run -s typecheck; fi
     if [ $? -ne 0 ]; then echo "The typecheck fails on top of the work merged meanwhile: fix it, commit, land again."; exit 1; fi
   fi
-  # A repo with a testlab lands only what its proof run approves (the testlab's verdict: no new
-  # failures, demo lines in order). When the test agent already wrote the card's spec on a
-  # spec/<card> branch, the run tests this commit together with it and that combined commit lands,
-  # so the card can go to Klaar at once. Testlab unreachable: land; main is tested after landing.
-  if [ "$proef" = 1 ]; then
-    specs=""
-    proefcmd=\${OMB_PROEF_CMD:-"ssh -o BatchMode=yes -o ConnectTimeout=10 beast ~/testlab/proef.sh"}
-    out=$($proefcmd --repo "$(basename "$repo")" "$(git rev-parse HEAD)" 2>&1); rc=$?
-    printf '%s\n' "$out" | grep -v '^LANDMET '
-    if [ $rc -eq 255 ]; then
-      echo "Testlab not reachable: landing without a proof run (main is tested after landing)."
-    elif [ $rc -ne 0 ]; then
-      echo "Not landed: the proof run is not green (see above). Fix it, commit, land again."; exit 1
-    else
-      # Only the verdict's own last line counts (test output above it could contain anything), and
-      # only a commit that is a merge on top of exactly the tested HEAD.
-      last=$(printf '%s\n' "$out" | tail -n 1)
-      if printf '%s\n' "$last" | grep -Eq '^LANDMET [0-9a-f]{40}( spec/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})+$'; then
-        landmet=$(printf '%s\n' "$last" | cut -d' ' -f2)
-        if [ "$(git rev-parse -q --verify "$landmet^1" 2>/dev/null)" = "$(git rev-parse HEAD)" ] && git merge -q --ff-only "$landmet" 2>/dev/null; then
-          specs=$(printf '%s\n' "$last" | cut -d' ' -f3-)
-          echo "Landing together with the test agent's spec: $specs"
-        fi
-      fi
-    fi
-  fi
   if git -C "$repo" merge -q --ff-only "$branch" 2>/dev/null; then
     echo "Merged $(git rev-parse --short HEAD) into $main."
-    set -f; for b in \${specs:-}; do case "$b" in spec/*) git -C "$repo" branch -D -- "$b" >/dev/null 2>&1 || true ;; esac; done; set +f
     # Publish right away, so the remote is never behind what landed. A refused push does not undo the landing.
     if up=$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>/dev/null); then
       if out=$(git -C "$repo" -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 push -q "\${up%%/*}" "$main" 2>&1); then

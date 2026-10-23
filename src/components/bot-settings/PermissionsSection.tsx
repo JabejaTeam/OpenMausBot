@@ -13,7 +13,7 @@
 // newly selected bot. Full access has no warning: it applies at once, to the
 // bot and every thread (owner decision, Oct 12).
 import { useEffect, useState } from "react";
-import { Briefcase, Code2, Crown, FlaskConical } from "lucide-react";
+import { Briefcase, Code2, Crown } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -33,7 +33,6 @@ import { useBotEditor } from "./BotEditorContext";
 const KIND_SWITCHES = [
   { kind: "code", Icon: Code2, title: "botSettings.codeAgent.title", body: "botSettings.codeAgent.body" },
   { kind: "pm", Icon: Briefcase, title: "botSettings.pmAgent.title", body: "botSettings.pmAgent.body" },
-  { kind: "test", Icon: FlaskConical, title: "botSettings.testAgent.title", body: "botSettings.testAgent.body" },
 ] as const;
 
 export function PermissionsSection({

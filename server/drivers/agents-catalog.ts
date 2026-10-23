@@ -43,8 +43,6 @@ export interface CatalogProfile {
   chief: boolean;
   /** Written into start_thread's schema: the only bot_id it accepts. */
   botId: string;
-  /** Fork: this bot is linked to a client in OMB_CONTROLE_BOTS (server/controle-card.ts). */
-  controleCard?: boolean;
 }
 
 /** The profile a spawned proxy was given. Everything is off unless the
@@ -60,7 +58,6 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     memoryEnabled: env.OMB_MEMORY_ENABLED !== "0",
     chief: env.OMB_CHIEF_OF_STAFF === "1",
     botId: env.OMB_BOT_ID ?? "",
-    controleCard: env.OMB_CONTROLE_CARD === "1",
   };
 }
 
@@ -559,12 +556,6 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
-    name: "show_controle_card",
-    description:
-      "Show the controle card in this conversation: the testlab's screenshots of your client's app that a person still has to review, one change at a time, with before and after, what changed and why. The person approves or rejects (with feedback) on the card itself; you do not pass those on. After calling it, end your turn with at most one short sentence.",
-    inputSchema: { type: "object", additionalProperties: false, properties: {} },
-  },
-  {
     name: "request_sign_in",
     description:
       "Ask the person to sign in to a website themselves, in the browser or on the computer you are using now. Use it when a page needs a login you do not have, or a one-time code, CAPTCHA or other step only they can do. They get a card and a notification, sign in where you work, and press Done. Never ask for a password or code in chat. After calling it, end your turn; OpenMausBot resumes you when they finish or decline, and then check you are signed in.",
@@ -970,8 +961,6 @@ const CHIEF_ONLY_TOOL_NAMES = new Set([
 ]);
 const CHIEF_TARGET_TOOL_NAMES = new Set(["propose_profile", "propose_model"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
-// Fork: only for a bot linked to a client (server/controle-card.ts).
-const CONTROLE_TOOL_NAMES = new Set(["show_controle_card"]);
 
 // A Cloud home never offers this computer or a Local VM, so its bots are not
 // shown them as choices, nor a VM shell they could never have.
@@ -995,7 +984,6 @@ function catalogTools(profile: CatalogProfile) {
   const BOT_SCOPED_TOOLS = TOOL_DEFINITIONS.filter((tool) =>
     (profile.botId === WATCHER_OPTIONS_CARD_BOT_ID || !WATCHER_TOOL_NAMES.has(tool.name)) &&
     (profile.relayQuestions === true || !RELAY_TOOL_NAMES.has(tool.name)) &&
-    (profile.controleCard === true || !CONTROLE_TOOL_NAMES.has(tool.name)) &&
     (profile.memoryEnabled !== false || (tool.name !== "memory_update" && tool.name !== "memory_log")));
   const AUTHORING_TOOLS = profile.skillAuthoring
     ? BOT_SCOPED_TOOLS

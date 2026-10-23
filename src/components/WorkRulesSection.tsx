@@ -7,13 +7,12 @@ import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { Card } from "./SettingsPrimitives";
 
-type Scope = "everyone" | "others" | "code" | "pm" | "test";
+type Scope = "everyone" | "others" | "code" | "pm";
 const SCOPES: Array<{ scope: Scope; label: `settings.workRules.${Scope}`; hint: `settings.workRules.${Scope}Hint` }> = [
   { scope: "everyone", label: "settings.workRules.everyone", hint: "settings.workRules.everyoneHint" },
   { scope: "others", label: "settings.workRules.others", hint: "settings.workRules.othersHint" },
   { scope: "code", label: "settings.workRules.code", hint: "settings.workRules.codeHint" },
   { scope: "pm", label: "settings.workRules.pm", hint: "settings.workRules.pmHint" },
-  { scope: "test", label: "settings.workRules.test", hint: "settings.workRules.testHint" },
 ];
 
 function RulesEditor({ scope, label, hint, initial }: { scope: Scope; label: string; hint: string; initial: string }) {

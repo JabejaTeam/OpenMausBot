@@ -102,7 +102,6 @@ import { ChatFindBar } from "./ChatFindBar";
 import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
 import { EmailCard } from "./EmailCard";
-import { ControleCard } from "./ControleCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { SignInRequestCard } from "./SignInRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
@@ -1124,8 +1123,6 @@ const MessagesList = memo(function MessagesList({
               return m.connector ? <ConnectorCard botId={botId} threadId={threadId} message={m} /> : null;
             case "email":
               return m.email ? <EmailCard botId={botId} threadId={threadId} message={m} /> : null;
-            case "controle":
-              return m.controle ? <ControleCard botId={botId} threadId={threadId} message={m} replaced={m.id !== lookups.newestControleId} /> : null;
             case "options": {
               // a live permission ask gets the approval box; a structured
               // ask gets the question box; anything else keeps the list

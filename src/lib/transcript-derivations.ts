@@ -17,9 +17,6 @@ export interface TranscriptLookups {
    * bookkeeping after a failure (receipts, a finished call's record); Retry
    * still belongs to this row. */
   retryableId: string | undefined;
-  /** Fork: the newest controle card of the branch. Only that one is live;
-   * older ones fold to a single line (also after a rollout or restart). */
-  newestControleId: string | undefined;
 }
 
 /** `all` is every message the client holds for the thread (all branches);
@@ -47,7 +44,6 @@ export function transcriptLookups(all: readonly Message[], branch: readonly Mess
     },
     replyTarget: (message) => (message.replyToId ? byId.get(message.replyToId) : undefined),
     retryableId,
-    newestControleId: [...branch].reverse().find((message) => message.kind === "controle")?.id,
   };
 }
 

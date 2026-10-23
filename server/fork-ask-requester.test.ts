@@ -52,8 +52,7 @@ async function askOnce(asker: string) {
 describe("fork: code agents ask their requester, never the person", () => {
   it("only code agents ask their requester", () => {
     expect(kindAsksRequester("code")).toBe(true);
-    expect(kindAsksRequester("test")).toBe(true);
-    for (const kind of ["pm", "work", undefined] as const) expect(kindAsksRequester(kind as never)).toBe(false);
+    for (const kind of ["pm", "test", "work", undefined] as const) expect(kindAsksRequester(kind as never)).toBe(false);
   });
 
   it("the envelope sends the question to the requester and drops the NEEDS INPUT route", () => {

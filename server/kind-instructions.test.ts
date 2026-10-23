@@ -33,14 +33,13 @@ describe("workspace rules by kind of bot", () => {
     expect(kindInstructionsSystemPrompt("code")).not.toContain("Hand code questions to the code agent.");
   });
 
-  it("gives test agents their own rules and not the pm rules", () => {
+  it("treats a kind that no longer exists (a stored \"test\") as no kind", () => {
+    writeKindInstructions("everyone", "Be kind.");
     writeKindInstructions("pm", "Hand code questions to the code agent.");
-    writeKindInstructions("test", "Test every card on staging.");
-    const tester = kindInstructionsSystemPrompt("test");
-    expect(tester).toContain("test agents");
-    expect(tester).toContain("Test every card on staging.");
-    expect(tester).not.toContain("Hand code questions to the code agent.");
-    expect(kindInstructionsSystemPrompt("pm")).not.toContain("Test every card on staging.");
+    const old = kindInstructionsSystemPrompt("test" as never);
+    expect(old).toContain("Be kind.");
+    expect(old).not.toContain("Hand code questions to the code agent.");
+    expect(old).not.toContain("undefined");
   });
 
   it("gives the others rules and the team context to every bot except code agents", () => {
