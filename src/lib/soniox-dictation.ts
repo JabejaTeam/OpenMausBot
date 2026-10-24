@@ -11,7 +11,8 @@ import { useRecording } from "@soniox/react";
 type Api = <T = unknown>(path: string, init?: RequestInit & { timeoutMs?: number }) => Promise<T>;
 
 export const SONIOX_MODEL = "stt-rt-v5";
-export const SONIOX_LANGUAGE_HINTS = ["nl", "en"];
+// Dutch only, strict: with "en" as a hint Flemish speech came out as English.
+export const SONIOX_LANGUAGE_HINTS = ["nl"];
 /** A prefetched key is used only while it surely still opens (the server gives 60 s). */
 const TOKEN_MAX_AGE_MS = 45_000;
 /** A hanging connection stops instead of looking like it listens. */
@@ -142,6 +143,7 @@ export function useSonioxDictation(
     config: async () => ({ api_key: await takeTokenRef.current() }),
     model: SONIOX_MODEL,
     language_hints: SONIOX_LANGUAGE_HINTS,
+    language_hints_strict: true,
     enable_language_identification: true,
     enable_endpoint_detection: true,
     // a dropped second of wifi must not end the dictation; buffered audio is resent
