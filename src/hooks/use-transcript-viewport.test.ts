@@ -88,7 +88,8 @@ vi.mock("@/lib/focus-message", () => ({ useFocusMessage: () => {} }));
 
 import { useTranscriptViewport } from "./use-transcript-viewport";
 
-type Row = { id: string; role?: "user" | "bot" };
+/** `hidden`: a row that draws nothing, like a tool step while Tool calls is off. */
+type Row = { id: string; role?: "user" | "bot"; hidden?: boolean };
 const rows = (count: number, from = 0): Row[] => Array.from({ length: count }, (_, index) => ({ id: `m${from + index}` }));
 
 const ROW = 50;
@@ -129,7 +130,7 @@ function mount(initial: Partial<Props> = {}) {
   const commit = () => {
     result.scrollRef.current = scroller as unknown as HTMLDivElement;
     result.transcriptRef.current = {} as HTMLDivElement;
-    scroller.rows = result.windowedMessages.length;
+    scroller.rows = result.windowedMessages.filter((row) => !row.hidden).length;
     scroller.scrollTop = Math.min(scroller.scrollTop, scroller.bottom);
   };
   const flushFrames = () => {
@@ -517,6 +518,37 @@ describe("transcript viewport", () => {
     expect(observers).toBe(0);
     view.rerender({ transcriptShown: true });
     expect(observers).toBe(1);
+  });
+
+  it("fills the screen with earlier rows when a chat opens on a turn of hidden steps", () => {
+    // the bot is still working: its question, many tool steps that draw
+    // nothing, one narration line — only the question and that line would
+    // show, under an empty screen
+    const steps = Array.from({ length: 150 }, (_, i): Row => ({ id: `step${i}`, role: "bot", hidden: true }));
+    const thread: Row[] = [...rows(100), { id: "ask", role: "user" }, ...steps, { id: "said", role: "bot" }];
+    const view = mount({ messages: thread });
+    expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+    expect(view.current.windowedMessages.map((row) => row.id)).toContain("m99");
+    expect(view.current.following).toBe(true);
+    expect(scroller.scrollTop).toBe(scroller.bottom);
+
+    // the turn goes on: the filled rows stay and the reader stays at the end
+    view.rerender({ messages: [...thread, { id: "step-next", role: "bot", hidden: true }] });
+    expect(view.current.windowedMessages.map((row) => row.id)).toContain("m99");
+    expect(scroller.scrollTop).toBe(scroller.bottom);
+  });
+
+  it("pages back from the server while following until the screen is full", () => {
+    const steps = Array.from({ length: 200 }, (_, i): Row => ({ id: `step${i}`, role: "bot", hidden: true }));
+    const view = mount({ messages: [{ id: "ask", role: "user" }, ...steps], hasMore: true });
+    expect(dispatched).toEqual([{ type: "loadOlderMessages", threadId: "thread" }]);
+    expect(view.current.following).toBe(true);
+
+    store.state.loadingOlder = {};
+    view.rerender({ messages: [...rows(50), { id: "ask", role: "user" }, ...steps], hasMore: false });
+    expect(view.current.windowedMessages.map((row) => row.id)).toContain("m49");
+    expect(view.current.following).toBe(true);
+    expect(scroller.scrollTop).toBe(scroller.bottom);
   });
 
   it("automatically expands earlier windowed messages when user scrolls near the top", () => {

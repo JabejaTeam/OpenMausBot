@@ -27,6 +27,10 @@ import {
 import { useStore } from "@/state/store";
 
 export const AUTO_EXPAND_TOP_THRESHOLD = 250;
+/** How far back from the end opening a chat may mount rows to fill the
+ * screen (fork). Tool steps draw nothing while Tool calls is off, so a long
+ * turn can hold hundreds of rows and still leave the pane empty. */
+export const FILL_REACH = 4 * TRANSCRIPT_WINDOW_SIZE;
 
 export function useTranscriptViewport<T extends { id: string; role?: string }>({
   ownerId,
@@ -78,25 +82,32 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   // stay put.
   // Callers derive everything else (last reply, working dots) from the FULL
   // list.
+  // Fork: `floor` is the oldest row the screen fill below mounted. Following
+  // never slides the boundary past it, or the fill would be undone by the
+  // next step of the turn; it lapses once it is more than FILL_REACH rows
+  // from the end.
   const transcriptKey = `${ownerId}:${threadId}`;
   const tailStart = tailWindowStart(messages.length);
   const [transcriptWindow, setTranscriptWindow] = useState<{
     key: string;
     start: number;
     end: number | null;
+    floor?: string;
   }>(() => ({
     key: transcriptKey,
     start: tailStart,
     end: null,
   }));
   const switched = transcriptWindow.key !== transcriptKey;
+  const floorIndex = transcriptWindow.floor ? messages.findIndex((message) => message.id === transcriptWindow.floor) : -1;
+  const followStart = followWindowStart(messages, transcriptWindow.start);
   const nextStart = switched
     ? tailStart
     : follow && transcriptWindow.end === null
-      ? followWindowStart(messages, transcriptWindow.start)
+      ? floorIndex >= 0 && messages.length - floorIndex <= FILL_REACH ? Math.min(followStart, floorIndex) : followStart
       : transcriptWindow.start;
   if (switched || nextStart !== transcriptWindow.start) {
-    setTranscriptWindow({ key: transcriptKey, start: nextStart, end: null });
+    setTranscriptWindow((w) => ({ key: transcriptKey, start: nextStart, end: null, floor: switched ? undefined : w.floor }));
   }
   const {
     visible: windowedMessages,
@@ -192,6 +203,39 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     expandingRef.current = false;
   }, [transcriptWindow.start, oldestId, transcriptKey]);
 
+  // Fork: opening a chat — or following one — must fill the screen. While the
+  // reader follows the end and the mounted rows do not reach the top of the
+  // pane, mount earlier rows (within FILL_REACH), then page back from the
+  // server. Each step pins the end, so the newest row stays where it was.
+  // One server request per oldest row: a failed page must not retry in a loop.
+  // Scrollback across the network: the snapshot holds a bounded page, and
+  // everything before it is still on the server.
+  const olderPending = Boolean(state.loadingOlder[threadId]);
+  const fillRequested = useRef<string | null>(null);
+  const filling = useRef(false);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !followRef.current || transcriptWindow.end !== null || !transcriptShown) return;
+    if (filling.current) {
+      filling.current = false;
+      el.scrollTo({ top: el.scrollHeight });
+      previousScrollTop.current = el.scrollTop;
+    }
+    if (el.scrollHeight > el.clientHeight) return;
+    const reachStart = Math.max(0, messages.length - FILL_REACH);
+    if (startIndex > reachStart) {
+      const start = Math.max(expandWindowStart(startIndex), reachStart);
+      filling.current = true;
+      setTranscriptWindow({ key: transcriptKey, start, end: null, floor: messages[start]?.id });
+    } else if (startIndex === 0 && hasMore && !olderPending && messages.length < FILL_REACH) {
+      const request = `${transcriptKey}:${oldestId}`;
+      if (fillRequested.current === request) return;
+      fillRequested.current = request;
+      dispatch({ type: "loadOlderMessages", threadId });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-measure when the mounted rows or the paging state change
+  }, [transcriptKey, startIndex, messages.length, oldestId, hasMore, olderPending, follow, transcriptWindow.end, transcriptShown]);
+
   const showEarlier = () => {
     holdRowForPrepend();
     const start = expandWindowStart(startIndex);
@@ -202,9 +246,6 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     const nextEnd = Math.min(messages.length, endIndex + TRANSCRIPT_WINDOW_SIZE);
     setTranscriptWindow((w) => ({ ...w, end: nextEnd >= messages.length ? null : nextEnd }));
   };
-  // Scrollback across the network: the snapshot holds a bounded page, and
-  // everything before it is still on the server.
-  const olderPending = Boolean(state.loadingOlder[threadId]);
   const loadOlder = () => {
     holdRowForPrepend();
     dispatch({ type: "loadOlderMessages", threadId });
